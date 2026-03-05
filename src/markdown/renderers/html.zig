@@ -1,7 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const tst = std.testing;
-const mem = std.mem;
 
 const AST = @import("../ast.zig");
 const Parser = @import("../parser.zig");

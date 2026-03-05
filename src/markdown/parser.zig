@@ -1,17 +1,11 @@
 const std = @import("std");
-const Array = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const tst = std.testing;
-const math = std.math;
 const mem = std.mem;
 
 const mecha = @import("mecha");
 
 const AST = @import("ast.zig");
-const P2 = @import("parser2.zig");
-const tokens = @import("tokens.zig");
-const Token = tokens.Token;
-const Range = tokens.Range;
 
 // ── Result types for mecha-based parsers (kept for API compat) ──────────────
 
