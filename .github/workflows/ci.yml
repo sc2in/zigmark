@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: "write"
+      contents: "read"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Nix
+        uses: DeterminateSystems/determinate-nix-action@main
+
+      - name: Setup Nix cache
+        uses: DeterminateSystems/flakehub-cache-action@main
+        with:
+          use-gha-cache: "enabled"
+          flakehub-flake-name: "sc2in/ZigMark"
+
+      - name: Install omnix
+        run: nix --accept-flake-config profile add nixpkgs#omnix
+
+      - name: Configure permissions
+        run:  sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Run CI
+        run: om ci run --include-all-dependencies
+        
+      - name: Collect artifacts
+        if: ${{ success() }}
+        run: |
+          mkdir -p artifacts
+          cp -rL "$(jq -r '.result.ROOT.build.byName.zigmark' result)"/* artifacts/
+
+      - name: Upload artifacts
+        if: ${{ success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: zigmark
+          path: artifacts/
+          retention-days: 7
+
+      - name: Create release archive
+        if: ${{ success() && github.ref_type == 'tag' && github.ref == 'refs/heads/main' }}
+        run: |
+          cd release-artifacts
+          tar czf ../zigmark-${{ github.ref_name }}.tar.gz bin/ lib/ docs/
+          cd ..
+
+      - name: Create GitHub Release
+        if: ${{ success() && github.ref_type == 'tag' && github.ref == 'refs/heads/main' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: zigmark-${{ github.ref_name }}.tar.gz
+          generate_release_notes: true
