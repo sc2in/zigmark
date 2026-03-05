@@ -36,7 +36,7 @@ jobs:
         if: ${{ success() }}
         run: |
           mkdir -p artifacts
-          cp -rL "$(jq -r '.result.root.build.byName.zigmark' result)"/* artifacts/
+          cp -rL "$(jq -r '.result.ROOT.build.byName.zigmark' result)"/* artifacts/
 
       - name: Upload artifacts
         if: ${{ success() }}
