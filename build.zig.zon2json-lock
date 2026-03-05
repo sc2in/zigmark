@@ -1,0 +1,36 @@
+{
+  "tomlz-0.3.0-H2E6wzxKAgD6D_3w6raXVf-FpUmFduKFWXQOCg6dQSGb": {
+    "name": "tomlz",
+    "url": "git+https://github.com/tsunaminoai/tomlz.git#b6362cb00e89d8f4996a9198a6ef33ac0523f52a",
+    "hash": "sha256-STQYm2xn5b7cCUIyvB5+2OeRrRTfZIOsDsxD1DuQcyY=",
+    "rev": "b6362cb00e89d8f4996a9198a6ef33ac0523f52a"
+  },
+  "mvzr-0.3.7-ZSOky5FtAQB2VrFQPNbXHQCFJxWTMAYEK7ljYEaMR6jt": {
+    "name": "mvzr",
+    "url": "git+https://github.com/mnemnion/mvzr#17a44b46cfe48ef46818d51bdf1161783dfe66e1",
+    "hash": "sha256-RsnjkmsAZAuwO75S9Zy2dW117E6APOgHRKC2ReMAkik=",
+    "rev": "17a44b46cfe48ef46818d51bdf1161783dfe66e1"
+  },
+  "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e": {
+    "name": "clap",
+    "url": "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.11.0.tar.gz",
+    "hash": "sha256-fDWd7EQYZuAlBlrpynBuznK89OiiX74xcZsekv84lkg="
+  },
+  "datetime-0.8.0-cJNXzP_YAQBxQ5hkNNP6ScnG5XsqciJmeP5RVV4xwCBA": {
+    "name": "datetime",
+    "url": "git+https://github.com/frmdstryr/zig-datetime#3a39a21e6e34dcb0ade0ff828d0914d40ba535f3",
+    "hash": "sha256-KlhKQOR3fVth8wqP+tX0YZlV1m+KF83PiSiXMnHhosU=",
+    "rev": "3a39a21e6e34dcb0ade0ff828d0914d40ba535f3"
+  },
+  "zig_yaml-0.2.0-C1161pmrAgC_rL9WzjvgNg7HnmyAMwHsG3Sre0F4haPI": {
+    "name": "yaml",
+    "url": "https://github.com/kubkon/zig-yaml/archive/refs/tags/0.2.0.tar.gz",
+    "hash": "sha256-/9kraRhZ10r+mg1OoJQVFjKBgDxbOYnKj1muYF3Nyxw="
+  },
+  "mecha-0.11.0-dVGaSNuLAQDk3kihQu0WAoRKEOaR1KUF7z55Mj33DQ6A": {
+    "name": "mecha",
+    "url": "git+https://github.com/Hejsil/mecha#4ee15ea13107bc504a5c17291a7de1d3bf909a32",
+    "hash": "sha256-YVGk0Us6M/JpewmTB9RhTL1hj2RC4qBrFukbhXHdX84=",
+    "rev": "4ee15ea13107bc504a5c17291a7de1d3bf909a32"
+  }
+}
