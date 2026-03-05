@@ -50,6 +50,16 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
     b.installArtifact(lib);
+
+    const docs_step = b.step("docs", "Build documentation");
+    const docs = b.addInstallDirectory(.{
+        .source_dir = lib.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+    docs_step.dependOn(&docs.step);
+    b.getInstallStep().dependOn(docs_step);
+
     const run_step = b.step("run", "Run the app");
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
