@@ -49,18 +49,27 @@ pub const parsers = struct {
 
     pub const url_char = mecha.oneOf(.{
         alphanumeric,
-        mecha.ascii.char('.'), mecha.ascii.char('/'), mecha.ascii.char(':'),
-        mecha.ascii.char('?'), mecha.ascii.char('='), mecha.ascii.char('&'),
-        mecha.ascii.char('#'), mecha.ascii.char('-'), mecha.ascii.char('_'),
-        mecha.ascii.char('~'), mecha.ascii.char('%'),
+        mecha.ascii.char('.'),
+        mecha.ascii.char('/'),
+        mecha.ascii.char(':'),
+        mecha.ascii.char('?'),
+        mecha.ascii.char('='),
+        mecha.ascii.char('&'),
+        mecha.ascii.char('#'),
+        mecha.ascii.char('-'),
+        mecha.ascii.char('_'),
+        mecha.ascii.char('~'),
+        mecha.ascii.char('%'),
     });
 
     pub const text_char = mecha.oneOf(.{
-        letter, digit,
-        mecha.ascii.char(' '), mecha.ascii.char('.'), mecha.ascii.char(','),
-        mecha.ascii.char('!'), mecha.ascii.char('?'), mecha.ascii.char(';'),
-        mecha.ascii.char('"'), mecha.ascii.char('\''), mecha.ascii.char(':'),
-        mecha.ascii.char('-'), mecha.ascii.char('('), mecha.ascii.char(')'),
+        letter,                digit,
+        mecha.ascii.char(' '), mecha.ascii.char('.'),
+        mecha.ascii.char(','), mecha.ascii.char('!'),
+        mecha.ascii.char('?'), mecha.ascii.char(';'),
+        mecha.ascii.char('"'), mecha.ascii.char('\''),
+        mecha.ascii.char(':'), mecha.ascii.char('-'),
+        mecha.ascii.char('('), mecha.ascii.char(')'),
     });
 
     pub const line_ending = mecha.oneOf(.{
@@ -73,7 +82,7 @@ pub const parsers = struct {
             hash.many(.{ .collect = false, .min = 1, .max = 6 }),
             space,
             mecha.many(mecha.oneOf(.{
-                text_char, mecha.ascii.char('*'), mecha.ascii.char('_'),
+                text_char,             mecha.ascii.char('*'), mecha.ascii.char('_'),
                 mecha.ascii.char('['), mecha.ascii.char(']'), mecha.ascii.char('`'),
             }), .{ .collect = false }).asStr(),
             line_ending.opt(),
@@ -90,11 +99,14 @@ pub const parsers = struct {
             mecha.many(mecha.oneOf(.{
                 text_char, mecha.ascii.char('*'), mecha.ascii.char('_'), mecha.ascii.char('`'),
             }), .{ .collect = false }).asStr(),
-            rbracket, lparen,
+            rbracket,
+            lparen,
             url_char.many(.{ .collect = false, .min = 1 }).asStr(),
             rparen,
         }).map(struct {
-            fn build(r: anytype) LinkResult { return .{ .text = r[1], .url = r[4] }; }
+            fn build(r: anytype) LinkResult {
+                return .{ .text = r[1], .url = r[4] };
+            }
         }.build);
     }
 
@@ -102,22 +114,26 @@ pub const parsers = struct {
         const ast_emp = mecha.combine(.{
             asterisk,
             mecha.many(mecha.oneOf(.{
-                text_char, mecha.ascii.char('_'), mecha.ascii.char('['),
+                text_char,             mecha.ascii.char('_'), mecha.ascii.char('['),
                 mecha.ascii.char(']'), mecha.ascii.char('`'),
             }), .{ .collect = false }).asStr(),
             asterisk,
         }).map(struct {
-            fn build(r: anytype) EmphasisResult { return .{ .marker = '*', .content = r[1] }; }
+            fn build(r: anytype) EmphasisResult {
+                return .{ .marker = '*', .content = r[1] };
+            }
         }.build);
         const und_emp = mecha.combine(.{
             underscore,
             mecha.many(mecha.oneOf(.{
-                text_char, mecha.ascii.char('*'), mecha.ascii.char('['),
+                text_char,             mecha.ascii.char('*'), mecha.ascii.char('['),
                 mecha.ascii.char(']'), mecha.ascii.char('`'),
             }), .{ .collect = false }).asStr(),
             underscore,
         }).map(struct {
-            fn build(r: anytype) EmphasisResult { return .{ .marker = '_', .content = r[1] }; }
+            fn build(r: anytype) EmphasisResult {
+                return .{ .marker = '_', .content = r[1] };
+            }
         }.build);
         return mecha.oneOf(.{ ast_emp, und_emp });
     }
@@ -126,41 +142,49 @@ pub const parsers = struct {
         const ast_str = mecha.combine(.{
             asterisk, asterisk,
             mecha.many(mecha.oneOf(.{
-                text_char, mecha.ascii.char('_'), mecha.ascii.char('['),
+                text_char,             mecha.ascii.char('_'), mecha.ascii.char('['),
                 mecha.ascii.char(']'), mecha.ascii.char('`'),
             }), .{ .collect = false }).asStr(),
-            asterisk, asterisk,
+            asterisk,
+            asterisk,
         }).map(struct {
-            fn build(r: anytype) EmphasisResult { return .{ .marker = '*', .content = r[2] }; }
+            fn build(r: anytype) EmphasisResult {
+                return .{ .marker = '*', .content = r[2] };
+            }
         }.build);
         const und_str = mecha.combine(.{
             underscore, underscore,
             mecha.many(mecha.oneOf(.{
-                text_char, mecha.ascii.char('*'), mecha.ascii.char('['),
+                text_char,             mecha.ascii.char('*'), mecha.ascii.char('['),
                 mecha.ascii.char(']'), mecha.ascii.char('`'),
             }), .{ .collect = false }).asStr(),
-            underscore, underscore,
+            underscore,
+            underscore,
         }).map(struct {
-            fn build(r: anytype) EmphasisResult { return .{ .marker = '_', .content = r[2] }; }
+            fn build(r: anytype) EmphasisResult {
+                return .{ .marker = '_', .content = r[2] };
+            }
         }.build);
         return mecha.oneOf(.{ ast_str, und_str });
     }
 
     pub fn footnote_reference(_: std.mem.Allocator) mecha.Parser(FootnoteRefResult) {
         return mecha.combine(.{
-            lbracket, caret,
-            mecha.many(mecha.oneOf(.{ letter, digit }), .{ .collect = false, .min = 1 }).asStr(),
-            rbracket,
+            lbracket,                                                                             caret,
+            mecha.many(mecha.oneOf(.{ letter, digit }), .{ .collect = false, .min = 1 }).asStr(), rbracket,
         }).map(struct {
-            fn build(r: anytype) FootnoteRefResult { return .{ .label = r[2] }; }
+            fn build(r: anytype) FootnoteRefResult {
+                return .{ .label = r[2] };
+            }
         }.build);
     }
 
     pub fn footnote_definition(_: std.mem.Allocator) mecha.Parser(FootnoteDefResult) {
         return mecha.combine(.{
-            lbracket, caret,
-            mecha.many(mecha.oneOf(.{ letter, digit }), .{ .collect = false, .min = 1 }).asStr(),
-            rbracket, colon, space, mecha.rest.asStr(),
+            lbracket,                                                                             caret,
+            mecha.many(mecha.oneOf(.{ letter, digit }), .{ .collect = false, .min = 1 }).asStr(), rbracket,
+            colon,                                                                                space,
+            mecha.rest.asStr(),
         }).map(struct {
             fn build(r: anytype) FootnoteDefResult {
                 return .{ .label = r[2], .content = std.mem.trim(u8, r[6], " \t\n\r") };
@@ -260,7 +284,10 @@ fn parseAtxHeading(line: []const u8) ?struct { level: u8, content: []const u8 } 
     if (t.len == 0 or t[0] != '#') return null;
     var level: u8 = 0;
     var i: usize = 0;
-    while (i < t.len and t[i] == '#') { level += 1; i += 1; }
+    while (i < t.len and t[i] == '#') {
+        level += 1;
+        i += 1;
+    }
     if (level > 6) return null;
     if (i == t.len) return .{ .level = level, .content = "" };
     if (t[i] != ' ' and t[i] != '\t') return null;
@@ -362,7 +389,10 @@ fn isEmailAutolink(s: []const u8) bool {
 
 /// Try to parse [text](url "title") or [text](url) starting at `start` ('[').
 fn tryParseLink(input: []const u8, start: usize) ?struct {
-    text: []const u8, url: []const u8, title: ?[]const u8, end: usize,
+    text: []const u8,
+    url: []const u8,
+    title: ?[]const u8,
+    end: usize,
 } {
     if (start >= input.len or input[start] != '[') return null;
     var be: usize = start + 1;
@@ -506,7 +536,10 @@ fn parseInlineElements(allocator: Allocator, input: []const u8) !std.ArrayList(A
             var end = pos + 2;
             var found = false;
             while (end + 1 < input.len) {
-                if (input[end] == marker and input[end + 1] == marker) { found = true; break; }
+                if (input[end] == marker and input[end + 1] == marker) {
+                    found = true;
+                    break;
+                }
                 end += 1;
             }
             if (found) {
@@ -559,7 +592,9 @@ fn parseInlineElements(allocator: Allocator, input: []const u8) !std.ArrayList(A
 
 const Self = @This();
 
-pub fn init() Self { return Self{}; }
+pub fn init() Self {
+    return Self{};
+}
 pub fn deinit(_: *Self, _: Allocator) void {}
 
 fn appendInlines(allocator: Allocator, dest: *std.ArrayList(AST.Inline), content: []const u8) !void {
@@ -590,12 +625,17 @@ pub fn parseMarkdown(_: Self, allocator: Allocator, input: []const u8) !AST.Docu
     if (lines.len > 0) {
         const fl = trimLine(lines[0]);
         if (mem.eql(u8, fl, "---") or mem.eql(u8, fl, "+++") or mem.eql(u8, fl, "%%%")) {
-            i = 1;
-            while (i < lines.len) {
-                const tl = trimLine(lines[i]);
-                i += 1;
-                if (mem.eql(u8, tl, "---") or mem.eql(u8, tl, "+++") or mem.eql(u8, tl, "%%%")) break;
+            var fi: usize = 1;
+            var found_close = false;
+            while (fi < lines.len) {
+                const tl = trimLine(lines[fi]);
+                fi += 1;
+                if (mem.eql(u8, tl, "---") or mem.eql(u8, tl, "+++") or mem.eql(u8, tl, "%%%")) {
+                    found_close = true;
+                    break;
+                }
             }
+            if (found_close) i = fi;
         }
     }
 
@@ -603,7 +643,10 @@ pub fn parseMarkdown(_: Self, allocator: Allocator, input: []const u8) !AST.Docu
         const raw = lines[i];
         const t = trimLine(raw);
 
-        if (t.len == 0) { i += 1; continue; }
+        if (t.len == 0) {
+            i += 1;
+            continue;
+        }
 
         // ATX heading
         if (parseAtxHeading(raw)) |h| {
@@ -649,14 +692,20 @@ pub fn parseMarkdown(_: Self, allocator: Allocator, input: []const u8) !AST.Docu
             i += 1;
             var buf = std.ArrayList(u8){};
             while (i < lines.len) {
-                if (isFenceEnd(lines[i], fence)) { i += 1; break; }
+                if (isFenceEnd(lines[i], fence)) {
+                    i += 1;
+                    break;
+                }
                 if (buf.items.len > 0) try buf.append(allocator, '\n');
                 try buf.appendSlice(allocator, lines[i]);
                 i += 1;
             }
             const lang: ?[]const u8 = if (fence.info.len > 0) fence.info else null;
             try doc.children.append(allocator, .{ .fenced_code_block = AST.FencedCodeBlock.init(
-                try buf.toOwnedSlice(allocator), lang, fence.char, fence.len,
+                try buf.toOwnedSlice(allocator),
+                lang,
+                fence.char,
+                fence.len,
             ) });
             continue;
         }
@@ -701,7 +750,11 @@ pub fn parseMarkdown(_: Self, allocator: Allocator, input: []const u8) !AST.Docu
             var blank = false;
             while (i < lines.len) {
                 const lt = trimLine(lines[i]);
-                if (lt.len == 0) { blank = true; i += 1; continue; }
+                if (lt.len == 0) {
+                    blank = true;
+                    i += 1;
+                    continue;
+                }
                 const mi = parseBulletListMarker(lt) orelse break;
                 if (mi.marker != first.marker) break;
                 if (blank) loose = true;
@@ -726,7 +779,11 @@ pub fn parseMarkdown(_: Self, allocator: Allocator, input: []const u8) !AST.Docu
             var blank = false;
             while (i < lines.len) {
                 const lt = trimLine(lines[i]);
-                if (lt.len == 0) { blank = true; i += 1; continue; }
+                if (lt.len == 0) {
+                    blank = true;
+                    i += 1;
+                    continue;
+                }
                 const mi = parseOrderedListMarker(lt) orelse break;
                 if (mi.delimiter != first.delimiter) break;
                 if (blank) loose = true;
@@ -790,8 +847,7 @@ pub fn parseMarkdown(_: Self, allocator: Allocator, input: []const u8) !AST.Docu
                     lr_nocr[lr_nocr.len - 1] == ' ' and
                     lr_nocr[lr_nocr.len - 2] == ' ';
 
-                try appendInlines(allocator, &para.children,
-                    if (prev_hard) mem.trimRight(u8, lt, " ") else lt);
+                try appendInlines(allocator, &para.children, if (prev_hard) mem.trimRight(u8, lt, " ") else lt);
 
                 i += 1;
                 if (next_setext) break;
@@ -870,8 +926,8 @@ test "thematic break" {
     var p = init();
     var doc = try p.parseMarkdown(tst.allocator, "---\n");
     defer doc.deinit(tst.allocator);
-    try tst.expect(doc.children.items.len == 1);
-    try tst.expect(doc.children.items[0] == .thematic_break);
+    try tst.expectEqual(1, doc.children.items.len);
+    try tst.expectEqual(.thematic_break, std.meta.activeTag(doc.children.items[0]));
 }
 
 test "paragraph" {
@@ -977,7 +1033,9 @@ test "code span" {
     defer doc.deinit(tst.allocator);
     const para = doc.children.items[0].paragraph;
     var found_code = false;
-    for (para.children.items) |item| if (item == .code_span) { found_code = true; };
+    for (para.children.items) |item| if (item == .code_span) {
+        found_code = true;
+    };
     try tst.expect(found_code);
 }
 

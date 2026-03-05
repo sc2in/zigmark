@@ -299,7 +299,9 @@ pub const CodeBlock = struct {
     pub fn init(content: []const u8) CodeBlock {
         return CodeBlock{ .content = content };
     }
-    pub fn deinit(_: CodeBlock, _: Allocator) void {}
+    pub fn deinit(self: *CodeBlock, allocator: Allocator) void {
+        if (self.content.len > 0) allocator.free(self.content);
+    }
 };
 
 /// Fenced code block
@@ -317,7 +319,9 @@ pub const FencedCodeBlock = struct {
             .fence_length = fence_length,
         };
     }
-    pub fn deinit(_: FencedCodeBlock, _: Allocator) void {}
+    pub fn deinit(self: *FencedCodeBlock, allocator: Allocator) void {
+        if (self.content.len > 0) allocator.free(self.content);
+    }
 };
 
 /// Blockquote

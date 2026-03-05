@@ -91,7 +91,7 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
 
 // ── Block renderer ────────────────────────────────────────────────────────────
 
-fn renderBlock(writer: anytype, block: AST.Block) !void {
+fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
     switch (block) {
         .heading => |h| {
             try writer.print("<h{d}>", .{h.level});
@@ -179,10 +179,10 @@ fn renderBlock(writer: anytype, block: AST.Block) !void {
 // ── Top-level render ──────────────────────────────────────────────────────────
 
 pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
-    var buf = std.ArrayList(u8){};
-    var writer = buf.writer(allocator);
-    for (doc.children.items) |child| try renderBlock(writer, child);
-    return buf.toOwnedSlice(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    for (doc.children.items) |child| try renderBlock(&aw.writer, child);
+    return aw.toOwnedSlice();
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
