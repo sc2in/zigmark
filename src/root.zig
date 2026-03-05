@@ -120,7 +120,7 @@ test "enhanced parse and render" {
         if (item == .list) {
             found_list = true;
             try std.testing.expectEqual(AST.ListType.unordered, item.list.type);
-            try std.testing.expectEqual(@as(usize, 1), item.list.items.items.len);
+            try std.testing.expectEqual(@as(usize, 2), item.list.items.items.len);
             break;
         }
     }
@@ -134,7 +134,8 @@ test "enhanced parse and render" {
 
     // std.debug.print("Generated HTML:\n{s}\n", .{h});
     try std.testing.expectEqualStrings(
-        \\<h1>Heading</h1><p>Paragraph <a href="https://sc2.in">text</a>.</p><ul><li>item1</li></ul><ul><li>item2</li></ul><p>Some more <strong>bold</strong> text and some <em>italic</em> text.</p><blockquote><pre>a block quote</pre></blockquote><p>a footnote<a href="#fn:SCF:GOV-01" class="footnote-ref">SCF:GOV-01</a></p><p>a footnote<a href="#fn:2" class="footnote-ref">2</a></p><h2>Heading 2</h2><div class="footnote" id="fn:SCF:GOV-01"><p><b>SCF:GOV-01</b>:Footnote 1</p></div><div class="footnote" id="fn:2"><p><b>2</b>:Footnote 2</p></div>
+        \\<h1>Heading</h1><p>Paragraph <a href="https://sc2.in">text</a>.</p><ul><li>item1</li><li>item2</li></ul><p>Some more <strong>bold</strong> text and some <em>italic</em> text.</p><blockquote><p>a block quote</p></blockquote><p>a footnote<a href="#fn:SCF:GOV-01" class="footnote-ref">SCF:GOV-01</a>
+        \\a footnote<a href="#fn:2" class="footnote-ref">2</a></p><h2>Heading 2</h2><div class="footnote" id="fn:SCF:GOV-01"><p><b>SCF:GOV-01</b>: Footnote 1</p></div><div class="footnote" id="fn:2"><p><b>2</b>: Footnote 2</p></div>
     , h);
 }
 
@@ -172,7 +173,7 @@ pub const TestResult = struct {
 /// HTML normalization for test comparison (simplified version)
 /// Based on the CommonMark normalize.py approach
 fn normalizeHtml(allocator: std.mem.Allocator, src: []const u8) ![]const u8 {
-    var normalized = std.ArrayList(u8).init(allocator);
+    var normalized = std.ArrayList(u8){};
     var in_tag = false;
     var i: usize = 0;
 
@@ -182,24 +183,24 @@ fn normalizeHtml(allocator: std.mem.Allocator, src: []const u8) ![]const u8 {
         switch (char) {
             '<' => {
                 in_tag = true;
-                try normalized.append(char);
+                try normalized.append(allocator, char);
             },
             '>' => {
                 in_tag = false;
-                try normalized.append(char);
+                try normalized.append(allocator, char);
             },
             ' ', '\t', '\n', '\r' => {
                 if (!in_tag) {
                     // Normalize whitespace outside tags
                     if (normalized.items.len > 0 and normalized.items[normalized.items.len - 1] != ' ') {
-                        try normalized.append(' ');
+                        try normalized.append(allocator, ' ');
                     }
                 } else {
-                    try normalized.append(' ');
+                    try normalized.append(allocator, ' ');
                 }
             },
             else => {
-                try normalized.append(char);
+                try normalized.append(allocator, char);
             },
         }
         i += 1;
@@ -210,7 +211,7 @@ fn normalizeHtml(allocator: std.mem.Allocator, src: []const u8) ![]const u8 {
         _ = normalized.pop();
     }
 
-    return normalized.toOwnedSlice();
+    return normalized.toOwnedSlice(allocator);
 }
 
 /// Parse CommonMark spec test format
@@ -221,16 +222,16 @@ pub fn parseSpecTests(allocator: std.mem.Allocator, spec_content: []const u8) !s
 
     const alloc = arena.allocator();
 
-    var tests = std.ArrayList(SpecTest).init(alloc);
+    var tests = std.ArrayList(SpecTest){};
     var lines = std.mem.splitAny(u8, spec_content, "\n");
 
     var line_number: usize = 0;
     var start_line: usize = 0;
     var example_number: usize = 0;
-    var markdown_lines = std.ArrayList([]const u8).init(alloc);
-    defer markdown_lines.deinit();
-    var html_lines = std.ArrayList([]const u8).init(alloc);
-    defer html_lines.deinit();
+    var markdown_lines = std.ArrayList([]const u8){};
+    defer markdown_lines.deinit(alloc);
+    var html_lines = std.ArrayList([]const u8){};
+    defer html_lines.deinit(alloc);
     var state: u8 = 0; // 0: regular text, 1: markdown example, 2: html output
     var current_section: []const u8 = "Unknown";
 
@@ -258,7 +259,7 @@ pub fn parseSpecTests(allocator: std.mem.Allocator, spec_content: []const u8) !s
             const markdown = try std.mem.join(allocator, "\n", markdown_lines.items);
             const h = try std.mem.join(allocator, "\n", html_lines.items);
 
-            try tests.append(SpecTest{
+            try tests.append(allocator, SpecTest{
                 .markdown = markdown,
                 .html = h,
                 .example = example_number,
@@ -271,10 +272,10 @@ pub fn parseSpecTests(allocator: std.mem.Allocator, spec_content: []const u8) !s
         } else if (state == 1) {
             // Replace tab placeholder with actual tab
             const processed_line = try std.mem.replaceOwned(u8, allocator, line, "→", "\t");
-            try markdown_lines.append(processed_line);
+            try markdown_lines.append(alloc, processed_line);
         } else if (state == 2) {
             const processed_line = try std.mem.replaceOwned(u8, allocator, line, "→", "\t");
-            try html_lines.append(processed_line);
+            try html_lines.append(alloc, processed_line);
         }
     }
 
@@ -337,15 +338,15 @@ pub fn runCommonMarkSpecTests(allocator: std.mem.Allocator, spec_file_path: ?[]c
 
     // Parse test cases from spec
     var tests = try parseSpecTests(allocator, spec_content);
-    defer tests.deinit();
+    defer tests.deinit(allocator);
     defer for (tests.items) |test_case| {
         allocator.free(test_case.markdown);
         allocator.free(test_case.html);
     };
 
     // Filter tests based on options
-    var filtered_tests = std.ArrayList(SpecTest).init(allocator);
-    defer filtered_tests.deinit();
+    var filtered_tests = std.ArrayList(SpecTest){};
+    defer filtered_tests.deinit(allocator);
 
     for (tests.items) |test_case| {
         // Filter by pattern if specified
@@ -362,7 +363,7 @@ pub fn runCommonMarkSpecTests(allocator: std.mem.Allocator, spec_file_path: ?[]c
             }
         }
 
-        try filtered_tests.append(test_case);
+        try filtered_tests.append(allocator, test_case);
     }
 
     var result = TestResult{};

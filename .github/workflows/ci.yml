@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Cache Nix store
+        uses: actions/cache@v4
+        with:
+          path: /nix
+          key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'build.zig.zon2json-lock') }}
+          restore-keys: nix-${{ runner.os }}-
+
+      - name: Build
+        run: nix develop --command zig build
+
+      - name: Test
+        run: nix develop --command zig build test --summary all
