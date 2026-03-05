@@ -1,11 +1,12 @@
 const std = @import("std");
-const mecha = @import("mecha");
-
 const Array = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const tst = std.testing;
 const math = std.math;
 const mem = std.mem;
+
+const mecha = @import("mecha");
+
 const tokens = @import("tokens.zig");
 const Token = tokens.Token;
 const Range = tokens.Range;
@@ -28,8 +29,9 @@ pub const Document = struct {
     children: std.ArrayList(Block),
 
     pub fn init(allocator: std.mem.Allocator) Document {
+        _ = allocator; // autofix
         return Document{
-            .children = std.ArrayList(Block).init(allocator),
+            .children = std.ArrayList(Block){},
         };
     }
 
@@ -37,7 +39,7 @@ pub const Document = struct {
         for (self.children.items) |*child| {
             child.deinit(allocator);
         }
-        self.children.deinit();
+        self.children.deinit(allocator);
     }
     /// Enhanced query system for easier node testing and traversal
     /// Supports jQuery-like selector syntax for AST navigation
@@ -255,8 +257,9 @@ pub const Paragraph = struct {
     children: std.ArrayList(Inline),
 
     pub fn init(allocator: std.mem.Allocator) Paragraph {
+        _ = allocator; // autofix
         return Paragraph{
-            .children = std.ArrayList(Inline).init(allocator),
+            .children = std.ArrayList(Inline){},
         };
     }
 
@@ -264,7 +267,7 @@ pub const Paragraph = struct {
         for (self.children.items) |*child| {
             child.deinit(allocator);
         }
-        self.children.deinit();
+        self.children.deinit(allocator);
     }
 };
 
@@ -274,9 +277,10 @@ pub const Heading = struct {
     children: std.ArrayList(Inline),
 
     pub fn init(allocator: std.mem.Allocator, level: u8) Heading {
+        _ = allocator; // autofix
         return Heading{
             .level = level,
-            .children = std.ArrayList(Inline).init(allocator),
+            .children = std.ArrayList(Inline){},
         };
     }
 
@@ -284,7 +288,7 @@ pub const Heading = struct {
         for (self.children.items) |*child| {
             child.deinit(allocator);
         }
-        self.children.deinit();
+        self.children.deinit(allocator);
     }
 };
 
@@ -321,8 +325,9 @@ pub const Blockquote = struct {
     children: std.ArrayList(Block),
 
     pub fn init(allocator: std.mem.Allocator) Blockquote {
+        _ = allocator; // autofix
         return Blockquote{
-            .children = std.ArrayList(Block).init(allocator),
+            .children = std.ArrayList(Block){},
         };
     }
 
@@ -330,7 +335,7 @@ pub const Blockquote = struct {
         for (self.children.items) |*child| {
             child.deinit(allocator);
         }
-        self.children.deinit();
+        self.children.deinit(allocator);
     }
 };
 
@@ -346,8 +351,9 @@ pub const ListItem = struct {
     tight: bool = true,
 
     pub fn init(allocator: std.mem.Allocator) ListItem {
+        _ = allocator; // autofix
         return ListItem{
-            .children = std.ArrayList(Block).init(allocator),
+            .children = std.ArrayList(Block){},
         };
     }
 
@@ -355,7 +361,7 @@ pub const ListItem = struct {
         for (self.children.items) |*child| {
             child.deinit(allocator);
         }
-        self.children.deinit();
+        self.children.deinit(allocator);
     }
 };
 
@@ -367,9 +373,10 @@ pub const List = struct {
     start: ?usize = null,
 
     pub fn init(allocator: std.mem.Allocator, list_type: ListType) List {
+        _ = allocator; // autofix
         return List{
             .type = list_type,
-            .items = std.ArrayList(ListItem).init(allocator),
+            .items = std.ArrayList(ListItem){},
         };
     }
 
@@ -377,7 +384,7 @@ pub const List = struct {
         for (self.items.items) |*item| {
             item.deinit(allocator);
         }
-        self.items.deinit();
+        self.items.deinit(allocator);
     }
 };
 
@@ -407,9 +414,10 @@ pub const FootnoteDefinition = struct {
     children: std.ArrayList(Block),
 
     pub fn init(allocator: std.mem.Allocator, label: []const u8) FootnoteDefinition {
+        _ = allocator; // autofix
         return FootnoteDefinition{
             .label = label,
-            .children = std.ArrayList(Block).init(allocator),
+            .children = std.ArrayList(Block){},
         };
     }
 
@@ -417,7 +425,7 @@ pub const FootnoteDefinition = struct {
         for (self.children.items) |*child| {
             child.deinit(allocator);
         }
-        self.children.deinit();
+        self.children.deinit(allocator);
     }
 };
 
@@ -437,8 +445,9 @@ pub const Emphasis = struct {
     marker: u8,
 
     pub fn init(allocator: std.mem.Allocator, marker: u8) Emphasis {
+        _ = allocator; // autofix
         return Emphasis{
-            .children = std.ArrayList(Inline).init(allocator),
+            .children = std.ArrayList(Inline){},
             .marker = marker,
         };
     }
@@ -447,7 +456,7 @@ pub const Emphasis = struct {
         for (self.children.items) |*child| {
             child.deinit(allocator);
         }
-        self.children.deinit();
+        self.children.deinit(allocator);
     }
 };
 
@@ -457,8 +466,9 @@ pub const Strong = struct {
     marker: u8,
 
     pub fn init(allocator: std.mem.Allocator, marker: u8) Strong {
+        _ = allocator; // autofix
         return Strong{
-            .children = std.ArrayList(Inline).init(allocator),
+            .children = std.ArrayList(Inline){},
             .marker = marker,
         };
     }
@@ -467,7 +477,7 @@ pub const Strong = struct {
         for (self.children.items) |*child| {
             child.deinit(allocator);
         }
-        self.children.deinit();
+        self.children.deinit(allocator);
     }
 };
 
@@ -509,8 +519,9 @@ pub const Link = struct {
     reference_label: ?[]const u8 = null,
 
     pub fn init(allocator: std.mem.Allocator, destination: LinkDestination, link_type: LinkType) Link {
+        _ = allocator; // autofix
         return Link{
-            .children = std.ArrayList(Inline).init(allocator),
+            .children = std.ArrayList(Inline){},
             .destination = destination,
             .link_type = link_type,
         };
@@ -520,7 +531,7 @@ pub const Link = struct {
         for (self.children.items) |*child| {
             child.deinit(allocator);
         }
-        self.children.deinit();
+        self.children.deinit(allocator);
     }
 };
 

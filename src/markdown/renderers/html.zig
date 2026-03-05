@@ -1,22 +1,22 @@
 const std = @import("std");
-const mecha = @import("mecha");
-
 const Array = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const tst = std.testing;
 const math = std.math;
 const mem = std.mem;
+
+const mecha = @import("mecha");
+
+const AST = @import("../ast.zig");
+const Parser = @import("../parser.zig");
 const tokens = @import("../tokens.zig");
 const Token = tokens.Token;
 const Range = tokens.Range;
-const Parser = @import("../parser.zig");
-
-const AST = @import("../ast.zig");
 
 /// Enhanced HTML renderer with support for all in_line elements
 pub fn render(allocator: std.mem.Allocator, doc: AST.Document) ![]u8 {
-    var buf = std.ArrayList(u8).init(allocator);
-    var writer = buf.writer();
+    var buf = std.ArrayList(u8){};
+    var writer = buf.writer(allocator);
 
     for (doc.children.items) |child| {
         switch (child) {
@@ -94,7 +94,7 @@ pub fn render(allocator: std.mem.Allocator, doc: AST.Document) ![]u8 {
         }
     }
 
-    return buf.toOwnedSlice();
+    return buf.toOwnedSlice(allocator);
 }
 
 fn renderInlineHtml(writer: anytype, in_line_elem: AST.Inline) !void {

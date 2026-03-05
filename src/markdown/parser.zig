@@ -1,15 +1,17 @@
 const std = @import("std");
-const mecha = @import("mecha");
 const Array = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const tst = std.testing;
 const math = std.math;
 const mem = std.mem;
+
+const mecha = @import("mecha");
+
+const AST = @import("ast.zig");
+const P2 = @import("parser2.zig");
 const tokens = @import("tokens.zig");
 const Token = tokens.Token;
 const Range = tokens.Range;
-const P2 = @import("parser2.zig");
-const AST = @import("ast.zig");
 
 // Result types for parsers
 const HeadingResult = struct {
@@ -343,7 +345,7 @@ pub fn deinit(self: *Self, allocator: Allocator) void {
 
 // Enhanced in_line parser that handles all in_line elements
 fn parseInlineElements(allocator: std.mem.Allocator, input: []const u8) !std.ArrayList(AST.Inline) {
-    var in_lines = std.ArrayList(AST.Inline).init(allocator);
+    var in_lines = std.ArrayList(AST.Inline){};
     var pos: usize = 0;
 
     while (pos < input.len) {
@@ -370,8 +372,8 @@ fn parseInlineElements(allocator: std.mem.Allocator, input: []const u8) !std.Arr
             if (found_end) {
                 const content = input[pos + 2 .. end_pos];
                 var strong_elem = AST.Strong.init(allocator, marker);
-                try strong_elem.children.append(AST.Inline{ .text = AST.Text.init(content) });
-                try in_lines.append(AST.Inline{ .strong = strong_elem });
+                try strong_elem.children.append(allocator, AST.Inline{ .text = AST.Text.init(content) });
+                try in_lines.append(allocator, AST.Inline{ .strong = strong_elem });
                 pos = end_pos + 2;
                 continue;
             }
@@ -395,8 +397,8 @@ fn parseInlineElements(allocator: std.mem.Allocator, input: []const u8) !std.Arr
             if (found_end and end_pos > pos + 1) {
                 const content = input[pos + 1 .. end_pos];
                 var emph_elem = AST.Emphasis.init(allocator, marker);
-                try emph_elem.children.append(AST.Inline{ .text = AST.Text.init(content) });
-                try in_lines.append(AST.Inline{ .emphasis = emph_elem });
+                try emph_elem.children.append(allocator, AST.Inline{ .text = AST.Text.init(content) });
+                try in_lines.append(allocator, AST.Inline{ .emphasis = emph_elem });
                 pos = end_pos + 1;
                 continue;
             }
@@ -435,8 +437,8 @@ fn parseInlineElements(allocator: std.mem.Allocator, input: []const u8) !std.Arr
 
                     const destination = AST.LinkDestination.init(link_url, null);
                     var link_elem = AST.Link.init(allocator, destination, .in_line);
-                    try link_elem.children.append(AST.Inline{ .text = AST.Text.init(link_text) });
-                    try in_lines.append(AST.Inline{ .link = link_elem });
+                    try link_elem.children.append(allocator, AST.Inline{ .text = AST.Text.init(link_text) });
+                    try in_lines.append(allocator, AST.Inline{ .link = link_elem });
                     pos = paren_end + 1;
                     continue;
                 }
@@ -460,7 +462,7 @@ fn parseInlineElements(allocator: std.mem.Allocator, input: []const u8) !std.Arr
             if (found_bracket and bracket_end > pos + 2) {
                 const label = input[pos + 2 .. bracket_end];
                 const footnote_ref = AST.FootnoteReference.init(label);
-                try in_lines.append(AST.Inline{ .footnote_reference = footnote_ref });
+                try in_lines.append(allocator, AST.Inline{ .footnote_reference = footnote_ref });
                 pos = bracket_end + 1;
                 continue;
             }
@@ -478,7 +480,7 @@ fn parseInlineElements(allocator: std.mem.Allocator, input: []const u8) !std.Arr
         if (text_end > pos) {
             const text_content = input[pos..text_end];
             if (text_content.len > 0) {
-                try in_lines.append(AST.Inline{ .text = .{ .content = text_content } });
+                try in_lines.append(allocator, AST.Inline{ .text = .{ .content = text_content } });
             }
             pos = text_end;
         } else {
@@ -533,13 +535,13 @@ pub fn parseMarkdown(_: Self, allocator: std.mem.Allocator, input: []const u8) !
                 var heading = AST.Heading.init(allocator, level);
 
                 // Parse in_line elements in heading content
-                const in_lines = try parseInlineElements(allocator, content);
-                defer in_lines.deinit();
+                var in_lines = try parseInlineElements(allocator, content);
+                defer in_lines.deinit(allocator);
                 for (in_lines.items) |in_line_elem| {
-                    try heading.children.append(in_line_elem);
+                    try heading.children.append(allocator, in_line_elem);
                 }
 
-                try doc.children.append(AST.Block{ .heading = heading });
+                try doc.children.append(allocator, AST.Block{ .heading = heading });
                 continue;
             }
         }
@@ -553,15 +555,15 @@ pub fn parseMarkdown(_: Self, allocator: std.mem.Allocator, input: []const u8) !
             var para = AST.Paragraph.init(allocator);
 
             // Parse in_line elements in list item content
-            const in_lines = try parseInlineElements(allocator, content);
-            defer in_lines.deinit();
+            var in_lines = try parseInlineElements(allocator, content);
+            defer in_lines.deinit(allocator);
             for (in_lines.items) |in_line_elem| {
-                try para.children.append(in_line_elem);
+                try para.children.append(allocator, in_line_elem);
             }
 
-            try item.children.append(AST.Block{ .paragraph = para });
-            try list.items.append(item);
-            try doc.children.append(AST.Block{ .list = list });
+            try item.children.append(allocator, AST.Block{ .paragraph = para });
+            try list.items.append(allocator, item);
+            try doc.children.append(allocator, AST.Block{ .list = list });
             continue;
         }
 
@@ -574,11 +576,11 @@ pub fn parseMarkdown(_: Self, allocator: std.mem.Allocator, input: []const u8) !
             // Parse in_line elements in blockquote content
             const in_lines = try parseInlineElements(allocator, content);
             for (in_lines.items) |in_line_elem| {
-                try para.children.append(in_line_elem);
+                try para.children.append(allocator, in_line_elem);
             }
 
-            try bq.children.append(AST.Block{ .paragraph = para });
-            try doc.children.append(AST.Block{ .blockquote = bq });
+            try bq.children.append(allocator, AST.Block{ .paragraph = para });
+            try doc.children.append(allocator, AST.Block{ .blockquote = bq });
             continue;
         }
 
@@ -592,14 +594,14 @@ pub fn parseMarkdown(_: Self, allocator: std.mem.Allocator, input: []const u8) !
             var para = AST.Paragraph.init(allocator);
 
             // Parse in_line elements in footnote content
-            const in_lines = try parseInlineElements(allocator, content);
-            defer in_lines.deinit();
+            var in_lines = try parseInlineElements(allocator, content);
+            defer in_lines.deinit(allocator);
             for (in_lines.items) |in_line_elem| {
-                try para.children.append(in_line_elem);
+                try para.children.append(allocator, in_line_elem);
             }
 
-            try footnote_def.children.append(AST.Block{ .paragraph = para });
-            try doc.children.append(AST.Block{ .footnote_definition = footnote_def });
+            try footnote_def.children.append(allocator, AST.Block{ .paragraph = para });
+            try doc.children.append(allocator, AST.Block{ .footnote_definition = footnote_def });
             continue;
         }
 
@@ -607,13 +609,15 @@ pub fn parseMarkdown(_: Self, allocator: std.mem.Allocator, input: []const u8) !
         var para = AST.Paragraph.init(allocator);
 
         // Parse in_line elements in paragraph content
-        const in_lines = try parseInlineElements(allocator, trimmed);
-        defer in_lines.deinit();
+        var in_lines = try parseInlineElements(allocator, trimmed);
+        defer in_lines.deinit(
+            allocator,
+        );
         for (in_lines.items) |in_line_elem| {
-            try para.children.append(in_line_elem);
+            try para.children.append(allocator, in_line_elem);
         }
 
-        try doc.children.append(AST.Block{ .paragraph = para });
+        try doc.children.append(allocator, AST.Block{ .paragraph = para });
     }
 
     return doc;
