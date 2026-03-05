@@ -6,13 +6,13 @@ This document tracks the work needed to achieve full CommonMark 0.30 specificati
 
 ### Headings
 
-- [ ] **Setext headings** - Alternative heading syntax using underlines (`===` and `---`)
+- [x] **Setext headings** - Alternative heading syntax using underlines (`===` and `---`)
   - Required for full CommonMark compliance
   - Both `=` (level 1) and `-` (level 2) variants
 
 ### Code Blocks
 
-- [ ] **Indented code blocks** - 4-space indentation for code
+- [x] **Indented code blocks** - 4-space indentation for code
   - Currently only fenced code blocks are supported
   - Must handle blank lines and interruption rules
 
@@ -34,7 +34,7 @@ This document tracks the work needed to achieve full CommonMark 0.30 specificati
 
 ### Escape Sequences
 
-- [ ] **Backslash escapes** - `\` escaping of special characters
+- [x] **Backslash escapes** - `\` escaping of special characters
   - Escape punctuation and special markdown characters
   - Handle in all contexts (emphasis, links, code, etc.)
 
@@ -58,11 +58,11 @@ This document tracks the work needed to achieve full CommonMark 0.30 specificati
 - [ ] **Reference links (collapsed)** - `[text][]`
 - [ ] **Reference links (shortcut)** - `[text]` with definition elsewhere
 - [ ] **Proper link destination parsing** - Space handling, escaping, etc.
-- [ ] **Link titles** - Support all three quote styles: `"`, `'`, `()`
+- [x] **Link titles** - Support `"` and `'` quote styles (parenthesis style not yet implemented)
 
 ### Autolinks
 
-- [ ] **Proper autolinks** - `<http://example.com>` and `<user@example.com>`
+- [x] **Proper autolinks** - `<http://example.com>` and `<user@example.com>`
   - URI autolinks with scheme validation
   - Email autolinks with proper regex matching
   - Backslash escape handling (disabled in autolinks)
@@ -89,7 +89,7 @@ This document tracks the work needed to achieve full CommonMark 0.30 specificati
 
 ### List Processing
 
-- [ ] **Loose vs tight lists** - Proper `<p>` tag insertion logic
+- [x] **Loose vs tight lists** - Proper `<p>` tag insertion logic
   - Blank lines between items trigger loose list
   - Blank lines within items trigger loose list
   - Affects HTML rendering
@@ -123,7 +123,7 @@ This document tracks the work needed to achieve full CommonMark 0.30 specificati
 
 ### Line Handling
 
-- [ ] **Proper line ending normalization** - CRLF, LF, CR handling
+- [x] **Proper line ending normalization** - CRLF, LF, CR handling
   - Normalize to single character
   - Handle in all contexts
 
@@ -136,7 +136,7 @@ This document tracks the work needed to achieve full CommonMark 0.30 specificati
 
 ### Advanced Features
 
-- [ ] **Thematic break interruption** - Can interrupt paragraphs
+- [x] **Thematic break interruption** - Can interrupt paragraphs
 - [ ] **Paragraph interruption rules** - Various block types can interrupt
 - [ ] **Container nesting** - Proper nesting of blockquotes, lists, etc.
 - [ ] **Reference link definition placement** - Can occur anywhere, affects whole document
@@ -144,15 +144,23 @@ This document tracks the work needed to achieve full CommonMark 0.30 specificati
 ## Currently Implemented ✅
 
 - ✅ Basic ATX headings (`#` to `######`)
+- ✅ Setext headings (`===` and `---` underlines)
 - ✅ Paragraphs (basic)
 - ✅ Basic emphasis/strong (`*` and `_` variants)
 - ✅ Basic inline links `[text](url)`
+- ✅ Link titles (`"` and `'` quote styles)
 - ✅ Basic images `![alt](url)`
+- ✅ Autolinks (`<uri>` and `<email>`)
 - ✅ Unordered and ordered lists (basic)
-- ✅ Blockquotes (basic)
+- ✅ Loose vs tight list detection
+- ✅ Blockquotes (basic, with lazy continuation)
 - ✅ Code spans (basic)
 - ✅ Fenced code blocks (with info strings)
+- ✅ Indented code blocks (4-space / tab)
 - ✅ Thematic breaks
+- ✅ Backslash escapes of ASCII punctuation
+- ✅ Soft breaks and hard breaks (2+ trailing spaces)
+- ✅ Line ending normalization (CRLF, CR, LF)
 - ✅ Footnotes (extension, not in CommonMark)
 - ✅ Frontmatter support (YAML/TOML - extension, not in CommonMark)
 
