@@ -43,7 +43,13 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    const lib = b.addLibrary(.{
+        .name = "zigmark",
+        .root_module = zigmark,
+        .linkage = .dynamic,
+    });
     b.installArtifact(exe);
+    b.installArtifact(lib);
     const run_step = b.step("run", "Run the app");
     const run_cmd = b.addRunArtifact(exe);
     run_step.dependOn(&run_cmd.step);
