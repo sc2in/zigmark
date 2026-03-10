@@ -169,6 +169,7 @@ pub const SpecTest = struct {
     start_line: usize,
     end_line: usize,
     section: []const u8,
+    time_ns: i128 = 0,
 };
 
 /// Aggregate pass / fail / error / skip counts for a spec-test run.
@@ -177,6 +178,7 @@ pub const TestResult = struct {
     failed: usize = 0,
     errors: usize = 0,
     skipped: usize = 0,
+    time_ns: i128 = 0,
 
     /// Return the total number of test cases that were processed.
     pub fn total(self: TestResult) usize {
@@ -184,9 +186,7 @@ pub const TestResult = struct {
     }
 
     /// Implements `std.fmt.format` so a `TestResult` can be printed directly.
-    pub fn format(self: TestResult, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = fmt;
-        _ = options;
+    pub fn format(self: TestResult, writer: std.io.Writer) !void {
         try writer.print("{d} passed, {d} failed, {d} errors, {d} skipped", .{ self.passed, self.failed, self.errors, self.skipped });
     }
 };
@@ -310,7 +310,8 @@ pub fn parseSpecTests(allocator: std.mem.Allocator, spec_content: []const u8) !s
 }
 
 /// Run individual test case
-fn runSpecTest(allocator: std.mem.Allocator, test_case: SpecTest, normalize: bool) !bool {
+fn runSpecTest(allocator: std.mem.Allocator, test_case: *SpecTest, normalize: bool) !bool {
+    const t1 = std.time.nanoTimestamp();
     // Parse markdown with our parser
     var p = Parser.init();
     var doc = p.parseMarkdown(allocator, test_case.markdown) catch |err| {
@@ -338,6 +339,8 @@ fn runSpecTest(allocator: std.mem.Allocator, test_case: SpecTest, normalize: boo
     else
         actual_html;
     defer if (normalize) allocator.free(actual);
+    const t2 = std.time.nanoTimestamp();
+    test_case.*.time_ns = t2 - t1;
 
     return std.mem.eql(u8, expected, actual);
 }
@@ -406,7 +409,7 @@ pub fn runCommonMarkSpecTests(allocator: std.mem.Allocator, spec_file_path: ?[]c
     var result = TestResult{};
 
     // Run filtered tests
-    for (filtered_tests.items) |test_case| {
+    for (filtered_tests.items) |*test_case| {
         if (options.verbose) {
             std.log.info("Running test {d}: {s} (lines {d}-{d})", .{ test_case.example, test_case.section, test_case.start_line, test_case.end_line });
         }
@@ -416,6 +419,7 @@ pub fn runCommonMarkSpecTests(allocator: std.mem.Allocator, spec_file_path: ?[]c
             result.errors += 1;
             continue;
         };
+        result.time_ns += test_case.time_ns;
 
         if (passed) {
             result.passed += 1;
