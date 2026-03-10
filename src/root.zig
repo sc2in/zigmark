@@ -543,20 +543,39 @@ test "CommonMark spec compliance" {
     defer arena.deinit();
 
     const allocator = arena.allocator();
-    // std.debug.print("Commonmark tests disabled\n", .{});
 
-    // Run embedded spec tests
+    // Per-section breakdown
+    const sections = [_][]const u8{
+        "ATX",      "Setext",    "Thematic",   "Paragraph", "Blank",
+        "Indented", "Fenced",    "Blockquote", "List",      "Backslash",
+        "Entity",   "Code span", "Emphasis",   "Link",      "Image",
+        "Autolink", "Raw HTML",  "Hard line",  "Soft line", "Textual",
+    };
+
+    std.debug.print("\n{s:<25} {s:>6} {s:>6} {s:>6}\n", .{ "Section", "Pass", "Fail", "Total" });
+    std.debug.print("{s:-<50}\n", .{""});
+
+    for (sections) |section| {
+        const r = try runCommonMarkSpecTests(allocator, "./src/markdown/spec.txt", .{
+            .pattern = section,
+            .normalize = true,
+            .verbose = false,
+        });
+        const total = r.passed + r.failed + r.errors;
+        if (total > 0) {
+            std.debug.print("{s:<25} {d:>6} {d:>6} {d:>6}\n", .{ section, r.passed, r.failed, total });
+        }
+    }
+
+    // Run all
     const result = try runCommonMarkSpecTests(allocator, "./src/markdown/spec.txt", .{
         .normalize = true,
         .verbose = false,
     });
 
-    std.debug.print("CommonMark spec test results: {any}\n", .{result});
-
-    // We expect some tests to pass (implementation is basic)
+    std.debug.print("\nCommonMark spec test results: {any}\n", .{result});
     try testing.expect(result.total() > 0);
 
-    // Log detailed results
     if (result.failed > 0) {
         std.debug.print("Warning: {d} CommonMark spec tests failed\n", .{result.failed});
         std.debug.print("This is expected as the parser implementation is still basic\n", .{});
