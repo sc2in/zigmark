@@ -19,6 +19,41 @@ fn writeEscaped(writer: anytype, s: []const u8) !void {
     }
 }
 
+/// Write a URL with HTML-escaping AND percent-encoding for characters that
+/// need it (spaces, non-ASCII, etc.), while preserving already-encoded %XX sequences.
+fn writeUrlEncoded(writer: anytype, s: []const u8) !void {
+    var i: usize = 0;
+    while (i < s.len) {
+        const c = s[i];
+        if (c == '&') {
+            try writer.writeAll("&amp;");
+        } else if (c == '\'') {
+            try writer.writeAll("&amp;");
+        } else if (c == '"') {
+            try writer.writeAll("&quot;");
+        } else if (c == ' ') {
+            try writer.writeAll("%20");
+        } else if (c == '%' and i + 2 < s.len and isHexDigit(s[i + 1]) and isHexDigit(s[i + 2])) {
+            // Already percent-encoded — pass through
+            try writer.writeByte('%');
+            try writer.writeByte(s[i + 1]);
+            try writer.writeByte(s[i + 2]);
+            i += 3;
+            continue;
+        } else if (c >= 0x80) {
+            // Non-ASCII: percent-encode each byte
+            try writer.print("%{X:0>2}", .{c});
+        } else {
+            try writer.writeByte(c);
+        }
+        i += 1;
+    }
+}
+
+fn isHexDigit(c: u8) bool {
+    return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
+}
+
 // ── Inline renderer ───────────────────────────────────────────────────────────
 
 fn renderInline(writer: anytype, item: AST.Inline) !void {
@@ -43,7 +78,7 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
         },
         .link => |l| {
             try writer.writeAll("<a href=\"");
-            try writeEscaped(writer, l.destination.url);
+            try writeUrlEncoded(writer, l.destination.url);
             try writer.writeByte('"');
             if (l.destination.title) |title| {
                 try writer.writeAll(" title=\"");
@@ -56,7 +91,7 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
         },
         .image => |img| {
             try writer.writeAll("<img src=\"");
-            try writeEscaped(writer, img.destination.url);
+            try writeUrlEncoded(writer, img.destination.url);
             try writer.writeAll("\" alt=\"");
             try writeEscaped(writer, img.alt_text);
             try writer.writeByte('"');
@@ -70,13 +105,13 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
         .autolink => |al| {
             if (al.is_email) {
                 try writer.writeAll("<a href=\"mailto:");
-                try writeEscaped(writer, al.url);
+                try writeUrlEncoded(writer, al.url);
                 try writer.writeAll("\">");
                 try writeEscaped(writer, al.url);
                 try writer.writeAll("</a>");
             } else {
                 try writer.writeAll("<a href=\"");
-                try writeEscaped(writer, al.url);
+                try writeUrlEncoded(writer, al.url);
                 try writer.writeAll("\">");
                 try writeEscaped(writer, al.url);
                 try writer.writeAll("</a>");
@@ -96,18 +131,18 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
         .heading => |h| {
             try writer.print("<h{d}>", .{h.level});
             for (h.children.items) |item| try renderInline(writer, item);
-            try writer.print("</h{d}>", .{h.level});
+            try writer.print("</h{d}>\n", .{h.level});
         },
         .paragraph => |p| {
             try writer.writeAll("<p>");
             for (p.children.items) |item| try renderInline(writer, item);
-            try writer.writeAll("</p>");
+            try writer.writeAll("</p>\n");
         },
-        .thematic_break => try writer.writeAll("<hr />"),
+        .thematic_break => try writer.writeAll("<hr />\n"),
         .code_block => |cb| {
             try writer.writeAll("<pre><code>");
             try writeEscaped(writer, cb.content);
-            try writer.writeAll("</code></pre>");
+            try writer.writeAll("</code></pre>\n");
         },
         .fenced_code_block => |fcb| {
             if (fcb.language) |lang| {
@@ -118,27 +153,27 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                 try writer.writeAll("<pre><code>");
             }
             try writeEscaped(writer, fcb.content);
-            try writer.writeAll("</code></pre>");
+            try writer.writeAll("</code></pre>\n");
         },
         .blockquote => |bq| {
-            try writer.writeAll("<blockquote>");
+            try writer.writeAll("<blockquote>\n");
             for (bq.children.items) |child| try renderBlock(writer, child);
-            try writer.writeAll("</blockquote>");
+            try writer.writeAll("</blockquote>\n");
         },
         .list => |lst| {
             const tag: []const u8 = if (lst.type == .ordered) "ol" else "ul";
             if (lst.type == .ordered) {
                 if (lst.start) |s| {
                     if (s != 1) {
-                        try writer.print("<ol start=\"{d}\">", .{s});
+                        try writer.print("<ol start=\"{d}\">\n", .{s});
                     } else {
-                        try writer.writeAll("<ol>");
+                        try writer.writeAll("<ol>\n");
                     }
                 } else {
-                    try writer.writeAll("<ol>");
+                    try writer.writeAll("<ol>\n");
                 }
             } else {
-                try writer.writeAll("<ul>");
+                try writer.writeAll("<ul>\n");
             }
             for (lst.items.items) |item| {
                 try writer.writeAll("<li>");
@@ -154,23 +189,23 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                     // Loose: render with block structure
                     for (item.children.items) |child| try renderBlock(writer, child);
                 }
-                try writer.writeAll("</li>");
+                try writer.writeAll("</li>\n");
             }
-            try writer.print("</{s}>", .{tag});
+            try writer.print("</{s}>\n", .{tag});
         },
         .footnote_definition => |fd| {
-            try writer.print("<div class=\"footnote\" id=\"fn:{s}\">", .{fd.label});
+            try writer.print("<div class=\"footnote\" id=\"fn:{s}\">\n", .{fd.label});
             for (fd.children.items) |child| {
                 switch (child) {
                     .paragraph => |p| {
                         try writer.print("<p><b>{s}</b>: ", .{fd.label});
                         for (p.children.items) |inl| try renderInline(writer, inl);
-                        try writer.writeAll("</p>");
+                        try writer.writeAll("</p>\n");
                     },
                     else => try renderBlock(writer, child),
                 }
             }
-            try writer.writeAll("</div>");
+            try writer.writeAll("</div>\n");
         },
         .html_block => |hb| try writer.writeAll(hb.content),
     }
@@ -201,86 +236,116 @@ fn ok(s: []const u8, expected: []const u8) !void {
 }
 
 test "heading" {
-    try ok("# Heading", "<h1>Heading</h1>");
-    try ok("## Level 2", "<h2>Level 2</h2>");
-    try ok("### Level 3", "<h3>Level 3</h3>");
+    try ok("# Heading", "<h1>Heading</h1>\n");
+    try ok("## Level 2", "<h2>Level 2</h2>\n");
+    try ok("### Level 3", "<h3>Level 3</h3>\n");
 }
 
 test "setext heading" {
-    try ok("Title\n=====", "<h1>Title</h1>");
-    try ok("Title\n-----", "<h2>Title</h2>");
+    try ok("Title\n=====", "<h1>Title</h1>\n");
+    try ok("Title\n-----", "<h2>Title</h2>\n");
 }
 
 test "thematic break" {
-    try ok("---", "<hr />");
-    try ok("***", "<hr />");
-    try ok("___", "<hr />");
+    try ok("---", "<hr />\n");
+    try ok("***", "<hr />\n");
+    try ok("___", "<hr />\n");
 }
 
 test "paragraph" {
-    try ok("Hello world", "<p>Hello world</p>");
+    try ok("Hello world", "<p>Hello world</p>\n");
 }
 
 test "multi-line paragraph with soft break" {
-    try ok("line one\nline two", "<p>line one\nline two</p>");
+    try ok("line one\nline two", "<p>line one\nline two</p>\n");
 }
 
 test "emphasis and strong" {
-    try ok("*em*", "<p><em>em</em></p>");
-    try ok("**bold**", "<p><strong>bold</strong></p>");
-    try ok("_em_", "<p><em>em</em></p>");
-    try ok("__bold__", "<p><strong>bold</strong></p>");
+    try ok("*em*", "<p><em>em</em></p>\n");
+    try ok("**bold**", "<p><strong>bold</strong></p>\n");
+    try ok("_em_", "<p><em>em</em></p>\n");
+    try ok("__bold__", "<p><strong>bold</strong></p>\n");
 }
 
 test "link" {
-    try ok("[text](https://example.com)", "<p><a href=\"https://example.com\">text</a></p>");
+    try ok("[text](https://example.com)", "<p><a href=\"https://example.com\">text</a></p>\n");
 }
 
 test "image" {
-    try ok("![alt](img.png)", "<p><img src=\"img.png\" alt=\"alt\" /></p>");
+    try ok("![alt](img.png)", "<p><img src=\"img.png\" alt=\"alt\" /></p>\n");
 }
 
 test "autolink" {
-    try ok("<https://example.com>", "<p><a href=\"https://example.com\">https://example.com</a></p>");
+    try ok("<https://example.com>", "<p><a href=\"https://example.com\">https://example.com</a></p>\n");
 }
 
 test "code span" {
-    try ok("`code`", "<p><code>code</code></p>");
+    try ok("`code`", "<p><code>code</code></p>\n");
 }
 
 test "indented code block" {
-    try ok("    hello", "<pre><code>hello</code></pre>");
+    try ok("    hello", "<pre><code>hello</code></pre>\n");
 }
 
 test "fenced code block" {
-    try ok("```\ncode\n```", "<pre><code>code</code></pre>");
-    try ok("```zig\nconst x = 1;\n```", "<pre><code class=\"language-zig\">const x = 1;</code></pre>");
+    try ok("```\ncode\n```", "<pre><code>code</code></pre>\n");
+    try ok("```zig\nconst x = 1;\n```", "<pre><code class=\"language-zig\">const x = 1;</code></pre>\n");
 }
 
 test "blockquote" {
-    try ok("> quote", "<blockquote><p>quote</p></blockquote>");
+    try ok("> quote", "<blockquote>\n<p>quote</p>\n</blockquote>\n");
 }
 
 test "tight unordered list" {
-    try ok("- a\n- b\n- c", "<ul><li>a</li><li>b</li><li>c</li></ul>");
+    try ok("- a\n- b\n- c", "<ul>\n<li>a</li>\n<li>b</li>\n<li>c</li>\n</ul>\n");
 }
 
 test "loose unordered list" {
-    try ok("- a\n\n- b", "<ul><li><p>a</p></li><li><p>b</p></li></ul>");
+    try ok("- a\n\n- b", "<ul>\n<li><p>a</p>\n</li>\n<li><p>b</p>\n</li>\n</ul>\n");
 }
 
 test "ordered list" {
-    try ok("1. first\n2. second", "<ol><li>first</li><li>second</li></ol>");
+    try ok("1. first\n2. second", "<ol>\n<li>first</li>\n<li>second</li>\n</ol>\n");
 }
 
 test "ordered list non-one start" {
-    try ok("3. first\n4. second", "<ol start=\"3\"><li>first</li><li>second</li></ol>");
+    try ok("3. first\n4. second", "<ol start=\"3\">\n<li>first</li>\n<li>second</li>\n</ol>\n");
 }
 
 test "backslash escape" {
-    try ok("\\*not em\\*", "<p>*not em*</p>");
+    try ok("\\*not em\\*", "<p>*not em*</p>\n");
 }
 
 test "hard break" {
-    try ok("line one  \nline two", "<p>line one<br />line two</p>");
+    try ok("line one  \nline two", "<p>line one<br />line two</p>\n");
+}
+
+test "link reference" {
+    try ok("[foo]: /url \"title\"\n\n[foo]", "<p><a href=\"/url\" title=\"title\">foo</a></p>\n");
+}
+
+test "link reference forward" {
+    try ok("[foo]\n\n[foo]: /url", "<p><a href=\"/url\">foo</a></p>\n");
+}
+
+test "link reference collapsed" {
+    try ok("[foo]: /url\n\n[foo][]", "<p><a href=\"/url\">foo</a></p>\n");
+}
+
+test "link with parens in url" {
+    try ok("[link](foo(and(bar)))", "<p><a href=\"foo(and(bar))\">link</a></p>\n");
+}
+
+test "link with angle bracket dest" {
+    try ok("[link](</my uri>)", "<p><a href=\"/my%20uri\">link</a></p>\n");
+}
+
+test "link with title styles" {
+    try ok("[link](/url \"title\")", "<p><a href=\"/url\" title=\"title\">link</a></p>\n");
+    try ok("[link](/url 'title')", "<p><a href=\"/url\" title=\"title\">link</a></p>\n");
+    try ok("[link](/url (title))", "<p><a href=\"/url\" title=\"title\">link</a></p>\n");
+}
+
+test "link rejects space in bare url" {
+    try ok("[link](/my uri)", "<p>[link](/my uri)</p>\n");
 }

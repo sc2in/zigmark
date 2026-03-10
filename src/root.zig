@@ -133,10 +133,16 @@ test "enhanced parse and render" {
     try std.testing.expect(std.mem.indexOf(u8, h, "<blockquote>") != null);
 
     // std.debug.print("Generated HTML:\n{s}\n", .{h});
-    try std.testing.expectEqualStrings(
-        \\<h1>Heading</h1><p>Paragraph <a href="https://sc2.in">text</a>.</p><ul><li>item1</li><li>item2</li></ul><p>Some more <strong>bold</strong> text and some <em>italic</em> text.</p><blockquote><p>a block quote</p></blockquote><p>a footnote<a href="#fn:SCF:GOV-01" class="footnote-ref">SCF:GOV-01</a>
-        \\a footnote<a href="#fn:2" class="footnote-ref">2</a></p><h2>Heading 2</h2><div class="footnote" id="fn:SCF:GOV-01"><p><b>SCF:GOV-01</b>: Footnote 1</p></div><div class="footnote" id="fn:2"><p><b>2</b>: Footnote 2</p></div>
-    , h);
+    try std.testing.expectEqualStrings("<h1>Heading</h1>\n" ++
+        "<p>Paragraph <a href=\"https://sc2.in\">text</a>.</p>\n" ++
+        "<ul>\n<li>item1</li>\n<li>item2</li>\n</ul>\n" ++
+        "<p>Some more <strong>bold</strong> text and some <em>italic</em> text.</p>\n" ++
+        "<blockquote>\n<p>a block quote</p>\n</blockquote>\n" ++
+        "<p>a footnote<a href=\"#fn:SCF:GOV-01\" class=\"footnote-ref\">SCF:GOV-01</a>\n" ++
+        "a footnote<a href=\"#fn:2\" class=\"footnote-ref\">2</a></p>\n" ++
+        "<h2>Heading 2</h2>\n" ++
+        "<div class=\"footnote\" id=\"fn:SCF:GOV-01\">\n<p><b>SCF:GOV-01</b>: Footnote 1</p>\n</div>\n" ++
+        "<div class=\"footnote\" id=\"fn:2\">\n<p><b>2</b>: Footnote 2</p>\n</div>\n", h);
 }
 
 /// COMMONMARK SPEC TEST RUNNER
