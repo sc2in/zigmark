@@ -251,8 +251,8 @@ pub fn parseSpecTests(allocator: std.mem.Allocator, spec_content: []const u8) !s
         line_number += 1;
         const trimmed = std.mem.trim(u8, line, " \t\r");
 
-        // Detect section headers
-        if (std.mem.startsWith(u8, trimmed, "#")) {
+        // Detect section headers (only when not inside an example block)
+        if (state == 0 and std.mem.startsWith(u8, trimmed, "#")) {
             current_section = std.mem.trim(u8, trimmed, "# \t");
             continue;
         }
