@@ -11,16 +11,25 @@ const math = std.math;
 
 const mecha = @import("mecha");
 
+/// Abstract syntax tree types for the parsed Markdown document.
 pub const AST = @import("markdown/ast.zig");
+/// Markdown parser that transforms raw text into an `AST.Document`.
 pub const Parser = @import("markdown/parser.zig");
 const html = @import("markdown/renderers/html.zig");
 
+/// Pre-built renderer that serialises an `AST.Document` to CommonMark-compliant HTML.
 pub const HTMLRenderer = Renderer.create(html);
+
+/// A type-erased rendering back-end.
+///
+/// Create concrete instances with `Renderer.create`, passing any struct that
+/// exposes a `pub fn render(Allocator, AST.Document) ![]u8`.
 pub const Renderer = struct {
     vtable: struct {
         render: *const fn (Allocator, AST.Document) anyerror![]u8,
     },
 
+    /// Build a `Renderer` vtable from a concrete back-end type `T`.
     pub fn create(comptime T: type) Renderer {
         return Renderer{
             .vtable = .{
@@ -28,11 +37,15 @@ pub const Renderer = struct {
             },
         };
     }
+
+    /// Render `doc` into an allocator-owned byte slice.
+    /// The caller is responsible for freeing the returned slice.
     pub fn render(self: Renderer, alloc: Allocator, doc: AST.Document) ![]u8 {
         return try self.vtable.render(alloc, doc);
     }
 };
-/// Character classification helpers
+/// Character classification helpers used by the parser to implement
+/// CommonMark's definitions of Unicode whitespace, punctuation, etc.
 pub const chars = struct {
     /// ASCII whitespace: space, tab, line feed, form feed, carriage return
     pub fn isWhitespace(c: u8) bool {
@@ -158,17 +171,19 @@ pub const SpecTest = struct {
     section: []const u8,
 };
 
-/// Test result tracking
+/// Aggregate pass / fail / error / skip counts for a spec-test run.
 pub const TestResult = struct {
     passed: usize = 0,
     failed: usize = 0,
     errors: usize = 0,
     skipped: usize = 0,
 
+    /// Return the total number of test cases that were processed.
     pub fn total(self: TestResult) usize {
         return self.passed + self.failed + self.errors + self.skipped;
     }
 
+    /// Implements `std.fmt.format` so a `TestResult` can be printed directly.
     pub fn format(self: TestResult, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
@@ -329,6 +344,16 @@ fn runSpecTest(allocator: std.mem.Allocator, test_case: SpecTest, normalize: boo
 
 /// Main test runner function for CommonMark specification compliance
 /// This function can be called from build.zig test step
+/// Run the CommonMark specification test suite (or a filtered subset).
+///
+/// * `spec_file_path` — path to `spec.txt`; pass `null` to use the small
+///   embedded subset.
+/// * `options.pattern` — if set, only examples whose section name contains
+///   this substring are executed.
+/// * `options.number` — run a single example by number.
+/// * `options.verbose` — print per-test pass / fail details.
+/// * `options.normalize` — apply HTML whitespace normalisation before
+///   comparison (matches the behaviour of the reference `spec_tests.py`).
 pub fn runCommonMarkSpecTests(allocator: std.mem.Allocator, spec_file_path: ?[]const u8, options: struct {
     pattern: ?[]const u8 = null,
     normalize: bool = true,

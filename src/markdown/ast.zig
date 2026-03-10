@@ -1,3 +1,11 @@
+//! Markdown Abstract Syntax Tree (AST) definitions.
+//!
+//! This module defines every node type produced by the parser.  The tree is
+//! rooted at a `Document` which contains a flat list of `Block` nodes, each
+//! of which may recursively contain other blocks or `Inline` elements.
+//!
+//! The types closely follow the CommonMark specification §4 (leaf blocks)
+//! and §6 (inlines), with extensions for footnotes.
 const std = @import("std");
 const Array = std.ArrayList;
 const Allocator = std.mem.Allocator;
@@ -11,7 +19,7 @@ const tokens = @import("tokens.zig");
 const Token = tokens.Token;
 const Range = tokens.Range;
 
-/// Base node type for all AST elements
+/// Base node type for all AST elements.
 pub const Node = struct {
     range: ?Range = null,
 
@@ -24,10 +32,15 @@ pub const Node = struct {
     }
 };
 
-/// Document root node
+/// The root of a parsed Markdown document.
+///
+/// A `Document` owns a flat list of top-level `Block` nodes.  Call
+/// `deinit` when you are done to release all child allocations (unless
+/// you are using an arena allocator that will be freed in bulk).
 pub const Document = struct {
     children: std.ArrayList(Block),
 
+    /// Create an empty document.
     pub fn init(allocator: std.mem.Allocator) Document {
         _ = allocator; // autofix
         return Document{
@@ -35,22 +48,27 @@ pub const Document = struct {
         };
     }
 
+    /// Recursively free every block (and its inlines) then release the list.
     pub fn deinit(self: *Document, allocator: std.mem.Allocator) void {
         for (self.children.items) |*child| {
             child.deinit(allocator);
         }
         self.children.deinit(allocator);
     }
-    /// Enhanced query system for easier node testing and traversal
-    /// Supports jQuery-like selector syntax for AST navigation
+
+    /// Convenience query API for traversing and filtering the AST.
+    ///
+    /// Obtain a `Query` with `doc.get()` and then call helper methods
+    /// such as `.headings()`, `.links()`, `.textAt()`, etc.
     pub const Query = struct {
         document: *const Document,
 
+        /// Wrap `document` in a query handle.
         pub fn init(document: *const Document) Query {
             return Query{ .document = document };
         }
 
-        /// Get all blocks of a specific type
+        /// Return every top-level block whose active tag equals `block_type`.
         pub fn blocks(self: Query, allocator: std.mem.Allocator, block_type: std.meta.Tag(Block)) !std.ArrayList(*const Block) {
             var results = std.ArrayList(*const Block).init(allocator);
 
@@ -63,7 +81,8 @@ pub const Document = struct {
             return results;
         }
 
-        /// Get headings by level
+        /// Return all headings, optionally filtered to a single `level` (1–6).
+        /// Pass `null` to return headings of every level.
         pub fn headings(self: Query, allocator: std.mem.Allocator, level: ?u8) !std.ArrayList(*const Heading) {
             var results = std.ArrayList(*const Heading).init(allocator);
 
@@ -82,7 +101,7 @@ pub const Document = struct {
             return results;
         }
 
-        /// Get all paragraphs containing specific inline elements
+        /// Return every paragraph that contains at least one inline of `inline_type`.
         pub fn paragraphsWithInlines(self: Query, allocator: std.mem.Allocator, inline_type: std.meta.Tag(Inline)) !std.ArrayList(*const Paragraph) {
             var results = std.ArrayList(*const Paragraph).init(allocator);
 
@@ -100,7 +119,8 @@ pub const Document = struct {
             return results;
         }
 
-        /// Get all links in the document
+        /// Collect every `Link` inline across all blocks (paragraphs, headings,
+        /// blockquotes, and list items) in document order.
         pub fn links(self: Query, allocator: std.mem.Allocator) !std.ArrayList(*const Link) {
             var results = std.ArrayList(*const Link).init(allocator);
 
@@ -111,7 +131,11 @@ pub const Document = struct {
             return results;
         }
 
-        /// Get text content from a specific path (e.g., "heading[1].text")
+        /// Look up text content by a simple path expression.
+        ///
+        /// Currently supports `"heading[N]"` where *N* is a zero-based index
+        /// into `document.children`.  Returns the first `Text` inline of
+        /// that heading, or `null` if the path doesn't resolve.
         pub fn textAt(self: Query, allocator: std.mem.Allocator, path: []const u8) !?[]const u8 {
             _ = allocator;
 
@@ -134,7 +158,7 @@ pub const Document = struct {
             return null;
         }
 
-        /// Count elements by type
+        /// Count the number of top-level blocks matching `element_type`.
         pub fn count(self: Query, element_type: anytype) usize {
             var counter: usize = 0;
 
@@ -199,13 +223,19 @@ pub const Document = struct {
         }
     };
 
-    /// Main dot notation interface
+    /// Return a `Query` handle for this document.
+    ///
+    /// Usage: `const q = doc.get(); const hdrs = try q.headings(alloc, 2);`
     pub fn get(self: *const Document) Query {
         return Query.init(self);
     }
 };
 
-/// Block-level elements
+/// A block-level element (CommonMark §4).
+///
+/// Block nodes form the top-level structure of a document: paragraphs,
+/// headings, code blocks, lists, blockquotes, thematic breaks, raw HTML
+/// blocks, and footnote definitions.
 pub const Block = union(enum) {
     paragraph: Paragraph,
     heading: Heading,
@@ -217,6 +247,7 @@ pub const Block = union(enum) {
     html_block: HtmlBlock,
     footnote_definition: FootnoteDefinition,
 
+    /// Recursively free this block and all children it owns.
     pub fn deinit(self: *Block, allocator: std.mem.Allocator) void {
         switch (self.*) {
             inline else => |*b| b.deinit(allocator),
@@ -229,7 +260,12 @@ pub const Block = union(enum) {
     }
 };
 
-/// Inline elements
+/// An inline-level element (CommonMark §6).
+///
+/// Inline nodes live inside block nodes such as `Paragraph` or `Heading`.
+/// They represent runs of text, emphasis, strong emphasis, code spans,
+/// links, images, autolinks, footnote references, line breaks, and
+/// inline HTML.
 pub const Inline = union(enum) {
     text: Text,
     emphasis: Emphasis,
@@ -243,6 +279,7 @@ pub const Inline = union(enum) {
     soft_break: SoftBreak,
     html_in_line: HtmlInline,
 
+    /// Recursively free this inline and any children it owns.
     pub fn deinit(self: *Inline, allocator: std.mem.Allocator) void {
         switch (self.*) {
             inline else => |*in_line_elem| if (@hasDecl(@TypeOf(in_line_elem.*), "deinit")) {
@@ -252,10 +289,12 @@ pub const Inline = union(enum) {
     }
 };
 
-/// Paragraph block
+/// A paragraph — a sequence of non-blank lines that cannot be interpreted
+/// as other kinds of blocks (CommonMark §4.8).
 pub const Paragraph = struct {
     children: std.ArrayList(Inline),
 
+    /// Create an empty paragraph with no inline children.
     pub fn init(allocator: std.mem.Allocator) Paragraph {
         _ = allocator; // autofix
         return Paragraph{
@@ -271,11 +310,16 @@ pub const Paragraph = struct {
     }
 };
 
-/// Heading block
+/// An ATX or setext heading (CommonMark §4.2 / §4.3).
+///
+/// `level` is 1–6 corresponding to `<h1>`–`<h6>`.  The inline content
+/// of the heading (everything after the `#` markers or the underline)
+/// is stored in `children`.
 pub const Heading = struct {
     level: u8,
     children: std.ArrayList(Inline),
 
+    /// Create a heading at the given `level` with no inline children.
     pub fn init(allocator: std.mem.Allocator, level: u8) Heading {
         _ = allocator; // autofix
         return Heading{
@@ -292,10 +336,15 @@ pub const Heading = struct {
     }
 };
 
-/// Indented code block
+/// An indented code block (CommonMark §4.4).
+///
+/// Each line is indented by at least four spaces or one tab.  The
+/// leading indentation is stripped; the remaining text is stored
+/// verbatim in `content`.
 pub const CodeBlock = struct {
     content: []const u8,
 
+    /// Wrap `content` in an indented code block node.
     pub fn init(content: []const u8) CodeBlock {
         return CodeBlock{ .content = content };
     }
@@ -304,13 +353,18 @@ pub const CodeBlock = struct {
     }
 };
 
-/// Fenced code block
+/// A fenced code block (CommonMark §4.5).
+///
+/// Delimited by a line of at least three backticks (`` ` ``) or tildes (`~`).
+/// An optional info string after the opening fence is exposed as `language`
+/// (typically used for syntax highlighting hints).
 pub const FencedCodeBlock = struct {
     content: []const u8,
     language: ?[]const u8 = null,
     fence_char: u8,
     fence_length: usize,
 
+    /// Create a fenced code block with the given content and metadata.
     pub fn init(content: []const u8, language: ?[]const u8, fence_char: u8, fence_length: usize) FencedCodeBlock {
         return FencedCodeBlock{
             .content = content,
@@ -324,10 +378,15 @@ pub const FencedCodeBlock = struct {
     }
 };
 
-/// Blockquote
+/// A blockquote (CommonMark §5.1).
+///
+/// Lines are prefixed with `>`.  The contents are parsed recursively
+/// so a blockquote may contain any block-level elements, including
+/// nested blockquotes.
 pub const Blockquote = struct {
     children: std.ArrayList(Block),
 
+    /// Create an empty blockquote.
     pub fn init(allocator: std.mem.Allocator) Blockquote {
         _ = allocator; // autofix
         return Blockquote{
@@ -343,17 +402,21 @@ pub const Blockquote = struct {
     }
 };
 
-/// List types
+/// Discriminator for ordered (`1.`) vs unordered (`-`, `*`, `+`) lists.
 pub const ListType = enum {
     ordered,
     unordered,
 };
 
-/// List item
+/// A single item inside a `List` (CommonMark §5.3).
+///
+/// Each item contains one or more `Block` children.  In a *tight* list
+/// the paragraphs are rendered without `<p>` wrappers.
 pub const ListItem = struct {
     children: std.ArrayList(Block),
     tight: bool = true,
 
+    /// Create an empty list item.
     pub fn init(allocator: std.mem.Allocator) ListItem {
         _ = allocator; // autofix
         return ListItem{
@@ -369,13 +432,18 @@ pub const ListItem = struct {
     }
 };
 
-/// List
+/// An ordered or unordered list (CommonMark §5.3).
+///
+/// * `tight` — when `true` the list's item paragraphs are rendered
+///   without `<p>` wrappers (a *tight* list in CommonMark terms).
+/// * `start` — for ordered lists, the starting number (defaults to 1).
 pub const List = struct {
     type: ListType,
     items: std.ArrayList(ListItem),
     tight: bool = true,
     start: ?usize = null,
 
+    /// Create an empty list of the given type.
     pub fn init(allocator: std.mem.Allocator, list_type: ListType) List {
         _ = allocator; // autofix
         return List{
@@ -392,31 +460,42 @@ pub const List = struct {
     }
 };
 
-/// Thematic break (horizontal rule)
+/// A thematic break — a horizontal rule rendered as `<hr />` (CommonMark §4.1).
+///
+/// Produced by a line containing three or more `*`, `-`, or `_` characters.
 pub const ThematicBreak = struct {
     char: u8,
 
+    /// Create a thematic break that was introduced by `char` (`*`, `-`, or `_`).
     pub fn init(char: u8) ThematicBreak {
         return ThematicBreak{ .char = char };
     }
     pub fn deinit(_: ThematicBreak, _: Allocator) void {}
 };
 
-/// HTML block
+/// A raw HTML block (CommonMark §4.6).
+///
+/// The `content` is passed through to the renderer verbatim — no
+/// escaping or further parsing is performed.
 pub const HtmlBlock = struct {
     content: []const u8,
 
+    /// Wrap raw HTML `content` in an HTML block node.
     pub fn init(content: []const u8) HtmlBlock {
         return HtmlBlock{ .content = content };
     }
     pub fn deinit(_: HtmlBlock, _: Allocator) void {}
 };
 
-/// Footnote definition
+/// A footnote definition (`[^label]: …`).
+///
+/// This is an extension to CommonMark.  The `label` is the identifier
+/// that `FootnoteReference` inlines link to.
 pub const FootnoteDefinition = struct {
     label: []const u8,
     children: std.ArrayList(Block),
 
+    /// Create an empty footnote definition for the given `label`.
     pub fn init(allocator: std.mem.Allocator, label: []const u8) FootnoteDefinition {
         _ = allocator; // autofix
         return FootnoteDefinition{
@@ -433,21 +512,26 @@ pub const FootnoteDefinition = struct {
     }
 };
 
-/// Plain text
+/// A run of plain text (CommonMark §6.11, textual content).
 pub const Text = struct {
     content: []const u8,
 
+    /// Wrap a string slice in a `Text` inline node.
     pub fn init(content: []const u8) Text {
         return Text{ .content = content };
     }
     pub fn deinit(_: Text, _: Allocator) void {}
 };
 
-/// Emphasis (italic)
+/// Emphasis — rendered as `<em>` (CommonMark §6.4).
+///
+/// Delimited by a single `*` or `_`.  `marker` records which delimiter
+/// was used so a round-trip formatter can preserve the author's style.
 pub const Emphasis = struct {
     children: std.ArrayList(Inline),
     marker: u8,
 
+    /// Create an empty emphasis node with the given delimiter `marker`.
     pub fn init(allocator: std.mem.Allocator, marker: u8) Emphasis {
         _ = allocator; // autofix
         return Emphasis{
@@ -464,11 +548,14 @@ pub const Emphasis = struct {
     }
 };
 
-/// Strong emphasis (bold)
+/// Strong emphasis — rendered as `<strong>` (CommonMark §6.4).
+///
+/// Delimited by `**` or `__`.  `marker` records which character was used.
 pub const Strong = struct {
     children: std.ArrayList(Inline),
     marker: u8,
 
+    /// Create an empty strong-emphasis node with the given delimiter `marker`.
     pub fn init(allocator: std.mem.Allocator, marker: u8) Strong {
         _ = allocator; // autofix
         return Strong{
@@ -485,20 +572,29 @@ pub const Strong = struct {
     }
 };
 
-/// Code span
+/// A code span — inline code delimited by backticks (CommonMark §6.1).
+///
+/// Backtick strings of any length may be used; interior backtick runs
+/// shorter than the delimiter are treated as literal characters.
 pub const CodeSpan = struct {
     content: []const u8,
 
+    /// Wrap `content` in a code span node.
     pub fn init(content: []const u8) CodeSpan {
         return CodeSpan{ .content = content };
     }
 };
 
-/// Link destination and title
+/// The destination (URL) and optional title of a link or image.
+///
+/// In CommonMark, a link destination may be enclosed in angle brackets
+/// (`<url>`) or written bare.  The title, if present, is enclosed in
+/// `"…"`, `'…'`, or `(…)` (CommonMark §6.5 / §6.7).
 pub const LinkDestination = struct {
     url: []const u8,
     title: ?[]const u8 = null,
 
+    /// Create a link destination with the given URL and optional title.
     pub fn init(url: []const u8, title: ?[]const u8) LinkDestination {
         return LinkDestination{
             .url = url,
@@ -507,21 +603,31 @@ pub const LinkDestination = struct {
     }
 };
 
-/// Link types
+/// How a link or image was specified in the source (CommonMark §6.5).
 pub const LinkType = enum {
+    /// `[text](url "title")` — inline link.
     in_line,
+    /// `[text][label]` — full reference link.
     reference,
+    /// `[text][]` — collapsed reference link (label == text).
     collapsed,
+    /// `[text]` — shortcut reference link (label == text, no brackets).
     shortcut,
 };
 
-/// Link
+/// A hyperlink (CommonMark §6.5 – §6.7).
+///
+/// `children` are the visible inline elements between `[` and `]`.
+/// The resolved URL and optional title are in `destination`.  For
+/// reference-style links `link_type` indicates the flavour used and
+/// `reference_label` stores the original label text.
 pub const Link = struct {
     children: std.ArrayList(Inline),
     destination: LinkDestination,
     link_type: LinkType,
     reference_label: ?[]const u8 = null,
 
+    /// Create a link with the given destination and no children.
     pub fn init(allocator: std.mem.Allocator, destination: LinkDestination, link_type: LinkType) Link {
         _ = allocator; // autofix
         return Link{
@@ -539,13 +645,18 @@ pub const Link = struct {
     }
 };
 
-/// Image
+/// An image (CommonMark §6.8).
+///
+/// Syntactically identical to a link but prefixed with `!`.  The
+/// `alt_text` is the content between `[` and `]`, rendered as the
+/// `alt` attribute of the `<img>` tag.
 pub const Image = struct {
     alt_text: []const u8,
     destination: LinkDestination,
     link_type: LinkType,
     reference_label: ?[]const u8 = null,
 
+    /// Create an image node with the given alt text and destination.
     pub fn init(alt_text: []const u8, destination: LinkDestination, link_type: LinkType) Image {
         return Image{
             .alt_text = alt_text,
@@ -555,11 +666,15 @@ pub const Image = struct {
     }
 };
 
-/// Autolink
+/// An autolink — a URI or e-mail address enclosed in angle brackets
+/// (CommonMark §6.9).
+///
+/// Example: `<https://example.com>` or `<user@host>`.
 pub const Autolink = struct {
     url: []const u8,
     is_email: bool = false,
 
+    /// Create an autolink node.
     pub fn init(url: []const u8, is_email: bool) Autolink {
         return Autolink{
             .url = url,
@@ -568,33 +683,45 @@ pub const Autolink = struct {
     }
 };
 
-/// Footnote reference
+/// An inline footnote reference (`[^label]`).
+///
+/// This is an extension to CommonMark.  The `label` matches a
+/// corresponding `FootnoteDefinition` block elsewhere in the document.
 pub const FootnoteReference = struct {
     label: []const u8,
 
+    /// Create a footnote reference for the given `label`.
     pub fn init(label: []const u8) FootnoteReference {
         return FootnoteReference{ .label = label };
     }
 };
 
-/// Hard line break
+/// A hard line break — rendered as `<br />` (CommonMark §6.10).
+///
+/// Produced by two or more trailing spaces before a newline, or by a
+/// backslash at the end of a line.
 pub const HardBreak = struct {
     pub fn init() HardBreak {
         return HardBreak{};
     }
 };
 
-/// Soft line break
+/// A soft line break — rendered as a newline character (CommonMark §6.11).
+///
+/// Occurs at every line ending inside a paragraph that is not a hard break.
 pub const SoftBreak = struct {
     pub fn init() SoftBreak {
         return SoftBreak{};
     }
 };
 
-/// Inline HTML
+/// Raw inline HTML (CommonMark §6.6).
+///
+/// Any HTML tag that appears in inline context is preserved verbatim.
 pub const HtmlInline = struct {
     content: []const u8,
 
+    /// Wrap raw inline HTML `content` in a node.
     pub fn init(content: []const u8) HtmlInline {
         return HtmlInline{ .content = content };
     }

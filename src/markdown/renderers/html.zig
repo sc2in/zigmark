@@ -1,3 +1,9 @@
+//! HTML renderer for the Markdown AST.
+//!
+//! Serialises an `AST.Document` into CommonMark-compliant HTML.  The
+//! output follows the same conventions as the CommonMark reference
+//! implementation (`cmark`): UTF-8, self-closing tags for void elements
+//! (e.g. `<br />`, `<hr />`), and minimal attribute quoting.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const tst = std.testing;
@@ -213,6 +219,9 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
 
 // ── Top-level render ──────────────────────────────────────────────────────────
 
+/// Render `doc` to an allocator-owned HTML byte slice.
+///
+/// The caller owns the returned memory and must free it when done.
 pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();

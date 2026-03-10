@@ -1,3 +1,18 @@
+//! Markdown parser.
+//!
+//! Transforms a UTF-8 Markdown string into an `AST.Document`.  The parser
+//! operates in two passes:
+//!
+//!  1. **Link-reference-definition collection** — scans every line for
+//!     `[label]: destination "title"` definitions and builds a lookup map.
+//!  2. **Block / inline parsing** — identifies block structure (headings,
+//!     lists, blockquotes, …) then parses inline content within each
+//!     block, resolving emphasis, links (inline and reference), code
+//!     spans, autolinks, etc.
+//!
+//! The public entry point is `parseMarkdown`.  All slice references in
+//! the returned AST point into `input` or into buffers allocated with
+//! the supplied allocator (ideally an `ArenaAllocator`).
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const tst = std.testing;
@@ -18,6 +33,10 @@ const ListItemResult = struct { marker: u8, content: []const u8 };
 const BlockquoteResult = struct { content: []const u8 };
 
 // ── Mecha parsers namespace (backward compat) ─────────────────────────────────
+
+/// Low-level `mecha` parser combinators exposed for advanced use or testing.
+///
+/// Most callers should use `parseMarkdown` instead.
 pub const parsers = struct {
     pub const space = mecha.ascii.char(' ');
     pub const tab = mecha.ascii.char('\t');
@@ -944,9 +963,13 @@ fn tryParseRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *c
 
 const Self = @This();
 
+/// Create a new parser instance.  The parser is stateless; all mutable
+/// state lives in the allocator and the returned `AST.Document`.
 pub fn init() Self {
     return Self{};
 }
+
+/// Release any resources held by the parser (currently a no-op).
 pub fn deinit(_: *Self, _: Allocator) void {}
 
 fn appendInlines(allocator: Allocator, dest: *std.ArrayList(AST.Inline), content: []const u8, ref_map: ?*const RefMap) !void {

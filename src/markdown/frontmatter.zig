@@ -1,16 +1,25 @@
+//! Frontmatter parser for Markdown documents.
+//!
+//! Extracts and parses YAML (`---`) or TOML (`+++`) frontmatter blocks
+//! from the beginning of a Markdown file.  The parsed key/value tree is
+//! normalised into `std.json.Value` for uniform downstream access.
+
 const std = @import("std");
 const Array = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const tst = std.testing;
 const math = std.math;
-const Yaml = @import("yaml").Yaml;
 const JsonValue = std.json.Value;
+
 const tomlz = @import("tomlz");
+const Yaml = @import("yaml").Yaml;
 
 const FrontMatter = @This();
 
 allocator: Allocator,
+/// The parsed frontmatter as a JSON value tree.
 root: JsonValue,
+/// The raw frontmatter source text (without delimiters).
 source: []const u8,
 original: Origin,
 
@@ -24,6 +33,8 @@ const Kind = enum {
     toml,
 };
 
+/// Parse `source` as frontmatter of `input_kind` (YAML or TOML).
+/// Returns a `FrontMatter` whose `.root` field contains the parsed tree.
 pub fn init(alloc: Allocator, source: []const u8, input_kind: Kind) !FrontMatter {
     var orig: Origin = undefined;
     const value: JsonValue = switch (input_kind) {
@@ -60,12 +71,18 @@ pub fn init(alloc: Allocator, source: []const u8, input_kind: Kind) !FrontMatter
         .original = orig,
     };
 }
+/// Release all memory owned by this `FrontMatter` instance.
 pub fn deinit(self: *FrontMatter) void {
     deinitJsonValue(self.allocator, &self.root);
     switch (self.original) {
         inline else => |*o| o.deinit(self.allocator),
     }
 }
+
+/// Extract and parse frontmatter from a full Markdown document.
+///
+/// The first line must be `---` (YAML) or `+++` (TOML).  The
+/// frontmatter extends to the next matching delimiter.
 pub fn initFromMarkdown(alloc: Allocator, txt: []const u8) !FrontMatter {
     const kind: Kind = switch (txt[0]) {
         '-' => .yaml,
@@ -169,6 +186,7 @@ fn deinitJsonValue(alloc: std.mem.Allocator, value: *std.json.Value) void {
     }
 }
 
+/// Recursively convert a `zig-yaml` value tree into `std.json.Value`.
 pub fn yamlNodeToJson(allocator: std.mem.Allocator, node: Yaml.Value) !JsonValue {
     switch (node) {
         .map => |m| {
@@ -249,6 +267,7 @@ test "toml to json conversion" {
     // const json_str = fbs.getWritten();
     // std.debug.print("{s}\n", .{json_str});
 }
+/// Recursively convert a `tomlz` value tree into `std.json.Value`.
 pub fn tomlValueToJson(allocator: std.mem.Allocator, v: *tomlz.parser.Value) !std.json.Value {
     return switch (v.*) {
         .string => |s| std.json.Value{ .string = s },
@@ -266,6 +285,7 @@ pub fn tomlValueToJson(allocator: std.mem.Allocator, v: *tomlz.parser.Value) !st
     };
 }
 
+/// Convert a `tomlz` table into a `std.json.Value` object map.
 pub fn tableToJson(allocator: std.mem.Allocator, table: *tomlz.parser.Table) error{OutOfMemory}!std.json.Value {
     var obj = std.json.ObjectMap.init(allocator);
     errdefer obj.deinit();
@@ -279,6 +299,7 @@ pub fn tableToJson(allocator: std.mem.Allocator, table: *tomlz.parser.Table) err
     return std.json.Value{ .object = obj };
 }
 
+/// Look up a value by dot-separated key path (e.g. `"extra.owner"`).
 pub fn get(self: FrontMatter, path: []const u8) ?std.json.Value {
     return jsonFindByPath(self.root, path);
 }
