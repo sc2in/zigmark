@@ -2,6 +2,32 @@
 
 This document tracks the work needed to achieve full CommonMark 0.30 specification compliance.
 
+**Current score: 256 / 655 (39%) — 51 unit tests passing, 0 memory leaks**
+
+Per-section breakdown (via `zig build spec`):
+
+| Section | Pass | Fail | Total |
+|---------|------|------|-------|
+| ATX headings | 14 | 4 | 18 |
+| Setext headings | 14 | 13 | 27 |
+| Thematic breaks | 13 | 6 | 19 |
+| Paragraphs | 5 | 3 | 8 |
+| Blank lines | 1 | 0 | 1 |
+| Indented code | 1 | 11 | 12 |
+| Fenced code | 5 | 24 | 29 |
+| Lists | 17 | 50 | 67 |
+| Backslash escapes | 3 | 10 | 13 |
+| Entities | 2 | 15 | 17 |
+| Code spans | 10 | 12 | 22 |
+| **Emphasis** | **44** | **88** | **132** |
+| **Links** | **62** | **55** | **117** |
+| Images | 7 | 15 | 22 |
+| Autolinks | 12 | 7 | 19 |
+| Raw HTML | 11 | 10 | 21 |
+| Hard line breaks | 5 | 10 | 15 |
+| Soft line breaks | 2 | 0 | 2 |
+| Textual content | 3 | 0 | 3 |
+
 ## Block Elements
 
 ### Headings
@@ -18,10 +44,14 @@ This document tracks the work needed to achieve full CommonMark 0.30 specificati
 
 ### Link References
 
-- [ ] **Link reference definitions** - `[label]: url "title"` syntax
-  - Parse reference definitions from document
-  - Support inline, reference, collapsed, and shortcut link styles
-  - Handle case-insensitive matching with Unicode case folding
+- [x] **Link reference definitions** - `[label]: url "title"` syntax
+  - Two-pass architecture: first pass collects ref defs, second pass builds AST
+  - Case-insensitive label matching with whitespace normalisation
+  - First definition wins (per CommonMark spec)
+  - Supports all three title delimiter styles (`"`, `'`, `(…)`)
+- [x] **Reference links (full style)** - `[text][label]`
+- [x] **Reference links (collapsed)** - `[text][]`
+- [x] **Reference links (shortcut)** - `[text]` with definition elsewhere
 
 ### Paragraph/List Behavior
 
@@ -54,11 +84,12 @@ This document tracks the work needed to achieve full CommonMark 0.30 specificati
 
 ### Links
 
-- [ ] **Reference links (full style)** - `[text][label]`
-- [ ] **Reference links (collapsed)** - `[text][]`
-- [ ] **Reference links (shortcut)** - `[text]` with definition elsewhere
-- [ ] **Proper link destination parsing** - Space handling, escaping, etc.
-- [x] **Link titles** - Support `"` and `'` quote styles (parenthesis style not yet implemented)
+- [x] **Reference links (full style)** - `[text][label]`
+- [x] **Reference links (collapsed)** - `[text][]`
+- [x] **Reference links (shortcut)** - `[text]` with definition elsewhere
+- [x] **Proper link destination parsing** - Nested parentheses, angle-bracket destinations, backslash escapes, space rejection in bare URLs
+- [x] **Link titles** - Support `"`, `'`, and `(…)` quote styles
+- [ ] **Nested links** - Links inside link text (CommonMark forbids nesting)
 
 ### Autolinks
 
@@ -140,33 +171,51 @@ This document tracks the work needed to achieve full CommonMark 0.30 specificati
 - [ ] **Paragraph interruption rules** - Various block types can interrupt
 - [ ] **Container nesting** - Proper nesting of blockquotes, lists, etc.
 - [ ] **Reference link definition placement** - Can occur anywhere, affects whole document
+  - *(Partially done — two-pass architecture implemented, but ref defs inside blockquotes/lists not yet fully handled)*
 
 ## Currently Implemented ✅
 
-- ✅ Basic ATX headings (`#` to `######`)
-- ✅ Setext headings (`===` and `---` underlines)
-- ✅ Paragraphs (basic)
-- ✅ Basic emphasis/strong (`*` and `_` variants)
-- ✅ Basic inline links `[text](url)`
-- ✅ Link titles (`"` and `'` quote styles)
-- ✅ Basic images `![alt](url)`
-- ✅ Autolinks (`<uri>` and `<email>`)
-- ✅ Unordered and ordered lists (basic)
+- ✅ Basic ATX headings (`#` to `######`) — 14/18 passing
+- ✅ Setext headings (`===` and `---` underlines) — 14/27 passing
+- ✅ Paragraphs (basic) — 5/8 passing
+- ✅ Basic emphasis/strong (`*` and `_` variants) — 44/132 passing
+- ✅ Inline links `[text](url)` with nested parens, angle-bracket destinations, backslash escapes
+- ✅ Link reference definitions `[label]: url "title"` — two-pass architecture
+- ✅ Reference links: full `[text][label]`, collapsed `[text][]`, shortcut `[text]`
+- ✅ Link titles (all three quote styles: `"`, `'`, `(…)`)
+- ✅ URL percent-encoding in rendered HTML (`writeUrlEncoded`)
+- ✅ Basic images `![alt](url)` — 7/22 passing
+- ✅ Autolinks (`<uri>` and `<email>`) — 12/19 passing
+- ✅ Unordered and ordered lists (basic) — 17/67 passing
 - ✅ Loose vs tight list detection
 - ✅ Blockquotes (basic, with lazy continuation)
-- ✅ Code spans (basic)
-- ✅ Fenced code blocks (with info strings)
+- ✅ Code spans (basic) — 10/22 passing
+- ✅ Fenced code blocks (with info strings) — 5/29 passing
 - ✅ Indented code blocks (4-space / tab)
-- ✅ Thematic breaks
-- ✅ Backslash escapes of ASCII punctuation
-- ✅ Soft breaks and hard breaks (2+ trailing spaces)
+- ✅ Thematic breaks — 13/19 passing
+- ✅ Backslash escapes of ASCII punctuation — 3/13 passing
+- ✅ Soft breaks and hard breaks (2+ trailing spaces) — 7/17 passing
 - ✅ Line ending normalization (CRLF, CR, LF)
 - ✅ Footnotes (extension, not in CommonMark)
-- ✅ Frontmatter support (YAML/TOML - extension, not in CommonMark)
+- ✅ Frontmatter support (YAML/TOML — extension, not in CommonMark)
 
 ## Testing
 
 - [x] Run CommonMark spec test suite (<https://github.com/commonmark/commonmark-spec/blob/master/test/spec_tests.py>)
 - [x] Implement test runner for spec examples
 - [x] Track compliance percentage
+- [x] Per-section spec build steps (`zig build spec`, `zig build spec-emphasis`, etc.)
+- [x] Verbose failure output per section (`zig build spec-links` shows each failing example)
+- [x] Comprehensive docstrings on all public API members (auto-doc generation via `zig build docs`)
 - [ ] Document any intentional deviations from spec
+
+## Biggest Opportunities (by failing test count)
+
+1. **Emphasis** — 88 failures (needs left/right flanking delimiter run algorithm)
+2. **Links** — 55 failures (edge cases: nested links, entity handling in URLs, etc.)
+3. **Lists** — 50 failures (indentation, interruption, nested content)
+4. **Fenced code** — 24 failures (indentation stripping, closing fence rules)
+5. **Entities** — 15 failures (HTML entity & numeric character reference resolution)
+6. **Images** — 15 failures (reference images, nested alt text)
+7. **Setext headings** — 13 failures (interaction with other block types)
+8. **Code spans** — 12 failures (multi-backtick, stripping, line ending handling)
