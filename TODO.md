@@ -166,7 +166,7 @@ This document tracks the work needed to achieve full CommonMark 0.30 specificati
 
 ## Testing
 
-- [ ] Run CommonMark spec test suite (<https://github.com/commonmark/commonmark-spec/blob/master/test/spec_tests.py>)
-- [ ] Implement test runner for spec examples
-- [ ] Track compliance percentage
+- [x] Run CommonMark spec test suite (<https://github.com/commonmark/commonmark-spec/blob/master/test/spec_tests.py>)
+- [x] Implement test runner for spec examples
+- [x] Track compliance percentage
 - [ ] Document any intentional deviations from spec

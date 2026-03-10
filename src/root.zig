@@ -229,9 +229,15 @@ pub fn parseSpecTests(allocator: std.mem.Allocator, spec_content: []const u8) !s
     var start_line: usize = 0;
     var example_number: usize = 0;
     var markdown_lines = std.ArrayList([]const u8){};
-    defer markdown_lines.deinit(alloc);
+    defer {
+        for (markdown_lines.items) |l| alloc.free(l);
+        markdown_lines.deinit(alloc);
+    }
     var html_lines = std.ArrayList([]const u8){};
-    defer html_lines.deinit(alloc);
+    defer {
+        for (html_lines.items) |l| alloc.free(l);
+        html_lines.deinit(alloc);
+    }
     var state: u8 = 0; // 0: regular text, 1: markdown example, 2: html output
     var current_section: []const u8 = "Unknown";
 
@@ -533,26 +539,28 @@ test "enhanced parse and render with dot notation" {
 
 // CommonMark specification compliance test
 test "CommonMark spec compliance" {
-    const allocator = std.testing.allocator;
-    _ = allocator; // autofix
-    std.debug.print("Commonmark tests disabled\n", .{});
+    var arena = std.heap.ArenaAllocator.init(tst.allocator);
+    defer arena.deinit();
+
+    const allocator = arena.allocator();
+    // std.debug.print("Commonmark tests disabled\n", .{});
 
     // Run embedded spec tests
-    // const result = try runCommonMarkSpecTests(allocator, null, .{
-    //     .normalize = true,
-    //     .verbose = false,
-    // });
+    const result = try runCommonMarkSpecTests(allocator, "./src/markdown/spec.txt", .{
+        .normalize = true,
+        .verbose = false,
+    });
 
-    // std.debug.print("CommonMark spec test results: {}\n", .{result});
+    std.debug.print("CommonMark spec test results: {any}\n", .{result});
 
     // We expect some tests to pass (implementation is basic)
-    // try testing.expect(result.total() > 0);
+    try testing.expect(result.total() > 0);
 
     // Log detailed results
-    // if (result.failed > 0) {
-    //     std.debug.print("Warning: {d} CommonMark spec tests failed\n", .{result.failed});
-    //     std.debug.print("This is expected as the parser implementation is still basic\n", .{});
-    // }
+    if (result.failed > 0) {
+        std.debug.print("Warning: {d} CommonMark spec tests failed\n", .{result.failed});
+        std.debug.print("This is expected as the parser implementation is still basic\n", .{});
+    }
 }
 
 // CommonMark specification compliance test
