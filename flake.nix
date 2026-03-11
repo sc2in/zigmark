@@ -47,6 +47,7 @@
           ];
 
           shellHook = ''
+            export ZIG_GLOBAL_CACHE_DIR=.zig-cache
             # Auto-generate/update zon2json-lock when entering the dev shell.
             # This requires network access, which the dev shell has but nix build does not.
             if [ -f build.zig.zon ]; then

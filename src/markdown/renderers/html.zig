@@ -33,12 +33,23 @@ fn writeUrlEncoded(writer: anytype, s: []const u8) !void {
         const c = s[i];
         if (c == '&') {
             try writer.writeAll("&amp;");
-        } else if (c == '\'') {
-            try writer.writeAll("&amp;");
         } else if (c == '"') {
             try writer.writeAll("&quot;");
+        } else if (c == '\'') {
+            try writer.writeAll("%27");
         } else if (c == ' ') {
             try writer.writeAll("%20");
+        } else if (c == '\\') {
+            // Backslash escape in URL context: if followed by ASCII punct, consume the
+            // backslash and encode the punctuation char; otherwise encode the backslash.
+            if (i + 1 < s.len and isAsciiPunctuation(s[i + 1])) {
+                // Output the escaped character directly (it's the literal char)
+                try writer.writeByte(s[i + 1]);
+                i += 2;
+                continue;
+            } else {
+                try writer.writeAll("%5C");
+            }
         } else if (c == '%' and i + 2 < s.len and isHexDigit(s[i + 1]) and isHexDigit(s[i + 2])) {
             // Already percent-encoded — pass through
             try writer.writeByte('%');
@@ -53,6 +64,40 @@ fn writeUrlEncoded(writer: anytype, s: []const u8) !void {
             try writer.writeByte(c);
         }
         i += 1;
+    }
+}
+
+fn isAsciiPunctuation(c: u8) bool {
+    return (c >= '!' and c <= '/') or (c >= ':' and c <= '@') or
+        (c >= '[' and c <= '`') or (c >= '{' and c <= '~');
+}
+
+/// Write text with backslash escape processing + HTML escaping.
+/// Backslash-escaped ASCII punctuation chars have the backslash removed.
+fn writeEscapedWithBackslash(writer: anytype, s: []const u8) !void {
+    var i: usize = 0;
+    while (i < s.len) {
+        const c = s[i];
+        if (c == '\\' and i + 1 < s.len and isAsciiPunctuation(s[i + 1])) {
+            // Write the escaped character with HTML escaping
+            switch (s[i + 1]) {
+                '&' => try writer.writeAll("&amp;"),
+                '<' => try writer.writeAll("&lt;"),
+                '>' => try writer.writeAll("&gt;"),
+                '"' => try writer.writeAll("&quot;"),
+                else => try writer.writeByte(s[i + 1]),
+            }
+            i += 2;
+        } else {
+            switch (c) {
+                '&' => try writer.writeAll("&amp;"),
+                '<' => try writer.writeAll("&lt;"),
+                '>' => try writer.writeAll("&gt;"),
+                '"' => try writer.writeAll("&quot;"),
+                else => try writer.writeByte(c),
+            }
+            i += 1;
+        }
     }
 }
 
@@ -88,7 +133,7 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
             try writer.writeByte('"');
             if (l.destination.title) |title| {
                 try writer.writeAll(" title=\"");
-                try writeEscaped(writer, title);
+                try writeEscapedWithBackslash(writer, title);
                 try writer.writeByte('"');
             }
             try writer.writeByte('>');
