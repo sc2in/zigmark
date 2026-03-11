@@ -2,28 +2,28 @@
 
 This document tracks the work needed to achieve full CommonMark 0.30 specification compliance.
 
-**Current score: 256 / 655 (39%) — 51 unit tests passing, 0 memory leaks**
+**Current score: 341 / 564 (60%) — spec tests passing, 0 memory leaks**
 
 Per-section breakdown (via `zig build spec`):
 
 | Section | Pass | Fail | Total |
 |---------|------|------|-------|
-| ATX headings | 14 | 4 | 18 |
-| Setext headings | 14 | 13 | 27 |
-| Thematic breaks | 13 | 6 | 19 |
+| ATX headings | 12 | 6 | 18 |
+| Setext headings | 15 | 12 | 27 |
+| Thematic breaks | 14 | 5 | 19 |
 | Paragraphs | 5 | 3 | 8 |
 | Blank lines | 1 | 0 | 1 |
 | Indented code | 1 | 11 | 12 |
-| Fenced code | 5 | 24 | 29 |
+| Fenced code | 7 | 22 | 29 |
 | Lists | 17 | 50 | 67 |
-| Backslash escapes | 3 | 10 | 13 |
+| Backslash escapes | 5 | 8 | 13 |
 | Entities | 2 | 15 | 17 |
-| Code spans | 10 | 12 | 22 |
-| **Emphasis** | **44** | **88** | **132** |
-| **Links** | **62** | **55** | **117** |
-| Images | 7 | 15 | 22 |
+| Code spans | 17 | 5 | 22 |
+| **Emphasis** | **124** | **8** | **132** |
+| **Links** | **73** | **44** | **117** |
+| Images | 14 | 8 | 22 |
 | Autolinks | 12 | 7 | 19 |
-| Raw HTML | 11 | 10 | 21 |
+| Raw HTML | 12 | 9 | 21 |
 | Hard line breaks | 5 | 10 | 15 |
 | Soft line breaks | 2 | 0 | 2 |
 | Textual content | 3 | 0 | 3 |
@@ -76,11 +76,11 @@ Per-section breakdown (via `zig build spec`):
 
 ### Emphasis and Strong Emphasis
 
-- [ ] **Proper emphasis/strong emphasis rules** - Complex delimiter matching
+- [x] **Proper emphasis/strong emphasis rules** - Complex delimiter matching
   - 17 rules for emphasis from CommonMark spec
   - Left/right-flanking delimiter runs
   - Can open/close emphasis based on surrounding characters
-  - Proper precedence with other inline elements
+  - 124/132 passing (8 remaining edge cases)
 
 ### Links
 
@@ -175,25 +175,25 @@ Per-section breakdown (via `zig build spec`):
 
 ## Currently Implemented ✅
 
-- ✅ Basic ATX headings (`#` to `######`) — 14/18 passing
-- ✅ Setext headings (`===` and `---` underlines) — 14/27 passing
+- ✅ Basic ATX headings (`#` to `######`) — 12/18 passing
+- ✅ Setext headings (`===` and `---` underlines) — 15/27 passing
 - ✅ Paragraphs (basic) — 5/8 passing
-- ✅ Basic emphasis/strong (`*` and `_` variants) — 44/132 passing
+- ✅ Emphasis/strong (`*` and `_` variants) — 124/132 passing
 - ✅ Inline links `[text](url)` with nested parens, angle-bracket destinations, backslash escapes
 - ✅ Link reference definitions `[label]: url "title"` — two-pass architecture
 - ✅ Reference links: full `[text][label]`, collapsed `[text][]`, shortcut `[text]`
 - ✅ Link titles (all three quote styles: `"`, `'`, `(…)`)
 - ✅ URL percent-encoding in rendered HTML (`writeUrlEncoded`)
-- ✅ Basic images `![alt](url)` — 7/22 passing
+- ✅ Images `![alt](url)` — 14/22 passing
 - ✅ Autolinks (`<uri>` and `<email>`) — 12/19 passing
 - ✅ Unordered and ordered lists (basic) — 17/67 passing
 - ✅ Loose vs tight list detection
 - ✅ Blockquotes (basic, with lazy continuation)
-- ✅ Code spans (basic) — 10/22 passing
-- ✅ Fenced code blocks (with info strings) — 5/29 passing
+- ✅ Code spans — 17/22 passing
+- ✅ Fenced code blocks (with info strings) — 7/29 passing
 - ✅ Indented code blocks (4-space / tab)
-- ✅ Thematic breaks — 13/19 passing
-- ✅ Backslash escapes of ASCII punctuation — 3/13 passing
+- ✅ Thematic breaks — 14/19 passing
+- ✅ Backslash escapes of ASCII punctuation — 5/13 passing
 - ✅ Soft breaks and hard breaks (2+ trailing spaces) — 7/17 passing
 - ✅ Line ending normalization (CRLF, CR, LF)
 - ✅ Footnotes (extension, not in CommonMark)
@@ -211,11 +211,14 @@ Per-section breakdown (via `zig build spec`):
 
 ## Biggest Opportunities (by failing test count)
 
-1. **Emphasis** — 88 failures (needs left/right flanking delimiter run algorithm)
-2. **Links** — 55 failures (edge cases: nested links, entity handling in URLs, etc.)
-3. **Lists** — 50 failures (indentation, interruption, nested content)
-4. **Fenced code** — 24 failures (indentation stripping, closing fence rules)
-5. **Entities** — 15 failures (HTML entity & numeric character reference resolution)
-6. **Images** — 15 failures (reference images, nested alt text)
-7. **Setext headings** — 13 failures (interaction with other block types)
-8. **Code spans** — 12 failures (multi-backtick, stripping, line ending handling)
+1. **Lists** — 50 failures (indentation, interruption, nested content)
+2. **Links** — 44 failures (edge cases: nested links, entity handling in URLs, etc.)
+3. **Fenced code** — 22 failures (indentation stripping, closing fence rules)
+4. **Entities** — 15 failures (HTML entity & numeric character reference resolution)
+5. **Setext headings** — 12 failures (interaction with other block types)
+6. **Indented code** — 11 failures (tab handling, interaction with other blocks)
+7. **Hard line breaks** — 10 failures (trailing spaces, backslash breaks)
+8. **Raw HTML** — 9 failures (HTML block types, inline HTML parsing)
+9. **Images** — 8 failures (reference images, nested alt text)
+10. **Emphasis** — 8 failures (remaining edge cases)
+11. **Backslash escapes** — 8 failures (escaping in various contexts)

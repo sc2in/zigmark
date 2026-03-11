@@ -10,14 +10,22 @@ A simple and efficient markdown parser and renderer library for Zig. Converts Co
 - **Inline Elements**:
   - Bold text with `**text**` or `__text__`
   - Italic text with `_text_` or `*text*`
-  - Links with `[text](url)` syntax
+  - Code spans with `` `code` `` syntax
+  - Links with `[text](url)` and reference-style `[text][ref]` syntax
+  - Images with `![alt](url)` and reference-style syntax
+  - Autolinks with `<url>` and `<email>` syntax
+  - Backslash escapes of ASCII punctuation
+  - Hard line breaks (trailing spaces and backslash)
   - Footnotes with `[^label]` references
 - **Block Elements**:
   - Paragraphs
-  - Lists (both ordered and unordered)
+  - ATX headings (`#` to `######`) and setext headings
+  - Lists (both ordered and unordered, loose and tight)
   - Blockquotes with `>`
-  - Code blocks
+  - Fenced code blocks (with info strings) and indented code blocks
   - Thematic breaks
+  - Link reference definitions
+  - Raw HTML blocks
 - **Frontmatter Support**:
   - YAML frontmatter parsing
   - TOML frontmatter parsing
@@ -178,25 +186,21 @@ zig build test
 
 Priority features and improvements planned for future releases:
 
-1. **CommonMark Spec Compliance**: Full compliance with CommonMark specification test suite (tracked in TODO)
-2. **Additional Inline Elements**:
-   - Code spans with backticks
+1. **CommonMark Spec Compliance**: 341/564 (60%) spec tests passing — tracked in [TODO.md](TODO.md)
+2. **Extended Syntax Support**:
+   - Tables (GFM-style)
    - Strikethrough with `~~text~~`
-   - Superscript and subscript
+   - Task lists
+   - Definition lists
 3. **HTML Attributes**: Support for custom attributes on HTML elements
 4. **Additional Renderers**:
    - Markdown-to-Markdown normalization
    - LaTeX output renderer
    - Plain text renderer
 5. **Performance Optimization**: Streaming parser for large documents
-6. **Extended Syntax Support**:
-   - Tables (GFM-style)
-   - Task lists
-   - Definition lists
-7. **Error Recovery**: Better error messages and recovery during parsing
-8. **AST Modification API**: Programmatic manipulation of parsed documents
-9. **Reference-style Links**: Complete support for `[text][ref]` style links
-10. **Container Blocks**: Support for nested block structures and custom containers
+6. **Error Recovery**: Better error messages and recovery during parsing
+7. **AST Modification API**: Programmatic manipulation of parsed documents
+8. **Container Blocks**: Support for nested block structures and custom containers
 
 ## License
 
