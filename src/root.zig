@@ -170,6 +170,7 @@ pub const SpecTest = struct {
     end_line: usize,
     section: []const u8,
     time_ns: i128 = 0,
+    actual: ?[]const u8 = null,
 };
 
 /// Aggregate pass / fail / error / skip counts for a spec-test run.
@@ -342,7 +343,11 @@ fn runSpecTest(allocator: std.mem.Allocator, test_case: *SpecTest, normalize: bo
     const t2 = std.time.nanoTimestamp();
     test_case.*.time_ns = t2 - t1;
 
-    return std.mem.eql(u8, expected, actual);
+    const passed = std.mem.eql(u8, expected, actual);
+    if (!passed) {
+        test_case.*.actual = allocator.dupe(u8, actual_html) catch null;
+    }
+    return passed;
 }
 
 /// Main test runner function for CommonMark specification compliance
@@ -433,6 +438,9 @@ pub fn runCommonMarkSpecTests(allocator: std.mem.Allocator, spec_file_path: ?[]c
                 std.log.warn("  Section: {s}", .{test_case.section});
                 std.log.warn("  Markdown: {s}", .{test_case.markdown});
                 std.log.warn("  Expected: {s}", .{test_case.html});
+                if (test_case.actual) |actual| {
+                    std.log.warn("  Actual:   {s}", .{actual});
+                }
             }
         }
     }
