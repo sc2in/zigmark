@@ -154,7 +154,7 @@ test "enhanced parse and render" {
         "<p>a footnote<a href=\"#fn:SCF:GOV-01\" class=\"footnote-ref\">SCF:GOV-01</a>\n" ++
         "a footnote<a href=\"#fn:2\" class=\"footnote-ref\">2</a></p>\n" ++
         "<h2>Heading 2</h2>\n" ++
-        "<div class=\"footnote\" id=\"fn:SCF:GOV-01\">\n<p><b>SCF:GOV-01</b>: Footnote 1</p>\n</div>\n" ++
+        "<p><a href=\"#fn:SCF:GOV-01\" class=\"footnote-ref\">SCF:GOV-01</a>: Footnote 1</p>\n" ++
         "<div class=\"footnote\" id=\"fn:2\">\n<p><b>2</b>: Footnote 2</p>\n</div>\n", h);
 }
 
@@ -627,7 +627,9 @@ test "CommonMark spec compliance" {
 
 // CommonMark specification compliance test
 test "Policy render" {
-    const allocator = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(tst.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     const test_policy =
         \\---
