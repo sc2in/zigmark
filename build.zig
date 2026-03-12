@@ -26,6 +26,7 @@ pub fn build(b: *std.Build) void {
     const zigmark = b.addModule("zigmark", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
+        .optimize = optimize,
     });
     zigmark.addImport("tomlz", tomlz.module("tomlz"));
     zigmark.addImport("yaml", yaml.module("yaml"));
