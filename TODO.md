@@ -2,25 +2,25 @@
 
 This document tracks the work needed to achieve full CommonMark 0.30 specification compliance.
 
-**Current score: 341 / 564 (60%) — spec tests passing, 0 memory leaks**
+**Current score: 421 / 564 (75%) — spec tests passing, 0 memory leaks**
 
 Per-section breakdown (via `zig build spec`):
 
 | Section | Pass | Fail | Total |
 |---------|------|------|-------|
 | ATX headings | 12 | 6 | 18 |
-| Setext headings | 15 | 12 | 27 |
-| Thematic breaks | 14 | 5 | 19 |
-| Paragraphs | 5 | 3 | 8 |
+| Setext headings | 18 | 9 | 27 |
+| Thematic breaks | 16 | 3 | 19 |
+| Paragraphs | 7 | 1 | 8 |
 | Blank lines | 1 | 0 | 1 |
-| Indented code | 1 | 11 | 12 |
-| Fenced code | 7 | 22 | 29 |
-| Lists | 17 | 50 | 67 |
-| Backslash escapes | 5 | 8 | 13 |
-| Entities | 2 | 15 | 17 |
+| Indented code | 11 | 1 | 12 |
+| Fenced code | 20 | 9 | 29 |
+| **Lists** | **62** | **5** | **67** |
+| Backslash escapes | 7 | 6 | 13 |
+| Entities | 3 | 14 | 17 |
 | Code spans | 17 | 5 | 22 |
 | **Emphasis** | **124** | **8** | **132** |
-| **Links** | **73** | **44** | **117** |
+| **Links** | **75** | **42** | **117** |
 | Images | 14 | 8 | 22 |
 | Autolinks | 12 | 7 | 19 |
 | Raw HTML | 12 | 9 | 21 |
@@ -120,15 +120,20 @@ Per-section breakdown (via `zig build spec`):
 
 ### List Processing
 
-- [x] **Loose vs tight lists** - Proper `<p>` tag insertion logic
+- [x] **Loose vs tight lists** - Proper `<p>` tag insertion logic — 62/67 passing
   - Blank lines between items trigger loose list
-  - Blank lines within items trigger loose list
+  - Blank lines within items trigger loose list (excluding blanks inside code blocks or nested lists)
   - Affects HTML rendering
-- [ ] **Indentation in list items** - Correct spacing rules for nested content
-  - 4-space rule for content within list items
-  - Proper nesting of code blocks, blockquotes, etc.
-- [ ] **List interruption** - Only ordered lists starting with `1` can interrupt paragraphs
-  - Prevent false list detection in wrapped text
+- [x] **Multi-line list items** - Content column–based continuation
+  - Lines indented to the content column are collected into the item
+  - Recursive block parsing of item content (nested code blocks, blockquotes, sub-lists)
+- [x] **List interruption** - Only ordered lists starting with `1` can interrupt paragraphs
+  - Empty list items cannot interrupt paragraphs
+  - Bullet lists can interrupt paragraphs (if non-empty)
+- [x] **Indentation in list items** - Content column computation for bullet and ordered markers
+  - Proper nesting of code blocks, blockquotes, etc. within items
+- [ ] **Lazy continuation lines in lists** - Paragraph continuation without full indentation
+  - 5 remaining failures (261, 310, 311, 314, 323) depend on blockquote lazy continuation, HTML block recognition, and lazy paragraph continuation
 
 ### Blockquotes
 
@@ -176,24 +181,26 @@ Per-section breakdown (via `zig build spec`):
 ## Currently Implemented ✅
 
 - ✅ Basic ATX headings (`#` to `######`) — 12/18 passing
-- ✅ Setext headings (`===` and `---` underlines) — 15/27 passing
-- ✅ Paragraphs (basic) — 5/8 passing
+- ✅ Setext headings (`===` and `---` underlines) — 18/27 passing
+- ✅ Paragraphs (basic) — 7/8 passing
 - ✅ Emphasis/strong (`*` and `_` variants) — 124/132 passing
 - ✅ Inline links `[text](url)` with nested parens, angle-bracket destinations, backslash escapes
 - ✅ Link reference definitions `[label]: url "title"` — two-pass architecture
-- ✅ Reference links: full `[text][label]`, collapsed `[text][]`, shortcut `[text]`
+- ✅ Reference links: full `[text][label]`, collapsed `[text][]`, shortcut `[text]` — 75/117 passing
 - ✅ Link titles (all three quote styles: `"`, `'`, `(…)`)
 - ✅ URL percent-encoding in rendered HTML (`writeUrlEncoded`)
 - ✅ Images `![alt](url)` — 14/22 passing
 - ✅ Autolinks (`<uri>` and `<email>`) — 12/19 passing
-- ✅ Unordered and ordered lists (basic) — 17/67 passing
-- ✅ Loose vs tight list detection
+- ✅ Unordered and ordered lists (multi-line, nested) — 62/67 passing
+- ✅ Loose vs tight list detection (blank lines in code blocks/nested lists excluded)
+- ✅ List interruption rules (empty items can't interrupt; ordered must start with 1)
+- ✅ Content column–based list item continuation and recursive block parsing
 - ✅ Blockquotes (basic, with lazy continuation)
 - ✅ Code spans — 17/22 passing
-- ✅ Fenced code blocks (with info strings) — 7/29 passing
-- ✅ Indented code blocks (4-space / tab)
-- ✅ Thematic breaks — 14/19 passing
-- ✅ Backslash escapes of ASCII punctuation — 5/13 passing
+- ✅ Fenced code blocks (with info strings) — 20/29 passing
+- ✅ Indented code blocks (4-space / tab) — 11/12 passing
+- ✅ Thematic breaks — 16/19 passing
+- ✅ Backslash escapes of ASCII punctuation — 7/13 passing
 - ✅ Soft breaks and hard breaks (2+ trailing spaces) — 7/17 passing
 - ✅ Line ending normalization (CRLF, CR, LF)
 - ✅ Footnotes (extension, not in CommonMark)
@@ -211,14 +218,16 @@ Per-section breakdown (via `zig build spec`):
 
 ## Biggest Opportunities (by failing test count)
 
-1. **Lists** — 50 failures (indentation, interruption, nested content)
-2. **Links** — 44 failures (edge cases: nested links, entity handling in URLs, etc.)
-3. **Fenced code** — 22 failures (indentation stripping, closing fence rules)
-4. **Entities** — 15 failures (HTML entity & numeric character reference resolution)
-5. **Setext headings** — 12 failures (interaction with other block types)
-6. **Indented code** — 11 failures (tab handling, interaction with other blocks)
-7. **Hard line breaks** — 10 failures (trailing spaces, backslash breaks)
-8. **Raw HTML** — 9 failures (HTML block types, inline HTML parsing)
-9. **Images** — 8 failures (reference images, nested alt text)
-10. **Emphasis** — 8 failures (remaining edge cases)
-11. **Backslash escapes** — 8 failures (escaping in various contexts)
+1. **Links** — 42 failures (edge cases: nested links, entity handling in URLs, etc.)
+2. **Entities** — 14 failures (HTML entity & numeric character reference resolution)
+3. **Hard line breaks** — 10 failures (trailing spaces, backslash breaks)
+4. **Fenced code** — 9 failures (indentation stripping, closing fence rules)
+5. **Setext headings** — 9 failures (interaction with other block types)
+6. **Raw HTML** — 9 failures (HTML block types, inline HTML parsing)
+7. **Images** — 8 failures (reference images, nested alt text)
+8. **Emphasis** — 8 failures (remaining edge cases)
+9. **Autolinks** — 7 failures (edge cases)
+10. **ATX headings** — 6 failures
+11. **Backslash escapes** — 6 failures (escaping in various contexts)
+12. **Lists** — 5 failures (blockquote lazy continuation, HTML blocks, lazy paragraph continuation)
+13. **Code spans** — 5 failures
