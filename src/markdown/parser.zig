@@ -340,15 +340,166 @@ fn isSetextDashLine(line: []const u8) bool {
     return true;
 }
 
+/// Compute the number of leading spaces on a raw line.
+fn countLeadingSpaces(line: []const u8) usize {
+    var n: usize = 0;
+    for (line) |c| {
+        if (c == ' ') {
+            n += 1;
+        } else if (c == '\t') {
+            n += 4 - (n % 4);
+        } else break;
+    }
+    return n;
+}
+
+/// For a bullet list marker, compute the content column.
+/// Returns the column where content starts (marker indent + marker + spaces after marker),
+/// or null if not a valid bullet list item.
+fn bulletListContentColumn(line: []const u8) ?struct { col: usize, marker: u8 } {
+    var pos: usize = 0;
+    var col: usize = 0;
+    // Skip 0-3 leading spaces
+    while (pos < line.len and col < 4 and (line[pos] == ' ' or line[pos] == '\t')) {
+        if (line[pos] == '\t') {
+            col += 4 - (col % 4);
+        } else {
+            col += 1;
+        }
+        pos += 1;
+    }
+    if (col >= 4) return null;
+    if (pos >= line.len) return null;
+    const marker = line[pos];
+    if (marker != '-' and marker != '*' and marker != '+') return null;
+    pos += 1;
+    col += 1;
+    // Must be followed by at least one space (or end of line for blank item)
+    if (pos >= line.len) return .{ .col = col + 1, .marker = marker }; // blank item
+    if (line[pos] != ' ' and line[pos] != '\t') return null;
+    // Count spaces after marker (at least 1, content column is where first non-space is)
+    const marker_col = col;
+    while (pos < line.len and (line[pos] == ' ' or line[pos] == '\t')) {
+        if (line[pos] == '\t') {
+            col += 4 - (col % 4);
+        } else {
+            col += 1;
+        }
+        pos += 1;
+    }
+    // If the rest of the line is blank, content column is marker_col + 1
+    if (pos >= line.len) return .{ .col = marker_col + 1, .marker = marker };
+    // CommonMark: if indentation from marker to content is > 4, it's code
+    // and the effective content column is marker_col + 1
+    if (col - marker_col > 4) return .{ .col = marker_col + 1, .marker = marker };
+    return .{ .col = col, .marker = marker };
+}
+
+/// For an ordered list marker, compute the content column.
+/// Returns the column where content starts, the number, and delimiter.
+fn orderedListContentColumn(line: []const u8) ?struct { col: usize, num: u32, delimiter: u8 } {
+    var pos: usize = 0;
+    var col: usize = 0;
+    // Skip 0-3 leading spaces
+    while (pos < line.len and col < 4 and (line[pos] == ' ' or line[pos] == '\t')) {
+        if (line[pos] == '\t') {
+            col += 4 - (col % 4);
+        } else {
+            col += 1;
+        }
+        pos += 1;
+    }
+    if (col >= 4) return null;
+    // 1-9 digits
+    const digit_start = pos;
+    while (pos < line.len and line[pos] >= '0' and line[pos] <= '9') pos += 1;
+    const digit_count = pos - digit_start;
+    if (digit_count == 0 or digit_count > 9) return null;
+    col += digit_count;
+    // Delimiter: . or )
+    if (pos >= line.len) return null;
+    const delimiter = line[pos];
+    if (delimiter != '.' and delimiter != ')') return null;
+    pos += 1;
+    col += 1;
+    // Must be followed by at least one space (or end of line for blank item)
+    if (pos >= line.len) {
+        const num = std.fmt.parseInt(u32, line[digit_start .. digit_start + digit_count], 10) catch return null;
+        return .{ .col = col + 1, .num = num, .delimiter = delimiter };
+    }
+    if (line[pos] != ' ' and line[pos] != '\t') return null;
+    const marker_col = col;
+    while (pos < line.len and (line[pos] == ' ' or line[pos] == '\t')) {
+        if (line[pos] == '\t') {
+            col += 4 - (col % 4);
+        } else {
+            col += 1;
+        }
+        pos += 1;
+    }
+    const num = std.fmt.parseInt(u32, line[digit_start .. digit_start + digit_count], 10) catch return null;
+    if (pos >= line.len) return .{ .col = marker_col + 1, .num = num, .delimiter = delimiter };
+    if (col - marker_col > 4) return .{ .col = marker_col + 1, .num = num, .delimiter = delimiter };
+    return .{ .col = col, .num = num, .delimiter = delimiter };
+}
+
+/// Extract the content of a line relative to a content column.
+/// Returns the portion of the line starting at the content column, or null
+/// if the line is not indented to at least that column.
+fn extractLineContent(line: []const u8, content_col: usize) ?[]const u8 {
+    var pos: usize = 0;
+    var col: usize = 0;
+    while (pos < line.len and col < content_col) {
+        if (line[pos] == '\t') {
+            col += 4 - (col % 4);
+        } else if (line[pos] == ' ') {
+            col += 1;
+        } else break;
+        pos += 1;
+    }
+    if (col < content_col) return null;
+    // If we overshot (tab jumped past content_col), prepend spaces
+    return line[pos..];
+}
+
+/// Check whether a line is a blank bullet list item (marker followed by nothing).
+fn isBulletItemBlank(line: []const u8) bool {
+    const info = bulletListContentColumn(line) orelse return false;
+    _ = info;
+    const t = trimLine(line);
+    return t.len == 1 and (t[0] == '-' or t[0] == '*' or t[0] == '+');
+}
+
+/// Check whether a line is a blank ordered list item.
+fn isOrderedItemBlank(line: []const u8) bool {
+    const t = trimLine(line);
+    if (t.len < 2) return false;
+    var i: usize = 0;
+    while (i < t.len and t[i] >= '0' and t[i] <= '9') i += 1;
+    if (i == 0 or i >= t.len) return false;
+    if (t[i] != '.' and t[i] != ')') return false;
+    return i + 1 == t.len; // nothing after delimiter
+}
+
 /// Returns true when `t` (trimmed) starts a block that terminates a paragraph.
+/// Implements CommonMark list interruption rules:
+/// - Bullet lists can interrupt a paragraph (but not empty items)
+/// - Ordered lists can only interrupt a paragraph if they start with 1
+/// - Empty list items cannot interrupt a paragraph
 fn isParaBreak(allocator: Allocator, t: []const u8, raw: []const u8) bool {
     if (t.len == 0) return true;
     if (t[0] == '#') return true;
     if (t[0] == '>') return true;
-    if (parsers.tryBulletListItem(allocator, t) != null) return true;
-    if (parsers.tryOrderedListItem(allocator, t) != null) return true;
+    if (isThematicBreak(t)) return true;
+    // Bullet list items can interrupt paragraphs, but not empty ones
+    if (bulletListContentColumn(raw)) |_| {
+        if (!isBulletItemBlank(raw)) return true;
+    }
+    // Ordered list items can only interrupt paragraphs if they start with 1
+    if (orderedListContentColumn(raw)) |info| {
+        if (info.num == 1 and !isOrderedItemBlank(raw)) return true;
+    }
     if (parsers.tryFenceStart(raw) != null) return true;
-    if (parsers.tryIndentedCode(raw) != null) return true;
     if (parsers.tryFootnoteDef(allocator, t) != null) return true;
     if (isLinkRefDefLine(raw)) return true;
     return false;
@@ -365,13 +516,14 @@ fn isLinkRefDefLine(line: []const u8) bool {
 
 /// Quick check: is this line the start of a standalone block element?
 fn isStandaloneBlockStart(allocator: Allocator, line: []const u8) bool {
+    _ = allocator; // autofix
     const t = trimLine(line);
     if (t.len == 0) return true;
     if (t[0] == '#') return true;
     if (t[0] == '>') return true;
     if (isThematicBreak(t)) return true;
-    if (parsers.tryBulletListItem(allocator, t) != null) return true;
-    if (parsers.tryOrderedListItem(allocator, t) != null) return true;
+    if (bulletListContentColumn(line) != null) return true;
+    if (orderedListContentColumn(line) != null) return true;
     if (parsers.tryFenceStart(line) != null) return true;
     if (isLinkRefDefLine(line)) return true;
     return false;
@@ -1487,6 +1639,261 @@ fn collectLinkRefDefs(allocator: Allocator, input: []const u8, ref_map: *RefMap)
     }
 }
 
+const ListParseConfig = struct {
+    list_type: AST.ListType,
+    marker: u8, // for bullet lists: -, *, +
+    delimiter: u8, // for ordered lists: . or )
+    start_num: u32, // for ordered lists: starting number
+};
+
+const ListParseResult = struct {
+    list: AST.List,
+    next_line: usize,
+};
+
+/// Parse a complete list (bullet or ordered) starting at line index `start`.
+/// Collects multi-line items, handles continuation indentation, detects loose/tight,
+/// and recursively parses each item's content as blocks.
+fn parseList(
+    allocator: Allocator,
+    lines: []const []const u8,
+    start: usize,
+    ref_map: *const RefMap,
+    config: ListParseConfig,
+) anyerror!ListParseResult {
+    var list = AST.List.init(allocator, config.list_type);
+    if (config.list_type == .ordered) {
+        list.start = config.start_num;
+    }
+
+    var i = start;
+    var had_blank_between_items = false;
+    var any_item_has_blank = false;
+
+    while (i < lines.len) {
+        // Try to parse a list marker on this line
+        var content_col: usize = undefined;
+        var item_first_line: []const u8 = undefined;
+        var is_blank_item = false;
+
+        if (config.list_type == .unordered) {
+            const info = bulletListContentColumn(lines[i]) orelse break;
+            if (info.marker != config.marker) break;
+            content_col = info.col;
+            // Extract content after marker
+            item_first_line = extractFirstLineContent(lines[i], content_col);
+            is_blank_item = trimLine(item_first_line).len == 0;
+        } else {
+            const info = orderedListContentColumn(lines[i]) orelse break;
+            if (info.delimiter != config.delimiter) break;
+            content_col = info.col;
+            item_first_line = extractFirstLineContent(lines[i], content_col);
+            is_blank_item = trimLine(item_first_line).len == 0;
+        }
+
+        // Collect all lines belonging to this list item
+        var item_buf = std.ArrayList(u8){};
+        // Add the first line's content
+        try item_buf.appendSlice(allocator, item_first_line);
+        i += 1;
+
+        var saw_blank_in_item = false;
+        var consecutive_blanks: usize = 0;
+        var pending_blanks: usize = 0;
+
+        // Collect continuation lines
+        while (i < lines.len) {
+            const line = lines[i];
+
+            if (isBlankLine(line)) {
+                consecutive_blanks += 1;
+                pending_blanks += 1;
+                // For blank-start items, a blank line after the empty first line ends the item
+                // (at most one blank line allowed for blank-start items to pick up content)
+                if (is_blank_item and consecutive_blanks >= 1 and trimLine(item_buf.items).len == 0) break;
+                i += 1;
+                continue;
+            }
+            consecutive_blanks = 0;
+
+            // Check if this line starts a new list item at the same level
+            var is_new_sibling = false;
+            if (config.list_type == .unordered) {
+                if (bulletListContentColumn(line)) |new_info| {
+                    if (new_info.marker == config.marker and countLeadingSpaces(line) < content_col) {
+                        is_new_sibling = true;
+                    } else if (new_info.marker != config.marker and countLeadingSpaces(line) < content_col) {
+                        break; // Different marker, different list
+                    }
+                }
+            } else {
+                if (orderedListContentColumn(line)) |new_info| {
+                    if (new_info.delimiter == config.delimiter and
+                        countLeadingSpaces(line) < content_col)
+                    {
+                        is_new_sibling = true;
+                    }
+                }
+            }
+            if (is_new_sibling) break;
+
+            // Check if the line is indented to the content column
+            const leading = countLeadingSpaces(line);
+            if (leading >= content_col) {
+                // Continuation line: commit pending blank lines and strip indentation
+                if (pending_blanks > 0) {
+                    saw_blank_in_item = true;
+                    var b: usize = 0;
+                    while (b < pending_blanks) : (b += 1) {
+                        try item_buf.append(allocator, '\n');
+                    }
+                    pending_blanks = 0;
+                }
+                const stripped = stripIndent(line, content_col);
+                try item_buf.append(allocator, '\n');
+                try item_buf.appendSlice(allocator, stripped);
+                i += 1;
+            } else {
+                // Not indented enough — this line doesn't belong to the item.
+                // But check for lazy continuation (paragraph continuation):
+                if (pending_blanks > 0) break; // After a blank line, must be indented
+                // Lazy continuation only for paragraph text
+                const lt = trimLine(line);
+                if (lt.len == 0) break;
+                // If the line starts any block-level construct, it's not lazy
+                if (bulletListContentColumn(line) != null) break;
+                if (orderedListContentColumn(line) != null) break;
+                if (lt[0] == '#') break;
+                if (lt[0] == '>') break;
+                if (isThematicBreak(lt)) break;
+                if (parsers.tryFenceStart(line) != null) break;
+                // Lazy paragraph continuation
+                try item_buf.append(allocator, '\n');
+                try item_buf.appendSlice(allocator, lt);
+                i += 1;
+            }
+        }
+
+        // Track whether there were pending blank lines at the end of this item
+        // (they might be between this item and the next)
+        const had_pending_blanks = pending_blanks > 0;
+
+        // Parse the item's collected content as blocks
+        var item = AST.ListItem.init(allocator);
+        const item_content = try item_buf.toOwnedSlice(allocator);
+
+        if (trimLine(item_content).len > 0) {
+            var inner_parser = init();
+            var inner_doc = try inner_parser.parseMarkdownWithRefs(allocator, item_content, ref_map);
+            for (inner_doc.children.items) |block| {
+                try item.children.append(allocator, block);
+            }
+            inner_doc.children = std.ArrayList(AST.Block){};
+        }
+
+        // Determine if this item has blank lines separating block children.
+        // Blank lines inside fenced code blocks or nested lists don't count.
+        if (saw_blank_in_item) {
+            const is_single_code = item.children.items.len == 1 and
+                (item.children.items[0] == .code_block or item.children.items[0] == .fenced_code_block);
+            if (!is_single_code) {
+                // Check if blank lines were between direct block children (not inside nested lists).
+                var direct_para_count: usize = 0;
+                var direct_list_count: usize = 0;
+                var has_non_list_non_para_blocks = false;
+                for (item.children.items) |child| {
+                    switch (child) {
+                        .paragraph => direct_para_count += 1,
+                        .list => direct_list_count += 1,
+                        else => has_non_list_non_para_blocks = true,
+                    }
+                }
+                // Multiple paragraphs → blank lines between them
+                if (direct_para_count > 1) {
+                    any_item_has_blank = true;
+                }
+                // Paragraph + non-list block → blank lines between them
+                else if (direct_para_count >= 1 and has_non_list_non_para_blocks) {
+                    any_item_has_blank = true;
+                }
+                // Single paragraph + only lists: blank lines are inside nested lists, don't count
+                // UNLESS the raw content had blank lines that didn't go into nested lists
+                // (e.g. link ref defs that were consumed)
+                else if (direct_para_count == 1 and direct_list_count == 0 and !has_non_list_non_para_blocks) {
+                    // Item has one paragraph but had blank lines → something was consumed (link ref def)
+                    any_item_has_blank = true;
+                }
+                // No blocks at all → empty item with blank
+                else if (item.children.items.len == 0) {
+                    any_item_has_blank = true;
+                }
+            }
+        }
+
+        try list.items.append(allocator, item);
+
+        // Skip blank lines between items
+        var blanks_between: usize = 0;
+        while (i < lines.len and isBlankLine(lines[i])) {
+            blanks_between += 1;
+            i += 1;
+        }
+        const total_blanks_between = blanks_between + @as(usize, if (had_pending_blanks) 1 else 0);
+        if (total_blanks_between > 0 and i < lines.len) {
+            // Check if the next line starts a new item in this list
+            var is_next_item = false;
+            if (config.list_type == .unordered) {
+                if (bulletListContentColumn(lines[i])) |new_info| {
+                    is_next_item = new_info.marker == config.marker;
+                }
+            } else {
+                if (orderedListContentColumn(lines[i])) |new_info| {
+                    is_next_item = new_info.delimiter == config.delimiter;
+                }
+            }
+            if (!is_next_item) break; // blank line followed by non-list-item ends the list
+            had_blank_between_items = true;
+        }
+    }
+
+    // A list is loose if there are blank lines between items OR
+    // any item contains blank lines separating block children
+    list.tight = !had_blank_between_items and !any_item_has_blank;
+
+    return .{ .list = list, .next_line = i };
+}
+
+/// Extract the content portion of a list item's first line, starting at content_col.
+fn extractFirstLineContent(line: []const u8, content_col: usize) []const u8 {
+    var pos: usize = 0;
+    var col: usize = 0;
+    while (pos < line.len and col < content_col) {
+        if (line[pos] == '\t') {
+            col += 4 - (col % 4);
+        } else {
+            col += 1;
+        }
+        pos += 1;
+    }
+    if (pos >= line.len) return "";
+    return line[pos..];
+}
+
+/// Strip `n` columns of indentation from a line.
+fn stripIndent(line: []const u8, n: usize) []const u8 {
+    var pos: usize = 0;
+    var col: usize = 0;
+    while (pos < line.len and col < n) {
+        if (line[pos] == '\t') {
+            col += 4 - (col % 4);
+        } else if (line[pos] == ' ') {
+            col += 1;
+        } else break;
+        pos += 1;
+    }
+    return line[pos..];
+}
+
 fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_map: *const RefMap) !AST.Document {
     var doc = AST.Document.init(allocator);
 
@@ -1630,59 +2037,28 @@ fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_m
         }
 
         // Unordered list
-        if (parsers.tryBulletListItem(allocator, t)) |first| {
-            var list = AST.List.init(allocator, .unordered);
-            var loose = false;
-            var blank = false;
-            while (i < lines.len) {
-                const lt = trimLine(lines[i]);
-                if (lt.len == 0) {
-                    blank = true;
-                    i += 1;
-                    continue;
-                }
-                const mi = parsers.tryBulletListItem(allocator, lt) orelse break;
-                if (mi.marker != first.marker) break;
-                if (blank) loose = true;
-                blank = false;
-                var item = AST.ListItem.init(allocator);
-                var para = AST.Paragraph.init(allocator);
-                try appendInlines(allocator, &para.children, mi.content, ref_map);
-                try item.children.append(allocator, .{ .paragraph = para });
-                try list.items.append(allocator, item);
-                i += 1;
-            }
-            list.tight = !loose;
-            try doc.children.append(allocator, .{ .list = list });
+        if (bulletListContentColumn(raw)) |first_info| {
+            const result = try parseList(allocator, lines, i, ref_map, .{
+                .list_type = .unordered,
+                .marker = first_info.marker,
+                .delimiter = 0,
+                .start_num = 0,
+            });
+            try doc.children.append(allocator, .{ .list = result.list });
+            i = result.next_line;
             continue;
         }
 
         // Ordered list
-        if (parsers.tryOrderedListItem(allocator, t)) |first| {
-            var list = AST.List.init(allocator, .ordered);
-            list.start = first.num;
-            var loose = false;
-            var blank = false;
-            while (i < lines.len) {
-                const lt = trimLine(lines[i]);
-                if (lt.len == 0) {
-                    blank = true;
-                    i += 1;
-                    continue;
-                }
-                const mi = parsers.tryOrderedListItem(allocator, lt) orelse break;
-                if (mi.delimiter != first.delimiter) break;
-                if (blank) loose = true;
-                blank = false;
-                var item = AST.ListItem.init(allocator);
-                var para = AST.Paragraph.init(allocator);
-                try appendInlines(allocator, &para.children, mi.content, ref_map);
-                try item.children.append(allocator, .{ .paragraph = para });
-                try list.items.append(allocator, item);
-                i += 1;
-            }
-            list.tight = !loose;
-            try doc.children.append(allocator, .{ .list = list });
+        if (orderedListContentColumn(raw)) |first_info| {
+            const result = try parseList(allocator, lines, i, ref_map, .{
+                .list_type = .ordered,
+                .marker = 0,
+                .delimiter = first_info.delimiter,
+                .start_num = first_info.num,
+            });
+            try doc.children.append(allocator, .{ .list = result.list });
+            i = result.next_line;
             continue;
         }
 

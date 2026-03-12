@@ -193,7 +193,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
         .code_block => |cb| {
             try writer.writeAll("<pre><code>");
             try writeEscaped(writer, cb.content);
-            try writer.writeAll("</code></pre>\n");
+            try writer.writeAll("\n</code></pre>\n");
         },
         .fenced_code_block => |fcb| {
             if (fcb.language) |lang| {
@@ -204,7 +204,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                 try writer.writeAll("<pre><code>");
             }
             try writeEscaped(writer, fcb.content);
-            try writer.writeAll("</code></pre>\n");
+            try writer.writeAll("\n</code></pre>\n");
         },
         .blockquote => |bq| {
             try writer.writeAll("<blockquote>\n");
@@ -227,20 +227,49 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                 try writer.writeAll("<ul>\n");
             }
             for (lst.items.items) |item| {
-                try writer.writeAll("<li>");
                 if (lst.tight) {
-                    // Tight: render inline content only (no wrapping <p>)
-                    for (item.children.items) |child| {
-                        switch (child) {
-                            .paragraph => |p| for (p.children.items) |inl| try renderInline(writer, inl),
-                            else => try renderBlock(writer, child),
+                    // Check if the item starts with a paragraph
+                    const starts_with_para = item.children.items.len > 0 and
+                        item.children.items[0] == .paragraph;
+                    if (starts_with_para) {
+                        try writer.writeAll("<li>");
+                    } else {
+                        // Item has only block-level children (e.g. code blocks)
+                        if (item.children.items.len == 0) {
+                            try writer.writeAll("<li>");
+                        } else {
+                            try writer.writeAll("<li>\n");
                         }
                     }
+                    // Tight: render inline content only (no wrapping <p>)
+                    var wrote_inline = false;
+                    for (item.children.items) |child| {
+                        switch (child) {
+                            .paragraph => |p| {
+                                for (p.children.items) |inl| try renderInline(writer, inl);
+                                wrote_inline = true;
+                            },
+                            else => {
+                                // Non-paragraph block: add newline separator
+                                if (wrote_inline) {
+                                    try writer.writeByte('\n');
+                                }
+                                wrote_inline = false;
+                                try renderBlock(writer, child);
+                            },
+                        }
+                    }
+                    try writer.writeAll("</li>\n");
                 } else {
                     // Loose: render with block structure
-                    for (item.children.items) |child| try renderBlock(writer, child);
+                    if (item.children.items.len == 0) {
+                        try writer.writeAll("<li>");
+                    } else {
+                        try writer.writeAll("<li>\n");
+                        for (item.children.items) |child| try renderBlock(writer, child);
+                    }
+                    try writer.writeAll("</li>\n");
                 }
-                try writer.writeAll("</li>\n");
             }
             try writer.print("</{s}>\n", .{tag});
         },
