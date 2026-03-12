@@ -367,12 +367,12 @@ test "code span" {
 }
 
 test "indented code block" {
-    try ok("    hello", "<pre><code>hello</code></pre>\n");
+    try ok("    hello", "<pre><code>hello\n</code></pre>\n");
 }
 
 test "fenced code block" {
-    try ok("```\ncode\n```", "<pre><code>code</code></pre>\n");
-    try ok("```zig\nconst x = 1;\n```", "<pre><code class=\"language-zig\">const x = 1;</code></pre>\n");
+    try ok("```\ncode\n```", "<pre><code>code\n</code></pre>\n");
+    try ok("```zig\nconst x = 1;\n```", "<pre><code class=\"language-zig\">const x = 1;\n</code></pre>\n");
 }
 
 test "blockquote" {
@@ -384,7 +384,7 @@ test "tight unordered list" {
 }
 
 test "loose unordered list" {
-    try ok("- a\n\n- b", "<ul>\n<li><p>a</p>\n</li>\n<li><p>b</p>\n</li>\n</ul>\n");
+    try ok("- a\n\n- b", "<ul>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>b</p>\n</li>\n</ul>\n");
 }
 
 test "ordered list" {
