@@ -75,18 +75,10 @@ pub const parsers = struct {
     pub const whitespace = mecha.oneOf(.{ space, tab }).many(.{ .collect = false, .min = 1 });
 
     pub const url_char = mecha.oneOf(.{
-        alphanumeric,
-        mecha.ascii.char('.'),
-        mecha.ascii.char('/'),
-        mecha.ascii.char(':'),
-        mecha.ascii.char('?'),
-        mecha.ascii.char('='),
-        mecha.ascii.char('&'),
-        mecha.ascii.char('#'),
-        mecha.ascii.char('-'),
-        mecha.ascii.char('_'),
-        mecha.ascii.char('~'),
-        mecha.ascii.char('%'),
+        alphanumeric,          mecha.ascii.char('.'), mecha.ascii.char('/'),
+        mecha.ascii.char(':'), mecha.ascii.char('?'), mecha.ascii.char('='),
+        mecha.ascii.char('&'), mecha.ascii.char('#'), mecha.ascii.char('-'),
+        mecha.ascii.char('_'), mecha.ascii.char('~'), mecha.ascii.char('%'),
     });
 
     pub const text_char = mecha.oneOf(.{
@@ -105,28 +97,17 @@ pub const parsers = struct {
     });
 
     // ── Composite mecha parsers ──────────────────────────────────────────
-    //
-    // Declared as `pub const` so that mecha can resolve the `.map()`
-    // callback types at comptime.  Use directly via `.parse(allocator,
-    // input)`, or prefer the `try*` convenience wrappers below.
 
-    /// ATX heading: 1-6 `#` chars, a space, then the rest of the line.
-    /// Input should be trimmed of leading/trailing whitespace.
     pub const atx_heading = mecha.oneOf(.{
-        // Heading with content after space
         mecha.combine(.{
             hash.many(.{ .collect = false, .min = 1, .max = 6 }),
             space,
             mecha.rest.asStr(),
         }).map(struct {
             fn f(r: anytype) HeadingResult {
-                return .{
-                    .level = @intCast(r[0].len),
-                    .content = mem.trim(u8, r[2], " \t#"),
-                };
+                return .{ .level = @intCast(r[0].len), .content = mem.trim(u8, r[2], " \t#") };
             }
         }.f),
-        // Empty heading (just hashes, no trailing content)
         hash.many(.{ .collect = false, .min = 1, .max = 6 }).map(struct {
             fn f(r: anytype) HeadingResult {
                 return .{ .level = @intCast(r.len), .content = "" };
@@ -134,8 +115,6 @@ pub const parsers = struct {
         }.f),
     });
 
-    /// Bullet list item: optional 0-3 spaces, then one of `-*+`, a space,
-    /// then the rest of the line.
     pub const bullet_list_item = mecha.combine(.{
         space.many(.{ .collect = false, .min = 0, .max = 3 }),
         mecha.oneOf(.{ dash, asterisk, plus }),
@@ -143,15 +122,10 @@ pub const parsers = struct {
         mecha.rest.asStr(),
     }).map(struct {
         fn f(r: anytype) BulletListResult {
-            return .{
-                .marker = r[1],
-                .content = mem.trimLeft(u8, r[3], " \t"),
-            };
+            return .{ .marker = r[1], .content = mem.trimLeft(u8, r[3], " \t") };
         }
     }.f);
 
-    /// Ordered list item: optional 0-3 spaces, 1-9 digits, `.` or `)`,
-    /// a space, then the rest of the line.
     pub const ordered_list_item = mecha.combine(.{
         space.many(.{ .collect = false, .min = 0, .max = 3 }),
         digit.many(.{ .collect = false, .min = 1, .max = 9 }).asStr(),
@@ -168,8 +142,6 @@ pub const parsers = struct {
         }
     }.f);
 
-    /// Blockquote line: optional leading whitespace, `>`, optional space,
-    /// then the rest.
     pub const blockquote_line = mecha.combine(.{
         mecha.oneOf(.{ space, tab }).many(.{ .collect = false, .min = 0 }),
         gt,
@@ -181,62 +153,37 @@ pub const parsers = struct {
         }
     }.f);
 
-    /// Footnote definition: `[^label]: content`
     pub const footnote_definition = mecha.combine(.{
-        lbracket,
-        caret,
-        mecha.many(mecha.oneOf(.{ letter, digit }), .{ .collect = false, .min = 1 }).asStr(),
-        rbracket,
-        colon,
-        space,
+        lbracket,                                                                             caret,
+        mecha.many(mecha.oneOf(.{ letter, digit }), .{ .collect = false, .min = 1 }).asStr(), rbracket,
+        colon,                                                                                space,
         mecha.rest.asStr(),
     }).map(struct {
         fn f(r: anytype) FootnoteDefResult {
-            return .{
-                .label = r[2],
-                .content = mem.trim(u8, r[6], " \t\n\r"),
-            };
+            return .{ .label = r[2], .content = mem.trim(u8, r[6], " \t\n\r") };
         }
     }.f);
 
     // ── Convenience wrappers ─────────────────────────────────────────────
-    //
-    // Each `try*` function runs the corresponding mecha parser on a line
-    // and returns an optional result.  These are the primary interface
-    // used by the block parser.
 
-    /// Try to parse an ATX heading from a raw line.
     pub fn tryAtxHeading(allocator: Allocator, line: []const u8) ?HeadingResult {
         const t = trimLine(line);
         if (t.len == 0 or t[0] != '#') return null;
         const result = atx_heading.parse(allocator, t) catch return null;
-        return switch (result.value) {
-            .ok => |v| v,
-            else => null,
-        };
+        return if (result.value == .ok) result.value.ok else null;
     }
 
-    /// Try to parse a bullet list marker from a line.
     pub fn tryBulletListItem(allocator: Allocator, line: []const u8) ?BulletListResult {
         if (line.len < 2) return null;
         const result = bullet_list_item.parse(allocator, line) catch return null;
-        return switch (result.value) {
-            .ok => |v| v,
-            else => null,
-        };
+        return if (result.value == .ok) result.value.ok else null;
     }
 
-    /// Try to parse an ordered list marker from a line.
     pub fn tryOrderedListItem(allocator: Allocator, line: []const u8) ?OrderedListResult {
         const result = ordered_list_item.parse(allocator, line) catch return null;
-        return switch (result.value) {
-            .ok => |v| v,
-            else => null,
-        };
+        return if (result.value == .ok) result.value.ok else null;
     }
 
-    /// Try to parse a blockquote marker from a raw line.
-    /// Returns the content after the `> ` marker, or null.
     pub fn tryBlockquoteLine(allocator: Allocator, line: []const u8) ?[]const u8 {
         const t = mem.trimLeft(u8, line, " \t");
         if (t.len == 0 or t[0] != '>') return null;
@@ -244,7 +191,6 @@ pub const parsers = struct {
         return switch (result.value) {
             .ok => |v| v.content,
             else => blk: {
-                // Bare `>` with no trailing content
                 if (t.len == 1) break :blk @as([]const u8, "");
                 if (t[1] == ' ' or t[1] == '\t') break :blk t[2..];
                 break :blk t[1..];
@@ -252,20 +198,13 @@ pub const parsers = struct {
         };
     }
 
-    /// Try to parse a footnote definition from a (trimmed) line.
     pub fn tryFootnoteDef(allocator: Allocator, line: []const u8) ?FootnoteDefResult {
         const t = trimLine(line);
         if (!mem.startsWith(u8, t, "[^")) return null;
         const result = footnote_definition.parse(allocator, t) catch return null;
-        return switch (result.value) {
-            .ok => |v| v,
-            else => null,
-        };
+        return if (result.value == .ok) result.value.ok else null;
     }
 
-    /// Try to parse a fenced code block opening line.
-    /// Handles backtick and tilde fences, info strings, and the rule
-    /// that backtick fences cannot have backticks in the info string.
     pub fn tryFenceStart(line: []const u8) ?FenceInfo {
         var s: usize = 0;
         while (s < 3 and s < line.len and line[s] == ' ') s += 1;
@@ -281,7 +220,6 @@ pub const parsers = struct {
         return .{ .char = c, .len = fl, .info = info };
     }
 
-    /// Check whether `line` closes a fenced code block opened by `fence`.
     pub fn isFenceEnd(line: []const u8, fence: FenceInfo) bool {
         const t = trimLine(line);
         var n: usize = 0;
@@ -290,7 +228,6 @@ pub const parsers = struct {
         return mem.trim(u8, t[n..], " \t").len == 0;
     }
 
-    /// Try to parse an indented code line (4 spaces or 1 tab).
     pub fn tryIndentedCode(line: []const u8) ?[]const u8 {
         if (mem.startsWith(u8, line, "    ")) return line[4..];
         if (mem.startsWith(u8, line, "\t")) return line[1..];
@@ -298,7 +235,7 @@ pub const parsers = struct {
     }
 };
 
-// ── Block helpers ─────────────────────────────────────────────────────────────
+// ── Small shared helpers ─────────────────────────────────────────────────────
 
 fn trimLine(line: []const u8) []const u8 {
     return mem.trim(u8, line, " \t\r");
@@ -308,7 +245,6 @@ fn isBlankLine(line: []const u8) bool {
     return trimLine(line).len == 0;
 }
 
-/// 3+ of the same char (-, *, _) with optional spaces — thematic break.
 fn isThematicBreak(line: []const u8) bool {
     const t = trimLine(line);
     if (t.len < 3) return false;
@@ -318,14 +254,11 @@ fn isThematicBreak(line: []const u8) bool {
     for (t) |ch| {
         if (ch == c) {
             n += 1;
-        } else if (ch != ' ' and ch != '\t') {
-            return false;
-        }
+        } else if (ch != ' ' and ch != '\t') return false;
     }
     return n >= 3;
 }
 
-/// All non-space chars are '=' (setext level-1 underline).
 fn isSetextEqLine(line: []const u8) bool {
     const t = trimLine(line);
     if (t.len == 0) return false;
@@ -333,7 +266,6 @@ fn isSetextEqLine(line: []const u8) bool {
     return true;
 }
 
-/// All non-space chars are '-' (setext level-2 underline / thematic break).
 fn isSetextDashLine(line: []const u8) bool {
     const t = trimLine(line);
     if (t.len == 0) return false;
@@ -341,27 +273,20 @@ fn isSetextDashLine(line: []const u8) bool {
     return true;
 }
 
-/// Compute the number of leading spaces on a raw line.
-fn countLeadingSpaces(line: []const u8) usize {
-    var n: usize = 0;
-    for (line) |c| {
-        if (c == ' ') {
-            n += 1;
-        } else if (c == '\t') {
-            n += 4 - (n % 4);
-        } else break;
-    }
-    return n;
+fn isAsciiPunct(c: u8) bool {
+    return (c >= '!' and c <= '/') or (c >= ':' and c <= '@') or
+        (c >= '[' and c <= '`') or (c >= '{' and c <= '~');
 }
 
-/// For a bullet list marker, compute the content column.
-/// Returns the column where content starts (marker indent + marker + spaces after marker),
-/// or null if not a valid bullet list item.
-fn bulletListContentColumn(line: []const u8) ?struct { col: usize, marker: u8 } {
+// ── Tab-aware indentation helpers ────────────────────────────────────────────
+
+const IndentResult = struct { pos: usize, col: usize };
+
+/// Skip leading whitespace up to `max_col` columns, handling tabs (width 4).
+fn skipIndent(line: []const u8, max_col: usize) IndentResult {
     var pos: usize = 0;
     var col: usize = 0;
-    // Skip 0-3 leading spaces
-    while (pos < line.len and col < 4 and (line[pos] == ' ' or line[pos] == '\t')) {
+    while (pos < line.len and col < max_col and (line[pos] == ' ' or line[pos] == '\t')) {
         if (line[pos] == '\t') {
             col += 4 - (col % 4);
         } else {
@@ -369,16 +294,24 @@ fn bulletListContentColumn(line: []const u8) ?struct { col: usize, marker: u8 } 
         }
         pos += 1;
     }
-    if (col >= 4) return null;
-    if (pos >= line.len) return null;
-    const marker = line[pos];
+    return .{ .pos = pos, .col = col };
+}
+
+fn countLeadingSpaces(line: []const u8) usize {
+    return skipIndent(line, std.math.maxInt(usize)).col;
+}
+
+/// For a bullet list marker, compute the content column.
+fn bulletListContentColumn(line: []const u8) ?struct { col: usize, marker: u8 } {
+    const indent = skipIndent(line, 4);
+    if (indent.col >= 4) return null;
+    if (indent.pos >= line.len) return null;
+    const marker = line[indent.pos];
     if (marker != '-' and marker != '*' and marker != '+') return null;
-    pos += 1;
-    col += 1;
-    // Must be followed by at least one space (or end of line for blank item)
-    if (pos >= line.len) return .{ .col = col + 1, .marker = marker }; // blank item
+    var pos = indent.pos + 1;
+    var col = indent.col + 1;
+    if (pos >= line.len) return .{ .col = col + 1, .marker = marker };
     if (line[pos] != ' ' and line[pos] != '\t') return null;
-    // Count spaces after marker (at least 1, content column is where first non-space is)
     const marker_col = col;
     while (pos < line.len and (line[pos] == ' ' or line[pos] == '\t')) {
         if (line[pos] == '\t') {
@@ -388,46 +321,29 @@ fn bulletListContentColumn(line: []const u8) ?struct { col: usize, marker: u8 } 
         }
         pos += 1;
     }
-    // If the rest of the line is blank, content column is marker_col + 1
     if (pos >= line.len) return .{ .col = marker_col + 1, .marker = marker };
-    // CommonMark: if indentation from marker to content is > 4, it's code
-    // and the effective content column is marker_col + 1
     if (col - marker_col > 4) return .{ .col = marker_col + 1, .marker = marker };
     return .{ .col = col, .marker = marker };
 }
 
 /// For an ordered list marker, compute the content column.
-/// Returns the column where content starts, the number, and delimiter.
 fn orderedListContentColumn(line: []const u8) ?struct { col: usize, num: u32, delimiter: u8 } {
-    var pos: usize = 0;
-    var col: usize = 0;
-    // Skip 0-3 leading spaces
-    while (pos < line.len and col < 4 and (line[pos] == ' ' or line[pos] == '\t')) {
-        if (line[pos] == '\t') {
-            col += 4 - (col % 4);
-        } else {
-            col += 1;
-        }
-        pos += 1;
-    }
-    if (col >= 4) return null;
-    // 1-9 digits
+    const indent = skipIndent(line, 4);
+    if (indent.col >= 4) return null;
+    var pos = indent.pos;
+    var col = indent.col;
     const digit_start = pos;
     while (pos < line.len and line[pos] >= '0' and line[pos] <= '9') pos += 1;
     const digit_count = pos - digit_start;
     if (digit_count == 0 or digit_count > 9) return null;
     col += digit_count;
-    // Delimiter: . or )
     if (pos >= line.len) return null;
     const delimiter = line[pos];
     if (delimiter != '.' and delimiter != ')') return null;
     pos += 1;
     col += 1;
-    // Must be followed by at least one space (or end of line for blank item)
-    if (pos >= line.len) {
-        const num = std.fmt.parseInt(u32, line[digit_start .. digit_start + digit_count], 10) catch return null;
-        return .{ .col = col + 1, .num = num, .delimiter = delimiter };
-    }
+    const num = std.fmt.parseInt(u32, line[digit_start .. digit_start + digit_count], 10) catch return null;
+    if (pos >= line.len) return .{ .col = col + 1, .num = num, .delimiter = delimiter };
     if (line[pos] != ' ' and line[pos] != '\t') return null;
     const marker_col = col;
     while (pos < line.len and (line[pos] == ' ' or line[pos] == '\t')) {
@@ -438,40 +354,17 @@ fn orderedListContentColumn(line: []const u8) ?struct { col: usize, num: u32, de
         }
         pos += 1;
     }
-    const num = std.fmt.parseInt(u32, line[digit_start .. digit_start + digit_count], 10) catch return null;
     if (pos >= line.len) return .{ .col = marker_col + 1, .num = num, .delimiter = delimiter };
     if (col - marker_col > 4) return .{ .col = marker_col + 1, .num = num, .delimiter = delimiter };
     return .{ .col = col, .num = num, .delimiter = delimiter };
 }
 
-/// Extract the content of a line relative to a content column.
-/// Returns the portion of the line starting at the content column, or null
-/// if the line is not indented to at least that column.
-fn extractLineContent(line: []const u8, content_col: usize) ?[]const u8 {
-    var pos: usize = 0;
-    var col: usize = 0;
-    while (pos < line.len and col < content_col) {
-        if (line[pos] == '\t') {
-            col += 4 - (col % 4);
-        } else if (line[pos] == ' ') {
-            col += 1;
-        } else break;
-        pos += 1;
-    }
-    if (col < content_col) return null;
-    // If we overshot (tab jumped past content_col), prepend spaces
-    return line[pos..];
-}
-
-/// Check whether a line is a blank bullet list item (marker followed by nothing).
 fn isBulletItemBlank(line: []const u8) bool {
-    const info = bulletListContentColumn(line) orelse return false;
-    _ = info;
+    _ = bulletListContentColumn(line) orelse return false;
     const t = trimLine(line);
     return t.len == 1 and (t[0] == '-' or t[0] == '*' or t[0] == '+');
 }
 
-/// Check whether a line is a blank ordered list item.
 fn isOrderedItemBlank(line: []const u8) bool {
     const t = trimLine(line);
     if (t.len < 2) return false;
@@ -479,76 +372,52 @@ fn isOrderedItemBlank(line: []const u8) bool {
     while (i < t.len and t[i] >= '0' and t[i] <= '9') i += 1;
     if (i == 0 or i >= t.len) return false;
     if (t[i] != '.' and t[i] != ')') return false;
-    return i + 1 == t.len; // nothing after delimiter
+    return i + 1 == t.len;
 }
 
-/// Returns true when `t` (trimmed) starts a block that terminates a paragraph.
-/// Implements CommonMark list interruption rules:
-/// - Bullet lists can interrupt a paragraph (but not empty items)
-/// - Ordered lists can only interrupt a paragraph if they start with 1
-/// - Empty list items cannot interrupt a paragraph
 fn isParaBreak(allocator: Allocator, t: []const u8, raw: []const u8) bool {
     if (t.len == 0) return true;
     if (t[0] == '#') return true;
     if (t[0] == '>') return true;
     if (isThematicBreak(t)) return true;
-    // Bullet list items can interrupt paragraphs, but not empty ones
     if (bulletListContentColumn(raw)) |_| {
         if (!isBulletItemBlank(raw)) return true;
     }
-    // Ordered list items can only interrupt paragraphs if they start with 1
     if (orderedListContentColumn(raw)) |info| {
         if (info.num == 1 and !isOrderedItemBlank(raw)) return true;
     }
     if (parsers.tryFenceStart(raw) != null) return true;
     if (parsers.tryFootnoteDef(allocator, t) != null) return true;
-    // NOTE: Link reference definitions do NOT interrupt paragraphs per CommonMark.
-    // They are only recognized at the start of a block context.
     return false;
 }
 
-/// Quick check: does this line look like it could start a link reference definition?
-/// This checks the basic pattern [label]: but may also need multi-line context.
-/// Used by the block parser to decide whether to try a full parse.
 fn isLinkRefDefStart(line: []const u8) bool {
-    // Link ref defs can have at most 3 spaces of leading indentation
-    var leading_spaces: usize = 0;
+    var leading: usize = 0;
     for (line) |c| {
         if (c == ' ') {
-            leading_spaces += 1;
+            leading += 1;
         } else break;
     }
-    if (leading_spaces >= 4) return false;
+    if (leading >= 4) return false;
     const t = mem.trimLeft(u8, line, " ");
-    if (t.len == 0) return false;
-    if (t[0] != '[') return false;
+    if (t.len == 0 or t[0] != '[') return false;
     if (t.len > 1 and t[1] == '^') return false;
-    // Check that we have ]: somewhere on this line or could be multi-line label
     var pos: usize = 1;
     while (pos < t.len) {
         if (t[pos] == '\\' and pos + 1 < t.len) {
             pos += 2;
-        } else if (t[pos] == ']') {
-            // Check for ]: after the ]
-            if (pos + 1 < t.len and t[pos + 1] == ':') return true;
-            return false;
-        } else if (t[pos] == '[') {
-            return false;
-        } else {
+        } else if (t[pos] == ']') return pos + 1 < t.len and t[pos + 1] == ':' else if (t[pos] == '[') return false else {
             pos += 1;
         }
     }
-    // We reached end of line without finding ] - could be multi-line label
     return true;
 }
 
-/// Quick check: is this line the start of a standalone block element?
 fn isStandaloneBlockStart(allocator: Allocator, line: []const u8) bool {
-    _ = allocator; // autofix
+    _ = allocator;
     const t = trimLine(line);
     if (t.len == 0) return true;
-    if (t[0] == '#') return true;
-    if (t[0] == '>') return true;
+    if (t[0] == '#' or t[0] == '>') return true;
     if (isThematicBreak(t)) return true;
     if (bulletListContentColumn(line) != null) return true;
     if (orderedListContentColumn(line) != null) return true;
@@ -559,81 +428,25 @@ fn isStandaloneBlockStart(allocator: Allocator, line: []const u8) bool {
 
 // ── Link reference definitions ────────────────────────────────────────────────
 
-/// Stores resolved link reference definitions: label → (url, title)
 const RefMap = std.StringHashMap(struct { url: []const u8, title: ?[]const u8 });
 
-/// Case-insensitive label normalization: collapse whitespace, Unicode casefold.
-fn normalizeLabel(allocator: Allocator, label: []const u8) ![]const u8 {
-    var buf = std.ArrayList(u8){};
-    var prev_ws = true;
-    var i: usize = 0;
-    while (i < label.len) {
-        const c = label[i];
-        if (c == ' ' or c == '\t' or c == '\n' or c == '\r') {
-            if (!prev_ws) {
-                try buf.append(allocator, ' ');
-                prev_ws = true;
-            }
-            i += 1;
-        } else if (c < 0x80) {
-            // ASCII: lowercase
-            try buf.append(allocator, if (c >= 'A' and c <= 'Z') c + 32 else c);
-            prev_ws = false;
-            i += 1;
-        } else {
-            // UTF-8: decode codepoint, casefold, re-encode
-            const seq_len = utf8SeqLen(c);
-            if (i + seq_len > label.len) {
-                try buf.append(allocator, c);
-                prev_ws = false;
-                i += 1;
-                continue;
-            }
-            const cp = decodeUtf8(label[i .. i + seq_len]);
-            // Special case: ẞ (U+1E9E) folds to "ss" (two characters) per Unicode case folding
-            if (cp == 0x1E9E) {
-                try buf.appendSlice(allocator, "ss");
-                prev_ws = false;
-                i += seq_len;
-                continue;
-            }
-            const lower_cp = unicodeCaseFold(cp);
-            var enc_buf: [4]u8 = undefined;
-            const enc_len = encodeUtf8(lower_cp, &enc_buf);
-            try buf.appendSlice(allocator, enc_buf[0..enc_len]);
-            prev_ws = false;
-            i += seq_len;
-        }
-    }
-    while (buf.items.len > 0 and buf.items[buf.items.len - 1] == ' ') _ = buf.pop();
-    return buf.toOwnedSlice(allocator);
+/// Walk backwards from `pos` to find the start of the UTF-8 character.
+fn utf8CharStart(input: []const u8, pos: usize) usize {
+    var p = pos;
+    while (p > 0 and (input[p] & 0xC0) == 0x80) p -= 1;
+    return p;
 }
 
-fn utf8SeqLen(first_byte: u8) usize {
-    if (first_byte < 0x80) return 1;
-    if (first_byte < 0xC0) return 1; // continuation byte, treat as 1
-    if (first_byte < 0xE0) return 2;
-    if (first_byte < 0xF0) return 3;
-    return 4;
+/// Decode the UTF-8 codepoint starting at `pos`.
+fn decodeUtf8At(input: []const u8, pos: usize) ?struct { cp: u21, len: u3 } {
+    if (pos >= input.len) return null;
+    const seq_len = unicode.utf8ByteSequenceLength(input[pos]) catch return null;
+    if (pos + seq_len > input.len) return null;
+    const cp = unicode.utf8Decode(input[pos..][0..seq_len]) catch return null;
+    return .{ .cp = cp, .len = seq_len };
 }
 
-fn decodeUtf8(bytes: []const u8) u32 {
-    if (bytes.len == 1) return bytes[0];
-    if (bytes.len == 2) {
-        return (@as(u32, bytes[0] & 0x1F) << 6) | @as(u32, bytes[1] & 0x3F);
-    }
-    if (bytes.len == 3) {
-        return (@as(u32, bytes[0] & 0x0F) << 12) |
-            (@as(u32, bytes[1] & 0x3F) << 6) |
-            @as(u32, bytes[2] & 0x3F);
-    }
-    return (@as(u32, bytes[0] & 0x07) << 18) |
-        (@as(u32, bytes[1] & 0x3F) << 12) |
-        (@as(u32, bytes[2] & 0x3F) << 6) |
-        @as(u32, bytes[3] & 0x3F);
-}
-
-fn encodeUtf8(cp: u32, buf: *[4]u8) usize {
+fn encodeUtf8(cp: u21, buf: *[4]u8) usize {
     if (cp < 0x80) {
         buf[0] = @intCast(cp);
         return 1;
@@ -655,33 +468,116 @@ fn encodeUtf8(cp: u32, buf: *[4]u8) usize {
     }
 }
 
-/// Simple Unicode case folding. Covers ASCII, Greek, and German ẞ→ß.
-/// For a full implementation, a complete case folding table would be needed.
-fn unicodeCaseFold(cp: u32) u32 {
-    // ASCII uppercase → lowercase
+/// Simple Unicode case folding (ASCII, Latin Extended, Greek, Cyrillic).
+fn unicodeCaseFold(cp: u21) u21 {
     if (cp >= 'A' and cp <= 'Z') return cp + 32;
-    // Greek uppercase (Α-Ω: 0x0391-0x03A9) → lowercase (α-ω: 0x03B1-0x03C9)
     if (cp >= 0x0391 and cp <= 0x03A1) return cp + 0x20;
     if (cp >= 0x03A3 and cp <= 0x03A9) return cp + 0x20;
-    // Greek capital sigma 0x03A2 doesn't exist, but handle final sigma
-    // Latin Extended: ẞ (U+1E9E) → ß (U+00DF)
     if (cp == 0x1E9E) return 0x00DF;
-    // Cyrillic uppercase (А-Я: 0x0410-0x042F) → lowercase (а-я: 0x0430-0x044F)
     if (cp >= 0x0410 and cp <= 0x042F) return cp + 0x20;
-    // Latin Extended-A pairs (e.g. Ā-ā, etc.) — even codepoints are uppercase
-    if (cp >= 0x0100 and cp <= 0x024F) {
-        // Most of Latin Extended-A/B: even = upper, odd = lower
-        if (cp < 0x0180 and (cp & 1) == 0) return cp + 1;
-    }
+    if (cp >= 0x0100 and cp <= 0x017E and (cp & 1) == 0) return cp + 1;
     return cp;
 }
 
+/// Case-insensitive label normalization: collapse whitespace, Unicode casefold.
+fn normalizeLabel(allocator: Allocator, label: []const u8) ![]const u8 {
+    var buf = std.ArrayList(u8){};
+    var prev_ws = true;
+    var i: usize = 0;
+    while (i < label.len) {
+        const c = label[i];
+        if (c == ' ' or c == '\t' or c == '\n' or c == '\r') {
+            if (!prev_ws) try buf.append(allocator, ' ');
+            prev_ws = true;
+            i += 1;
+        } else if (c < 0x80) {
+            try buf.append(allocator, if (c >= 'A' and c <= 'Z') c + 32 else c);
+            prev_ws = false;
+            i += 1;
+        } else {
+            if (decodeUtf8At(label, i)) |r| {
+                if (r.cp == 0x1E9E) {
+                    try buf.appendSlice(allocator, "ss");
+                } else {
+                    const lower = unicodeCaseFold(r.cp);
+                    var enc_buf: [4]u8 = undefined;
+                    const enc_len = encodeUtf8(lower, &enc_buf);
+                    try buf.appendSlice(allocator, enc_buf[0..enc_len]);
+                }
+                prev_ws = false;
+                i += r.len;
+            } else {
+                try buf.append(allocator, c);
+                prev_ws = false;
+                i += 1;
+            }
+        }
+    }
+    while (buf.items.len > 0 and buf.items[buf.items.len - 1] == ' ') _ = buf.pop();
+    return buf.toOwnedSlice(allocator);
+}
+
+/// Resolve a reference label against the ref map, returning owned copies of url/title.
+const ResolvedRef = struct { url: []const u8, title: ?[]const u8 };
+
+fn resolveRef(allocator: Allocator, rm: *const RefMap, label: []const u8) ?ResolvedRef {
+    const norm = normalizeLabel(allocator, label) catch return null;
+    defer allocator.free(norm);
+    const dest = rm.get(norm) orelse return null;
+    const url = allocator.dupe(u8, dest.url) catch return null;
+    const title: ?[]const u8 = if (dest.title) |t| (allocator.dupe(u8, t) catch return null) else null;
+    return .{ .url = url, .title = title };
+}
+
+/// Try to consume a link reference definition starting at `lines[start]`.
+/// Builds a multi-line candidate (up to `max_continuation` lines total),
+/// parses it, and inserts into `ref_map` (first definition wins).
+/// Returns the number of lines consumed, or null if no valid definition.
+fn tryConsumeLinkRefDef(
+    allocator: Allocator,
+    lines: []const []const u8,
+    start: usize,
+    max_continuation: usize,
+    ref_map: *RefMap,
+) !?usize {
+    const line = lines[start];
+    const tl = mem.trimLeft(u8, line, " ");
+    if (tl.len == 0 or tl[0] != '[') return null;
+    if (tl.len > 1 and tl[1] == '^') return null;
+
+    var candidate = std.ArrayList(u8){};
+    defer candidate.deinit(allocator);
+    try candidate.appendSlice(allocator, line);
+    var j = start + 1;
+    var lc: usize = 1;
+    while (j < lines.len and lc < max_continuation) : (j += 1) {
+        if (trimLine(lines[j]).len == 0) break;
+        try candidate.append(allocator, '\n');
+        try candidate.appendSlice(allocator, lines[j]);
+        lc += 1;
+    }
+
+    const def = parseLinkRefDef(candidate.items) orelse return null;
+    const norm = try normalizeLabel(allocator, def.label);
+    if (!ref_map.contains(norm)) {
+        const url_dupe = try allocator.dupe(u8, def.url);
+        const title_dupe: ?[]const u8 = if (def.title) |t| try allocator.dupe(u8, t) else null;
+        try ref_map.put(norm, .{ .url = url_dupe, .title = title_dupe });
+    } else {
+        allocator.free(norm);
+    }
+    // Count consumed lines
+    var consumed: usize = 1;
+    var ci: usize = 0;
+    while (ci < def.consumed and ci < candidate.items.len) : (ci += 1) {
+        if (candidate.items[ci] == '\n') consumed += 1;
+    }
+    return consumed;
+}
+
 /// Parse a link reference definition from concatenated lines.
-/// Format: [label]: <destination> "title"
-/// Lines are joined with \n. The label may span multiple lines.
 fn parseLinkRefDef(line: []const u8) ?struct { label: []const u8, url: []const u8, title: ?[]const u8, consumed: usize } {
     var pos: usize = 0;
-    // Up to 3 spaces of indentation
     var leading_spaces: usize = 0;
     while (pos < line.len and leading_spaces < 3 and line[pos] == ' ') {
         pos += 1;
@@ -690,17 +586,12 @@ fn parseLinkRefDef(line: []const u8) ?struct { label: []const u8, url: []const u
     if (pos >= line.len or line[pos] != '[') return null;
     pos += 1;
     const label_start = pos;
-    // Label can span multiple lines (contain \n), up to 999 characters
     var label_char_count: usize = 0;
     while (pos < line.len) {
         if (line[pos] == '\\' and pos + 1 < line.len) {
             pos += 2;
             label_char_count += 2;
-        } else if (line[pos] == ']') {
-            break;
-        } else if (line[pos] == '[') {
-            return null;
-        } else {
+        } else if (line[pos] == ']') break else if (line[pos] == '[') return null else {
             if (line[pos] != '\n') label_char_count += 1;
             pos += 1;
         }
@@ -720,7 +611,6 @@ fn parseLinkRefDef(line: []const u8) ?struct { label: []const u8, url: []const u
     if (pos >= line.len or line[pos] != ':') return null;
     pos += 1;
 
-    // Skip optional whitespace (including at most one line ending)
     while (pos < line.len and (line[pos] == ' ' or line[pos] == '\t')) pos += 1;
     if (pos < line.len and line[pos] == '\n') {
         pos += 1;
@@ -735,70 +625,52 @@ fn parseLinkRefDef(line: []const u8) ?struct { label: []const u8, url: []const u
         while (pos < line.len and line[pos] != '>' and line[pos] != '\n') {
             if (line[pos] == '\\' and pos + 1 < line.len) {
                 pos += 2;
-            } else if (line[pos] == '<') {
-                return null; // no < inside angle bracket URL
-            } else {
+            } else if (line[pos] == '<') return null else {
                 pos += 1;
             }
         }
         if (pos >= line.len or line[pos] != '>') return null;
         url = line[url_start..pos];
         pos += 1;
-        // After angle bracket URL, only whitespace/title/EOL allowed
-        // If there's a ( right after, it's not a valid link ref def
     } else {
         const url_start = pos;
-        var paren_depth: i32 = 0;
+        var pd: i32 = 0;
         while (pos < line.len) {
             const c = line[pos];
             if (c == '\\' and pos + 1 < line.len) {
                 pos += 2;
             } else if (c == '(') {
-                paren_depth += 1;
+                pd += 1;
                 pos += 1;
             } else if (c == ')') {
-                if (paren_depth == 0) break;
-                paren_depth -= 1;
+                if (pd == 0) break;
+                pd -= 1;
                 pos += 1;
-            } else if (c == ' ' or c == '\t' or c == '\n') {
-                break;
-            } else if (c <= 0x1f) {
-                return null;
-            } else {
+            } else if (c == ' ' or c == '\t' or c == '\n') break else if (c <= 0x1f) return null else {
                 pos += 1;
             }
         }
-        if (paren_depth != 0) return null;
+        if (pd != 0) return null;
         url = line[url_start..pos];
     }
 
-    // After URL: skip spaces/tabs, optional line ending
     const pos_after_url = pos;
     while (pos < line.len and (line[pos] == ' ' or line[pos] == '\t')) pos += 1;
-    const had_space_after_url = pos > pos_after_url;
-
-    // Check: if we're at end of input (or \n), this is valid with no title
+    const had_space = pos > pos_after_url;
     const pos_before_title = pos;
+
     if (pos < line.len and line[pos] == '\n') {
-        // Could be end-of-def (no title), or title on next line
-        const saved_pos = pos;
+        const saved = pos;
         pos += 1;
         while (pos < line.len and (line[pos] == ' ' or line[pos] == '\t')) pos += 1;
-        if (pos >= line.len) {
-            // No title, definition ends here
-            return .{ .label = label, .url = url, .title = null, .consumed = saved_pos };
-        }
-        if (line[pos] != '"' and line[pos] != '\'' and line[pos] != '(') {
-            // Next line doesn't start with title delimiter — def ended at the newline
-            return .{ .label = label, .url = url, .title = null, .consumed = saved_pos };
-        }
-        // Fall through to parse title
+        if (pos >= line.len) return .{ .label = label, .url = url, .title = null, .consumed = saved };
+        if (line[pos] != '"' and line[pos] != '\'' and line[pos] != '(')
+            return .{ .label = label, .url = url, .title = null, .consumed = saved };
     }
 
     var title: ?[]const u8 = null;
     if (pos < line.len and (line[pos] == '"' or line[pos] == '\'' or line[pos] == '(')) {
-        // Title must be separated from destination by whitespace (or be on next line)
-        if (!had_space_after_url and pos == pos_after_url) return null;
+        if (!had_space and pos == pos_after_url) return null;
         const title_open = line[pos];
         const title_close: u8 = if (title_open == '(') ')' else title_open;
         pos += 1;
@@ -806,10 +678,7 @@ fn parseLinkRefDef(line: []const u8) ?struct { label: []const u8, url: []const u
         while (pos < line.len) {
             if (line[pos] == '\\' and pos + 1 < line.len) {
                 pos += 2;
-            } else if (line[pos] == title_close) {
-                break;
-            } else if (line[pos] == '\n') {
-                // Check for blank line (two consecutive newlines) — that invalidates the title
+            } else if (line[pos] == title_close) break else if (line[pos] == '\n') {
                 if (pos + 1 < line.len and line[pos + 1] == '\n') return null;
                 pos += 1;
             } else {
@@ -820,25 +689,14 @@ fn parseLinkRefDef(line: []const u8) ?struct { label: []const u8, url: []const u
         title = line[title_start..pos];
         pos += 1;
     } else if (pos < line.len and line[pos] != '\n') {
-        // Non-whitespace, non-title after URL — not a valid def
-        // (e.g. `<bar>(baz)` — the `(baz)` after angle bracket URL)
         return null;
     }
 
     while (pos < line.len and (line[pos] == ' ' or line[pos] == '\t')) pos += 1;
     if (pos < line.len and line[pos] != '\n') {
-        // Trailing content after title — not valid
-        // But the definition might still be valid without the title
-        // if the URL-only version ended cleanly
         if (title != null) {
-            // Try without title: was pos_before_title at end or newline?
-            const check_pos = pos_before_title;
-            if (check_pos >= line.len) {
-                return .{ .label = label, .url = url, .title = null, .consumed = check_pos };
-            }
-            if (line[check_pos] == '\n') {
-                return .{ .label = label, .url = url, .title = null, .consumed = check_pos };
-            }
+            if (pos_before_title >= line.len or line[pos_before_title] == '\n')
+                return .{ .label = label, .url = url, .title = null, .consumed = pos_before_title };
             return null;
         }
         return null;
@@ -848,11 +706,6 @@ fn parseLinkRefDef(line: []const u8) ?struct { label: []const u8, url: []const u
 }
 
 // ── Inline parser ─────────────────────────────────────────────────────────────
-
-fn isAsciiPunct(c: u8) bool {
-    return (c >= '!' and c <= '/') or (c >= ':' and c <= '@') or
-        (c >= '[' and c <= '`') or (c >= '{' and c <= '~');
-}
 
 fn isUriAutolink(s: []const u8) bool {
     var i: usize = 0;
@@ -872,41 +725,29 @@ fn isEmailAutolink(s: []const u8) bool {
     return mem.indexOf(u8, s, " ") == null;
 }
 
-/// Check if a list of inline elements contains any link nodes (recursively through emphasis).
-/// Used to enforce the CommonMark rule that links cannot contain other links.
 fn containsLink(items: []const AST.Inline) bool {
-    for (items) |item| {
-        switch (item) {
-            .link => return true,
-            .emphasis => |e| {
-                if (containsLink(e.children.items)) return true;
-            },
-            .strong => |s| {
-                if (containsLink(s.children.items)) return true;
-            },
-            else => {},
-        }
-    }
+    for (items) |item| switch (item) {
+        .link => return true,
+        .emphasis => |e| {
+            if (containsLink(e.children.items)) return true;
+        },
+        .strong => |s| {
+            if (containsLink(s.children.items)) return true;
+        },
+        else => {},
+    };
     return false;
 }
 
-/// Find the closing `]` that matches an opening `[`, respecting:
-/// - Backslash escapes
-/// - Code spans (backtick sequences)
-/// - HTML tags
-/// - Autolinks
-/// - Nested brackets (allowed in link text per CommonMark)
-/// Returns the index of the `]` or null if not found.
 fn findClosingBracket(input: []const u8, start: usize) ?usize {
     var pos = start;
-    var bracket_depth: i32 = 0;
+    var depth: i32 = 0;
     while (pos < input.len) {
         const c = input[pos];
         if (c == '\\' and pos + 1 < input.len and isAsciiPunct(input[pos + 1])) {
             pos += 2;
             continue;
         }
-        // Code span: skip past the matching closing backtick sequence
         if (c == '`') {
             var tl: usize = 0;
             while (pos + tl < input.len and input[pos + tl] == '`') tl += 1;
@@ -923,20 +764,14 @@ fn findClosingBracket(input: []const u8, start: usize) ?usize {
                         break;
                     }
                     se += cl;
-                } else {
-                    se += 1;
-                }
+                } else se += 1;
             }
             if (found_close) continue;
-            // No matching close backtick; just advance past the opening sequence
             pos += tl;
             continue;
         }
-        // HTML tag or autolink: skip past >
         if (c == '<') {
-            // Check for autolink first
             if (pos + 1 < input.len) {
-                // Try to find matching >
                 if (mem.indexOfScalarPos(u8, input, pos + 1, '>')) |close| {
                     const inner = input[pos + 1 .. close];
                     if (isUriAutolink(inner) or isEmailAutolink(inner)) {
@@ -945,22 +780,21 @@ fn findClosingBracket(input: []const u8, start: usize) ?usize {
                     }
                 }
             }
-            // Try HTML tag
-            if (tryParseHtmlTag(input, pos)) |tag_end| {
-                pos = tag_end;
+            if (tryParseHtmlTag(input, pos)) |end| {
+                pos = end;
                 continue;
             }
             pos += 1;
             continue;
         }
         if (c == '[') {
-            bracket_depth += 1;
+            depth += 1;
             pos += 1;
             continue;
         }
         if (c == ']') {
-            if (bracket_depth == 0) return pos;
-            bracket_depth -= 1;
+            if (depth == 0) return pos;
+            depth -= 1;
             pos += 1;
             continue;
         }
@@ -969,9 +803,6 @@ fn findClosingBracket(input: []const u8, start: usize) ?usize {
     return null;
 }
 
-/// Try to parse [text](url "title") or [text](url) starting at `start` ('[').
-/// Handles nested brackets, and respects code spans, HTML tags, and autolinks
-/// inside the link text (which prevent the `]` from being matched).
 fn tryParseLink(input: []const u8, start: usize) ?struct {
     text: []const u8,
     url: []const u8,
@@ -979,214 +810,141 @@ fn tryParseLink(input: []const u8, start: usize) ?struct {
     end: usize,
 } {
     if (start >= input.len or input[start] != '[') return null;
-
     const be = findClosingBracket(input, start + 1) orelse return null;
     const link_text = input[start + 1 .. be];
-
     if (be + 1 >= input.len or input[be + 1] != '(') return null;
-
     var pos = be + 2;
 
     while (pos < input.len and (input[pos] == ' ' or input[pos] == '\t' or input[pos] == '\n' or input[pos] == '\r')) pos += 1;
     if (pos >= input.len) return null;
 
     var url: []const u8 = undefined;
-    if (pos < input.len and input[pos] == '<') {
-        const url_start = pos + 1;
+    if (input[pos] == '<') {
+        const us = pos + 1;
         pos += 1;
         while (pos < input.len) {
             if (input[pos] == '\\' and pos + 1 < input.len) {
                 pos += 2;
-            } else if (input[pos] == '>') {
-                break;
-            } else if (input[pos] == '<' or input[pos] == '\n') {
-                return null;
-            } else {
+            } else if (input[pos] == '>') break else if (input[pos] == '<' or input[pos] == '\n') return null else {
                 pos += 1;
             }
         }
         if (pos >= input.len) return null;
-        url = input[url_start..pos];
+        url = input[us..pos];
         pos += 1;
-    } else if (pos < input.len and input[pos] == ')') {
+    } else if (input[pos] == ')') {
         url = "";
     } else {
-        const url_start = pos;
-        var paren_depth: i32 = 0;
+        const us = pos;
+        var pd: i32 = 0;
         while (pos < input.len) {
             const ch = input[pos];
             if (ch == '\\' and pos + 1 < input.len and isAsciiPunct(input[pos + 1])) {
                 pos += 2;
             } else if (ch == '(') {
-                paren_depth += 1;
+                pd += 1;
                 pos += 1;
             } else if (ch == ')') {
-                if (paren_depth == 0) break;
-                paren_depth -= 1;
+                if (pd == 0) break;
+                pd -= 1;
                 pos += 1;
-            } else if (ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r') {
-                break;
-            } else if (ch <= 0x1f) {
-                return null;
-            } else {
+            } else if (ch == ' ' or ch == '\t' or ch == '\n' or ch == '\r') break else if (ch <= 0x1f) return null else {
                 pos += 1;
             }
         }
-        if (paren_depth != 0) return null;
-        url = input[url_start..pos];
+        if (pd != 0) return null;
+        url = input[us..pos];
     }
 
     while (pos < input.len and (input[pos] == ' ' or input[pos] == '\t' or input[pos] == '\n' or input[pos] == '\r')) pos += 1;
     if (pos >= input.len) return null;
+    if (input[pos] == ')') return .{ .text = link_text, .url = url, .title = null, .end = pos + 1 };
 
-    var title: ?[]const u8 = null;
-    if (input[pos] == ')') {
-        return .{ .text = link_text, .url = url, .title = title, .end = pos + 1 };
-    }
-
-    const title_open = input[pos];
-    const title_close: u8 = switch (title_open) {
+    const tc: u8 = switch (input[pos]) {
         '"' => '"',
         '\'' => '\'',
         '(' => ')',
         else => return null,
     };
     pos += 1;
-    const title_start = pos;
+    const ts = pos;
     while (pos < input.len) {
         if (input[pos] == '\\' and pos + 1 < input.len) {
             pos += 2;
-        } else if (input[pos] == title_close) {
-            break;
-        } else {
+        } else if (input[pos] == tc) break else {
             pos += 1;
         }
     }
     if (pos >= input.len) return null;
-    title = input[title_start..pos];
+    const title = input[ts..pos];
     pos += 1;
-
     while (pos < input.len and (input[pos] == ' ' or input[pos] == '\t' or input[pos] == '\n' or input[pos] == '\r')) pos += 1;
     if (pos >= input.len or input[pos] != ')') return null;
-
     return .{ .text = link_text, .url = url, .title = title, .end = pos + 1 };
 }
 
-// ── CommonMark delimiter-based emphasis algorithm ─────────────────────────────
-
-/// Walk backwards from `pos` to find the start of the UTF-8 character.
-/// If `pos` points to a continuation byte (0x80..0xBF), we go back
-/// up to 3 bytes to find the leading byte.
-fn utf8CharStart(input: []const u8, pos: usize) usize {
-    var p = pos;
-    // continuation bytes are 10xxxxxx (0x80..0xBF)
-    while (p > 0 and (input[p] & 0xC0) == 0x80) p -= 1;
-    return p;
-}
-
-/// Decode the UTF-8 codepoint starting at `pos` using std.unicode.
-/// Returns the codepoint and byte length, or null on invalid data.
-fn decodeUtf8At(input: []const u8, pos: usize) ?struct { cp: u21, len: u3 } {
-    if (pos >= input.len) return null;
-    const seq_len = unicode.utf8ByteSequenceLength(input[pos]) catch return null;
-    if (pos + seq_len > input.len) return null;
-    const cp = unicode.utf8Decode(input[pos..][0..seq_len]) catch return null;
-    return .{ .cp = cp, .len = seq_len };
-}
+// ── CommonMark emphasis (delimiter algorithm) ────────────────────────────────
 
 fn isUnicodeWhitespace(input: []const u8, pos: usize) bool {
     if (pos >= input.len) return false;
     const c = input[pos];
-    // ASCII whitespace
     if (c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == 0x0c or c == 0x0b) return true;
-    // Multi-byte Unicode whitespace: decode at char start
     const start = utf8CharStart(input, pos);
-    if (decodeUtf8At(input, start)) |r| {
-        return isUnicodeCodepointWhitespace(r.cp);
-    }
+    if (decodeUtf8At(input, start)) |r| return isUnicodeCodepointWhitespace(r.cp);
     return false;
 }
 
-/// Check if a Unicode codepoint is whitespace per CommonMark (Unicode Zs + ASCII whitespace).
 fn isUnicodeCodepointWhitespace(cp: u21) bool {
-    // ASCII whitespace is handled by the caller; this covers Unicode Zs category
     return switch (cp) {
-        0x00A0, // NBSP
-        0x1680, // Ogham space mark
-        0x2000...0x200A, // En quad through hair space
-        0x202F, // Narrow no-break space
-        0x205F, // Medium mathematical space
-        0x3000, // Ideographic space
-        => true,
+        0x00A0, 0x1680, 0x2000...0x200A, 0x202F, 0x205F, 0x3000 => true,
         else => false,
     };
 }
 
 fn isUnicodePunct(input: []const u8, pos: usize) bool {
     if (pos >= input.len) return false;
-    // Find the real start of the character (in case pos is a continuation byte)
     const start = utf8CharStart(input, pos);
     const c = input[start];
     if (c < 0x80) return isAsciiPunct(c);
-    if (decodeUtf8At(input, start)) |r| {
-        return isUnicodeCodepointPunct(r.cp);
-    }
+    if (decodeUtf8At(input, start)) |r| return isUnicodeCodepointPunct(r.cp);
     return false;
 }
 
-/// Check if a Unicode codepoint is in a punctuation or symbol category.
-/// Uses sorted range tables with linear scan (sufficient for the number
-/// of ranges involved; a binary search wrapper is trivial to add later).
 fn isUnicodeCodepointPunct(cp: u32) bool {
-    // Merged, sorted (start, end-inclusive) ranges covering Unicode categories
-    // Pc, Pd, Ps, Pe, Pi, Pf, Po, Sm, Sc, Sk, So that CommonMark treats as
-    // punctuation.  ASCII range (0x00–0x7F) is handled by isAsciiPunct above
-    // so the table starts at 0x00A1.
     const UR = @import("unicode_ranges.zig");
     for (UR.ranges) |r| {
-        if (cp < r[0]) return false; // sorted: no point continuing
+        if (cp < r[0]) return false;
         if (cp <= r[1]) return true;
     }
     return false;
 }
 
-fn isLeftFlanking(input: []const u8, run_start: usize, run_len: usize) bool {
-    const run_end = run_start + run_len;
-    if (run_end >= input.len) return false;
-    if (isUnicodeWhitespace(input, run_end)) return false;
-    const followed_by_punct = isUnicodePunct(input, run_end);
-    if (!followed_by_punct) return true;
-    if (run_start == 0) return true;
-    if (isUnicodeWhitespace(input, run_start - 1)) return true;
-    if (isUnicodePunct(input, run_start - 1)) return true;
-    return false;
+fn isLeftFlanking(input: []const u8, rs: usize, rl: usize) bool {
+    const re = rs + rl;
+    if (re >= input.len) return false;
+    if (isUnicodeWhitespace(input, re)) return false;
+    if (!isUnicodePunct(input, re)) return true;
+    return rs == 0 or isUnicodeWhitespace(input, rs - 1) or isUnicodePunct(input, rs - 1);
 }
 
-fn isRightFlanking(input: []const u8, run_start: usize, run_len: usize) bool {
-    const run_end = run_start + run_len;
-    if (run_start == 0) return false;
-    if (isUnicodeWhitespace(input, run_start - 1)) return false;
-    const preceded_by_punct = isUnicodePunct(input, run_start - 1);
-    if (!preceded_by_punct) return true;
-    if (run_end >= input.len) return true;
-    if (isUnicodeWhitespace(input, run_end)) return true;
-    if (isUnicodePunct(input, run_end)) return true;
-    return false;
+fn isRightFlanking(input: []const u8, rs: usize, rl: usize) bool {
+    const re = rs + rl;
+    if (rs == 0) return false;
+    if (isUnicodeWhitespace(input, rs - 1)) return false;
+    if (!isUnicodePunct(input, rs - 1)) return true;
+    return re >= input.len or isUnicodeWhitespace(input, re) or isUnicodePunct(input, re);
 }
 
-fn canOpen(input: []const u8, marker: u8, run_start: usize, run_len: usize) bool {
-    const lf = isLeftFlanking(input, run_start, run_len);
+fn canOpen(input: []const u8, marker: u8, rs: usize, rl: usize) bool {
+    const lf = isLeftFlanking(input, rs, rl);
     if (marker == '*') return lf;
-    const rf = isRightFlanking(input, run_start, run_len);
-    return lf and (!rf or (run_start > 0 and isUnicodePunct(input, run_start - 1)));
+    return lf and (!isRightFlanking(input, rs, rl) or (rs > 0 and isUnicodePunct(input, rs - 1)));
 }
 
-fn canClose(input: []const u8, marker: u8, run_start: usize, run_len: usize) bool {
-    const rf = isRightFlanking(input, run_start, run_len);
+fn canClose(input: []const u8, marker: u8, rs: usize, rl: usize) bool {
+    const rf = isRightFlanking(input, rs, rl);
     if (marker == '*') return rf;
-    const lf = isLeftFlanking(input, run_start, run_len);
-    const run_end = run_start + run_len;
-    return rf and (!lf or (run_end < input.len and isUnicodePunct(input, run_end)));
+    return rf and (!isLeftFlanking(input, rs, rl) or (rs + rl < input.len and isUnicodePunct(input, rs + rl)));
 }
 
 const Delimiter = struct {
@@ -1199,6 +957,111 @@ const Delimiter = struct {
     can_close: bool,
     active: bool,
 };
+
+/// Wrap inline nodes between opener and closer in an Emphasis or Strong node
+/// (depending on `use_count`), splice the node into the inline list, and
+/// fix up delimiter indices.
+fn wrapDelimiters(
+    allocator: Allocator,
+    inlines: *std.ArrayList(AST.Inline),
+    delimiters: *std.ArrayList(Delimiter),
+    opener_idx: usize,
+    closer_idx: usize,
+    use_count: usize,
+) !void {
+    const opener = &delimiters.items[opener_idx];
+    const closer = &delimiters.items[closer_idx];
+    const open_il = opener.inline_idx;
+    const close_il = closer.inline_idx;
+
+    // Gather children between opener and closer
+    var children = std.ArrayList(AST.Inline){};
+    var ci = open_il + 1;
+    while (ci < close_il) : (ci += 1) try children.append(allocator, inlines.items[ci]);
+
+    const node: AST.Inline = if (use_count == 2)
+        .{ .strong = .{ .children = children, .marker = closer.marker } }
+    else
+        .{ .emphasis = .{ .children = children, .marker = closer.marker } };
+
+    opener.count -= use_count;
+    closer.count -= use_count;
+
+    if (opener.count > 0)
+        inlines.items[open_il] = .{ .text = .{ .content = inlines.items[open_il].text.content[0..opener.count] } };
+    if (closer.count > 0)
+        inlines.items[close_il] = .{ .text = .{ .content = inlines.items[close_il].text.content[0..closer.count] } };
+
+    const rm_start = if (opener.count > 0) open_il + 1 else open_il;
+    const rm_end = if (closer.count > 0) close_il else close_il + 1;
+
+    if (rm_end > rm_start) {
+        const removed = rm_end - rm_start;
+        inlines.items[rm_start] = node;
+        if (removed > 1) {
+            var si = rm_start + 1;
+            while (si + removed - 1 < inlines.items.len) : (si += 1)
+                inlines.items[si] = inlines.items[si + removed - 1];
+            inlines.items.len -= removed - 1;
+        }
+        for (delimiters.items) |*d| {
+            if (d.inline_idx > rm_start and d.inline_idx < rm_end) d.active = false else if (d.inline_idx >= rm_end) d.inline_idx -= removed - 1;
+        }
+    }
+
+    var di = opener_idx + 1;
+    while (di < closer_idx) : (di += 1) delimiters.items[di].active = false;
+    if (opener.count == 0) opener.active = false;
+}
+
+fn processEmphasis(allocator: Allocator, inlines: *std.ArrayList(AST.Inline), delimiters: *std.ArrayList(Delimiter)) !void {
+    var closer_idx: usize = 0;
+    while (closer_idx < delimiters.items.len) {
+        var closer = &delimiters.items[closer_idx];
+        if (!closer.active or !closer.can_close) {
+            closer_idx += 1;
+            continue;
+        }
+
+        var found = false;
+        var oi: usize = closer_idx;
+        while (oi > 0) {
+            oi -= 1;
+            const opener = &delimiters.items[oi];
+            if (!opener.active or !opener.can_open or opener.marker != closer.marker) continue;
+            if ((opener.can_close or closer.can_open) and
+                (opener.orig_count + closer.orig_count) % 3 == 0 and
+                opener.orig_count % 3 != 0 and closer.orig_count % 3 != 0) continue;
+
+            found = true;
+            const uc: usize = if (closer.count >= 2 and opener.count >= 2) 2 else 1;
+            try wrapDelimiters(allocator, inlines, delimiters, oi, closer_idx, uc);
+            closer = &delimiters.items[closer_idx]; // refresh after splice
+            if (closer.count == 0) {
+                closer.active = false;
+                closer_idx += 1;
+            }
+            break;
+        }
+        if (!found) {
+            if (!closer.can_open) closer.active = false;
+            closer_idx += 1;
+        }
+    }
+    // Remove empty text nodes
+    var w: usize = 0;
+    for (inlines.items) |item| {
+        const skip = switch (item) {
+            .text => |t| t.content.len == 0,
+            else => false,
+        };
+        if (!skip) {
+            inlines.items[w] = item;
+            w += 1;
+        }
+    }
+    inlines.items.len = w;
+}
 
 fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap) !std.ArrayList(AST.Inline) {
     var inlines = std.ArrayList(AST.Inline){};
@@ -1224,58 +1087,19 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
 
         // Code span
         if (c == '`') {
+            if (tryParseCodeSpan(allocator, input, pos)) |r| {
+                try inlines.append(allocator, .{ .code_span = .{ .content = r.content } });
+                pos = r.end;
+                continue;
+            }
             var tl: usize = 0;
             while (pos + tl < input.len and input[pos + tl] == '`') tl += 1;
-            const cs = pos + tl;
-            var se = cs;
-            var found = false;
-            while (se < input.len) {
-                if (input[se] == '`') {
-                    var cl: usize = 0;
-                    while (se + cl < input.len and input[se + cl] == '`') cl += 1;
-                    if (cl == tl) {
-                        const raw = input[cs..se];
-                        var code_buf = std.ArrayList(u8){};
-                        for (raw) |ch| {
-                            if (ch == '\n') {
-                                try code_buf.append(allocator, ' ');
-                            } else {
-                                try code_buf.append(allocator, ch);
-                            }
-                        }
-                        const code_content = code_buf.items;
-                        var final_content: []const u8 = code_content;
-                        if (code_content.len >= 2 and code_content[0] == ' ' and code_content[code_content.len - 1] == ' ') {
-                            var all_spaces = true;
-                            for (code_content) |ch| {
-                                if (ch != ' ') {
-                                    all_spaces = false;
-                                    break;
-                                }
-                            }
-                            if (!all_spaces) {
-                                final_content = code_content[1 .. code_content.len - 1];
-                            }
-                        }
-                        const duped = try allocator.dupe(u8, final_content);
-                        code_buf.deinit(allocator);
-                        try inlines.append(allocator, .{ .code_span = .{ .content = duped } });
-                        pos = se + cl;
-                        found = true;
-                        break;
-                    }
-                    se += cl;
-                } else {
-                    se += 1;
-                }
-            }
-            if (found) continue;
             try inlines.append(allocator, .{ .text = .{ .content = input[pos .. pos + tl] } });
             pos += tl;
             continue;
         }
 
-        // Raw HTML tags / Autolinks
+        // Raw HTML / Autolinks
         if (c == '<') {
             if (mem.indexOfScalarPos(u8, input, pos + 1, '>')) |close| {
                 const inner = input[pos + 1 .. close];
@@ -1290,9 +1114,9 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
                     continue;
                 }
             }
-            if (tryParseHtmlTag(input, pos)) |tag_end| {
-                try inlines.append(allocator, .{ .html_in_line = .{ .content = input[pos..tag_end] } });
-                pos = tag_end;
+            if (tryParseHtmlTag(input, pos)) |end| {
+                try inlines.append(allocator, .{ .html_in_line = .{ .content = input[pos..end] } });
+                pos = end;
                 continue;
             }
         }
@@ -1300,9 +1124,9 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
         // Image ![alt](url) or ![alt][ref]
         if (c == '!' and pos + 1 < input.len and input[pos + 1] == '[') {
             if (tryParseLink(input, pos + 1)) |r| {
-                const alt_text = try flattenInlineText(allocator, r.text, ref_map);
+                const alt = try flattenInlineText(allocator, r.text, ref_map);
                 try inlines.append(allocator, .{ .image = .{
-                    .alt_text = alt_text,
+                    .alt_text = alt,
                     .destination = .{ .url = r.url, .title = r.title },
                     .link_type = .in_line,
                 } });
@@ -1310,22 +1134,20 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
                 continue;
             }
             if (ref_map) |rm| {
-                if (tryParseImageRefLink(allocator, input, pos, rm)) |result| {
-                    try inlines.append(allocator, result.inline_node);
-                    pos = result.end;
+                if (tryParseImageRefLink(allocator, input, pos, rm)) |r| {
+                    try inlines.append(allocator, r.inline_node);
+                    pos = r.end;
                     continue;
                 }
             }
         }
 
-        // Footnote ref [^label] or inline link [text](url) or reference link
+        // Footnote ref / inline link / reference link
         if (c == '[') {
             if (pos + 1 < input.len and input[pos + 1] == '^') {
                 if (mem.indexOfScalarPos(u8, input, pos + 2, ']')) |close| {
                     if (close > pos + 2) {
-                        try inlines.append(allocator, .{ .footnote_reference = .{
-                            .label = input[pos + 2 .. close],
-                        } });
+                        try inlines.append(allocator, .{ .footnote_reference = .{ .label = input[pos + 2 .. close] } });
                         pos = close + 1;
                         continue;
                     }
@@ -1333,10 +1155,8 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
             }
             if (tryParseLink(input, pos)) |r| {
                 var nested = try parseInlineElements(allocator, r.text, ref_map);
-                // CommonMark rule: links cannot contain other links
                 if (containsLink(nested.items)) {
                     nested.deinit(allocator);
-                    // Don't form this link; emit '[' as text and continue
                     try inlines.append(allocator, .{ .text = .{ .content = "[" } });
                     pos += 1;
                     continue;
@@ -1349,40 +1169,34 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
                 continue;
             }
             if (ref_map) |rm| {
-                if (tryParseRefLink(allocator, input, pos, rm)) |result| {
-                    try inlines.append(allocator, result.inline_node);
-                    pos = result.end;
+                if (tryParseRefLink(allocator, input, pos, rm)) |r| {
+                    try inlines.append(allocator, r.inline_node);
+                    pos = r.end;
                     continue;
                 }
             }
         }
 
-        // Emphasis/strong delimiter run
+        // Emphasis/strong delimiter
         if (c == '*' or c == '_') {
-            const marker = c;
-            const run_start = pos;
-            var run_len: usize = 0;
-            while (pos + run_len < input.len and input[pos + run_len] == marker) run_len += 1;
-
-            const opens = canOpen(input, marker, run_start, run_len);
-            const closes = canClose(input, marker, run_start, run_len);
-
-            try inlines.append(allocator, .{ .text = .{ .content = input[run_start .. run_start + run_len] } });
-
-            if (opens or closes) {
+            const rs = pos;
+            var rl: usize = 0;
+            while (pos + rl < input.len and input[pos + rl] == c) rl += 1;
+            const opens = canOpen(input, c, rs, rl);
+            const closes = canClose(input, c, rs, rl);
+            try inlines.append(allocator, .{ .text = .{ .content = input[rs .. rs + rl] } });
+            if (opens or closes)
                 try delimiters.append(allocator, .{
                     .inline_idx = inlines.items.len - 1,
-                    .input_pos = run_start,
-                    .count = run_len,
-                    .orig_count = run_len,
-                    .marker = marker,
+                    .input_pos = rs,
+                    .count = rl,
+                    .orig_count = rl,
+                    .marker = c,
                     .can_open = opens,
                     .can_close = closes,
                     .active = true,
                 });
-            }
-
-            pos += run_len;
+            pos += rl;
             continue;
         }
 
@@ -1413,11 +1227,7 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
                     else => {},
                 }
             }
-            if (is_hard) {
-                try inlines.append(allocator, .{ .hard_break = .{} });
-            } else {
-                try inlines.append(allocator, .{ .soft_break = .{} });
-            }
+            try inlines.append(allocator, if (is_hard) .{ .hard_break = .{} } else .{ .soft_break = .{} });
             pos += 1;
         } else {
             try inlines.append(allocator, .{ .text = .{ .content = input[pos .. pos + 1] } });
@@ -1429,8 +1239,40 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
     return inlines;
 }
 
+/// Try to parse a code span starting at `pos` (which points to the first backtick).
+fn tryParseCodeSpan(allocator: Allocator, input: []const u8, pos: usize) ?struct { content: []const u8, end: usize } {
+    var tl: usize = 0;
+    while (pos + tl < input.len and input[pos + tl] == '`') tl += 1;
+    const cs = pos + tl;
+    var se = cs;
+    while (se < input.len) {
+        if (input[se] == '`') {
+            var cl: usize = 0;
+            while (se + cl < input.len and input[se + cl] == '`') cl += 1;
+            if (cl == tl) {
+                const raw = input[cs..se];
+                var code_buf = std.ArrayList(u8){};
+                for (raw) |ch| code_buf.append(allocator, if (ch == '\n') ' ' else ch) catch return null;
+                var final: []const u8 = code_buf.items;
+                if (final.len >= 2 and final[0] == ' ' and final[final.len - 1] == ' ') {
+                    var all_spaces = true;
+                    for (final) |ch| if (ch != ' ') {
+                        all_spaces = false;
+                        break;
+                    };
+                    if (!all_spaces) final = final[1 .. final.len - 1];
+                }
+                const duped = allocator.dupe(u8, final) catch return null;
+                code_buf.deinit(allocator);
+                return .{ .content = duped, .end = se + cl };
+            }
+            se += cl;
+        } else se += 1;
+    }
+    return null;
+}
+
 fn flattenInlineText(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap) Allocator.Error![]const u8 {
-    // Parse the text as inline elements, then flatten to plain text
     var inlines = try parseInlineElements(allocator, input, ref_map);
     defer inlines.deinit(allocator);
     var buf = std.ArrayList(u8){};
@@ -1453,431 +1295,167 @@ fn flattenInline(allocator: Allocator, buf: *std.ArrayList(u8), item: AST.Inline
         },
         .image => |img| try buf.appendSlice(allocator, img.alt_text),
         .soft_break => try buf.appendSlice(allocator, "\n"),
-        .hard_break => {},
-        else => {},
+        .hard_break, .autolink, .footnote_reference, .html_in_line => {},
     }
 }
 
 fn tryParseHtmlTag(input: []const u8, pos: usize) ?usize {
-    if (pos >= input.len or input[pos] != '<') return null;
-    if (pos + 1 >= input.len) return null;
+    if (pos >= input.len or input[pos] != '<' or pos + 1 >= input.len) return null;
     const next = input[pos + 1];
+    // Opening tag
     if ((next >= 'a' and next <= 'z') or (next >= 'A' and next <= 'Z')) {
         var i = pos + 2;
-        // Tag name: [a-zA-Z][a-zA-Z0-9-]*
-        while (i < input.len and ((input[i] >= 'a' and input[i] <= 'z') or
-            (input[i] >= 'A' and input[i] <= 'Z') or
-            (input[i] >= '0' and input[i] <= '9') or input[i] == '-'))
-        {
-            i += 1;
-        }
-        // After tag name: optional whitespace, then optional attributes, then optional /, then >
-        // If not > or / immediately, there must be whitespace before attributes
+        while (i < input.len and ((input[i] >= 'a' and input[i] <= 'z') or (input[i] >= 'A' and input[i] <= 'Z') or
+            (input[i] >= '0' and input[i] <= '9') or input[i] == '-')) i += 1;
         while (i < input.len) {
-            // Skip whitespace
             while (i < input.len and (input[i] == ' ' or input[i] == '\t' or input[i] == '\n' or input[i] == '\r')) i += 1;
             if (i >= input.len) return null;
             if (input[i] == '>') return i + 1;
             if (input[i] == '/') {
                 i += 1;
-                if (i < input.len and input[i] == '>') return i + 1;
-                return null;
+                return if (i < input.len and input[i] == '>') i + 1 else null;
             }
-            // Must be an attribute: attribute name starts with [a-zA-Z_:]
             if (!((input[i] >= 'a' and input[i] <= 'z') or (input[i] >= 'A' and input[i] <= 'Z') or input[i] == '_' or input[i] == ':')) return null;
             i += 1;
-            // Attribute name continues with [a-zA-Z0-9_.:-]
-            while (i < input.len and ((input[i] >= 'a' and input[i] <= 'z') or
-                (input[i] >= 'A' and input[i] <= 'Z') or
-                (input[i] >= '0' and input[i] <= '9') or
-                input[i] == '_' or input[i] == '.' or input[i] == ':' or input[i] == '-'))
-            {
-                i += 1;
-            }
-            // Optional: = attribute_value
-            // Skip whitespace before =
+            while (i < input.len and ((input[i] >= 'a' and input[i] <= 'z') or (input[i] >= 'A' and input[i] <= 'Z') or
+                (input[i] >= '0' and input[i] <= '9') or input[i] == '_' or input[i] == '.' or input[i] == ':' or input[i] == '-')) i += 1;
             var j = i;
             while (j < input.len and (input[j] == ' ' or input[j] == '\t' or input[j] == '\n' or input[j] == '\r')) j += 1;
             if (j < input.len and input[j] == '=') {
                 j += 1;
-                // Skip whitespace after =
                 while (j < input.len and (input[j] == ' ' or input[j] == '\t' or input[j] == '\n' or input[j] == '\r')) j += 1;
                 if (j >= input.len) return null;
                 if (input[j] == '\'' or input[j] == '"') {
-                    // Quoted attribute value
-                    const quote = input[j];
+                    const q = input[j];
                     j += 1;
-                    while (j < input.len and input[j] != quote) j += 1;
+                    while (j < input.len and input[j] != q) j += 1;
                     if (j >= input.len) return null;
-                    j += 1; // skip closing quote
+                    j += 1;
                 } else {
-                    // Unquoted attribute value: non-empty, no spaces, no quotes, no = < > `
-                    const val_start = j;
-                    while (j < input.len and input[j] != ' ' and input[j] != '\t' and
-                        input[j] != '\n' and input[j] != '\r' and
-                        input[j] != '"' and input[j] != '\'' and input[j] != '=' and
-                        input[j] != '<' and input[j] != '>' and input[j] != '`')
-                    {
-                        j += 1;
-                    }
-                    if (j == val_start) return null; // empty unquoted value
+                    const vs = j;
+                    while (j < input.len and input[j] != ' ' and input[j] != '\t' and input[j] != '\n' and input[j] != '\r' and
+                        input[j] != '"' and input[j] != '\'' and input[j] != '=' and input[j] != '<' and input[j] != '>' and input[j] != '`') j += 1;
+                    if (j == vs) return null;
                 }
                 i = j;
-            } else {
-                i = j; // no value, just attribute name
-            }
+            } else i = j;
         }
         return null;
     }
+    // Closing tag
     if (next == '/') {
         var i = pos + 2;
         if (i >= input.len or !((input[i] >= 'a' and input[i] <= 'z') or (input[i] >= 'A' and input[i] <= 'Z'))) return null;
-        while (i < input.len and ((input[i] >= 'a' and input[i] <= 'z') or
-            (input[i] >= 'A' and input[i] <= 'Z') or
-            (input[i] >= '0' and input[i] <= '9') or input[i] == '-'))
-        {
-            i += 1;
-        }
+        while (i < input.len and ((input[i] >= 'a' and input[i] <= 'z') or (input[i] >= 'A' and input[i] <= 'Z') or
+            (input[i] >= '0' and input[i] <= '9') or input[i] == '-')) i += 1;
         while (i < input.len and (input[i] == ' ' or input[i] == '\t')) i += 1;
-        if (i < input.len and input[i] == '>') return i + 1;
-        return null;
+        return if (i < input.len and input[i] == '>') i + 1 else null;
     }
+    // Comment
     if (pos + 3 < input.len and input[pos + 1] == '!' and input[pos + 2] == '-' and input[pos + 3] == '-') {
         var i = pos + 4;
-        while (i + 2 < input.len) {
-            if (input[i] == '-' and input[i + 1] == '-' and input[i + 2] == '>') return i + 3;
-            i += 1;
-        }
+        while (i + 2 < input.len) : (i += 1) if (input[i] == '-' and input[i + 1] == '-' and input[i + 2] == '>') return i + 3;
         return null;
     }
+    // PI
     if (next == '?') {
         var i = pos + 2;
-        while (i + 1 < input.len) {
-            if (input[i] == '?' and input[i + 1] == '>') return i + 2;
-            i += 1;
-        }
+        while (i + 1 < input.len) : (i += 1) if (input[i] == '?' and input[i + 1] == '>') return i + 2;
         return null;
     }
+    // CDATA
     if (pos + 8 < input.len and mem.startsWith(u8, input[pos..], "<![CDATA[")) {
         var i = pos + 9;
-        while (i + 2 < input.len) {
-            if (input[i] == ']' and input[i + 1] == ']' and input[i + 2] == '>') return i + 3;
-            i += 1;
-        }
+        while (i + 2 < input.len) : (i += 1) if (input[i] == ']' and input[i + 1] == ']' and input[i + 2] == '>') return i + 3;
         return null;
     }
+    // Declaration
     if (next == '!' and pos + 2 < input.len and ((input[pos + 2] >= 'a' and input[pos + 2] <= 'z') or (input[pos + 2] >= 'A' and input[pos + 2] <= 'Z'))) {
         var i = pos + 3;
         while (i < input.len and input[i] != '>') i += 1;
-        if (i < input.len) return i + 1;
-        return null;
+        return if (i < input.len) i + 1 else null;
     }
     return null;
 }
 
-fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap) ?struct {
-    inline_node: AST.Inline,
-    end: usize,
-} {
+const InlineParseResult = struct { inline_node: AST.Inline, end: usize };
+
+fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap) ?InlineParseResult {
     if (start >= input.len or input[start] != '!' or start + 1 >= input.len or input[start + 1] != '[') return null;
     const be = findClosingBracket(input, start + 2) orelse return null;
     const raw_alt = input[start + 2 .. be];
 
+    // Full reference: ![alt][label]
     if (be + 1 < input.len and input[be + 1] == '[') {
-        var le: usize = be + 2;
-        while (le < input.len and input[le] != ']') : (le += 1) {}
-        if (le < input.len) {
-            const ref_label = input[be + 2 .. le];
-            const norm = normalizeLabel(allocator, ref_label) catch return null;
-            defer allocator.free(norm);
-            if (rm.get(norm)) |dest| {
-                const url_copy = allocator.dupe(u8, dest.url) catch return null;
-                const title_copy: ?[]const u8 = if (dest.title) |t| (allocator.dupe(u8, t) catch return null) else null;
-                const flat_alt = flattenInlineText(allocator, raw_alt, rm) catch return null;
-                return .{ .inline_node = .{ .image = .{
-                    .alt_text = flat_alt,
-                    .destination = .{ .url = url_copy, .title = title_copy },
-                    .link_type = .reference,
-                } }, .end = le + 1 };
-            }
-        }
-    }
-
-    if (be + 2 < input.len and input[be + 1] == '[' and input[be + 2] == ']') {
-        const norm = normalizeLabel(allocator, raw_alt) catch return null;
-        defer allocator.free(norm);
-        if (rm.get(norm)) |dest| {
-            const url_copy = allocator.dupe(u8, dest.url) catch return null;
-            const title_copy: ?[]const u8 = if (dest.title) |t| (allocator.dupe(u8, t) catch return null) else null;
-            const flat_alt = flattenInlineText(allocator, raw_alt, rm) catch return null;
-            return .{ .inline_node = .{ .image = .{
-                .alt_text = flat_alt,
-                .destination = .{ .url = url_copy, .title = title_copy },
-                .link_type = .collapsed,
-            } }, .end = be + 3 };
-        }
-    }
-
-    {
-        const norm = normalizeLabel(allocator, raw_alt) catch return null;
-        defer allocator.free(norm);
-        if (rm.get(norm)) |dest| {
-            const url_copy = allocator.dupe(u8, dest.url) catch return null;
-            const title_copy: ?[]const u8 = if (dest.title) |t| (allocator.dupe(u8, t) catch return null) else null;
-            const flat_alt = flattenInlineText(allocator, raw_alt, rm) catch return null;
-            return .{ .inline_node = .{ .image = .{
-                .alt_text = flat_alt,
-                .destination = .{ .url = url_copy, .title = title_copy },
-                .link_type = .shortcut,
-            } }, .end = be + 1 };
-        }
-    }
-
-    return null;
-}
-
-/// CommonMark "process emphasis" algorithm (§6.4).
-fn processEmphasis(allocator: Allocator, inlines: *std.ArrayList(AST.Inline), delimiters: *std.ArrayList(Delimiter)) !void {
-    var closer_idx: usize = 0;
-    while (closer_idx < delimiters.items.len) {
-        var closer = &delimiters.items[closer_idx];
-        if (!closer.active or !closer.can_close) {
-            closer_idx += 1;
-            continue;
-        }
-
-        var found_opener = false;
-        var opener_idx: usize = closer_idx;
-        while (opener_idx > 0) {
-            opener_idx -= 1;
-            const opener = &delimiters.items[opener_idx];
-            if (!opener.active or !opener.can_open or opener.marker != closer.marker) continue;
-
-            if ((opener.can_close or closer.can_open) and
-                (opener.orig_count + closer.orig_count) % 3 == 0 and
-                opener.orig_count % 3 != 0 and closer.orig_count % 3 != 0)
-            {
-                continue;
-            }
-
-            found_opener = true;
-            const use_count: usize = if (closer.count >= 2 and opener.count >= 2) 2 else 1;
-
-            if (use_count == 2) {
-                var strong = AST.Strong.init(allocator, closer.marker);
-                const open_inline = opener.inline_idx;
-                const close_inline = closer.inline_idx;
-                const children_start = open_inline + 1;
-                const children_end = close_inline;
-                var ci = children_start;
-                while (ci < children_end) {
-                    try strong.children.append(allocator, inlines.items[ci]);
-                    ci += 1;
-                }
-
-                opener.count -= 2;
-                closer.count -= 2;
-
-                if (opener.count > 0) {
-                    const old_content = inlines.items[open_inline].text.content;
-                    inlines.items[open_inline] = .{ .text = .{ .content = old_content[0..opener.count] } };
-                }
-
-                if (closer.count > 0) {
-                    const old_content = inlines.items[close_inline].text.content;
-                    inlines.items[close_inline] = .{ .text = .{ .content = old_content[0..closer.count] } };
-                }
-
-                const remove_start = if (opener.count > 0) open_inline + 1 else open_inline;
-                const remove_end = if (closer.count > 0) close_inline else close_inline + 1;
-
-                if (remove_end > remove_start) {
-                    const removed = remove_end - remove_start;
-                    inlines.items[remove_start] = .{ .strong = strong };
-                    if (removed > 1) {
-                        var si = remove_start + 1;
-                        while (si + removed - 1 < inlines.items.len) {
-                            inlines.items[si] = inlines.items[si + removed - 1];
-                            si += 1;
-                        }
-                        inlines.items.len -= removed - 1;
-                    }
-                    for (delimiters.items) |*d| {
-                        if (d.inline_idx > remove_start and d.inline_idx < remove_end) {
-                            d.active = false;
-                        } else if (d.inline_idx >= remove_end) {
-                            d.inline_idx -= removed - 1;
-                        }
-                    }
-                    closer = &delimiters.items[closer_idx];
-                }
-
-                var di = opener_idx + 1;
-                while (di < closer_idx) {
-                    delimiters.items[di].active = false;
-                    di += 1;
-                }
-
-                if (opener.count == 0) opener.active = false;
-                if (closer.count == 0) {
-                    closer.active = false;
-                    closer_idx += 1;
-                }
-            } else {
-                var emph = AST.Emphasis.init(allocator, closer.marker);
-                const open_inline = opener.inline_idx;
-                const close_inline = closer.inline_idx;
-
-                var ci = open_inline + 1;
-                while (ci < close_inline) {
-                    try emph.children.append(allocator, inlines.items[ci]);
-                    ci += 1;
-                }
-
-                opener.count -= 1;
-                closer.count -= 1;
-
-                if (opener.count > 0) {
-                    const old_content = inlines.items[open_inline].text.content;
-                    inlines.items[open_inline] = .{ .text = .{ .content = old_content[0..opener.count] } };
-                }
-
-                if (closer.count > 0) {
-                    const old_content = inlines.items[close_inline].text.content;
-                    inlines.items[close_inline] = .{ .text = .{ .content = old_content[0..closer.count] } };
-                }
-
-                const remove_start = if (opener.count > 0) open_inline + 1 else open_inline;
-                const remove_end = if (closer.count > 0) close_inline else close_inline + 1;
-
-                if (remove_end > remove_start) {
-                    const removed = remove_end - remove_start;
-                    inlines.items[remove_start] = .{ .emphasis = emph };
-                    if (removed > 1) {
-                        var si = remove_start + 1;
-                        while (si + removed - 1 < inlines.items.len) {
-                            inlines.items[si] = inlines.items[si + removed - 1];
-                            si += 1;
-                        }
-                        inlines.items.len -= removed - 1;
-                    }
-                    for (delimiters.items) |*d| {
-                        if (d.inline_idx > remove_start and d.inline_idx < remove_end) {
-                            d.active = false;
-                        } else if (d.inline_idx >= remove_end) {
-                            d.inline_idx -= removed - 1;
-                        }
-                    }
-                    closer = &delimiters.items[closer_idx];
-                }
-
-                var di = opener_idx + 1;
-                while (di < closer_idx) {
-                    delimiters.items[di].active = false;
-                    di += 1;
-                }
-
-                if (opener.count == 0) opener.active = false;
-                if (closer.count == 0) {
-                    closer.active = false;
-                    closer_idx += 1;
-                }
-            }
-            break;
-        }
-
-        if (!found_opener) {
-            if (!closer.can_open) {
-                closer.active = false;
-            }
-            closer_idx += 1;
-        }
-    }
-
-    // Remove empty text nodes left by consumed delimiters
-    var write: usize = 0;
-    for (inlines.items) |item| {
-        const skip = switch (item) {
-            .text => |t| t.content.len == 0,
-            else => false,
-        };
-        if (!skip) {
-            inlines.items[write] = item;
-            write += 1;
-        }
-    }
-    inlines.items.len = write;
-}
-
-fn tryParseRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap) ?struct {
-    inline_node: AST.Inline,
-    end: usize,
-} {
-    if (start >= input.len or input[start] != '[') return null;
-
-    const be = findClosingBracket(input, start + 1) orelse return null;
-    const link_text = input[start + 1 .. be];
-
-    // Track whether we attempted a full reference [text][label] — if so, don't
-    // fall back to shortcut even if label lookup fails.
-    var tried_full_ref = false;
-
-    if (be + 1 < input.len and input[be + 1] == '[') {
-        tried_full_ref = true;
-
-        // Collapsed reference: [text][]
+        // Collapsed: ![alt][]
         if (be + 2 < input.len and input[be + 2] == ']') {
-            const norm = normalizeLabel(allocator, link_text) catch return null;
-            defer allocator.free(norm);
-            if (rm.get(norm)) |dest| {
-                const url_copy = allocator.dupe(u8, dest.url) catch return null;
-                const title_copy: ?[]const u8 = if (dest.title) |t| (allocator.dupe(u8, t) catch return null) else null;
-                var link = AST.Link.init(allocator, .{ .url = url_copy, .title = title_copy }, .collapsed);
-                var nested = parseInlineElements(allocator, link_text, rm) catch return null;
-                defer nested.deinit(allocator);
-                if (containsLink(nested.items)) return null;
-                for (nested.items) |item| link.children.append(allocator, item) catch return null;
-                return .{ .inline_node = .{ .link = link }, .end = be + 3 };
+            if (resolveRef(allocator, rm, raw_alt)) |ref| {
+                const flat = flattenInlineText(allocator, raw_alt, rm) catch return null;
+                return .{ .inline_node = .{ .image = .{ .alt_text = flat, .destination = .{ .url = ref.url, .title = ref.title }, .link_type = .collapsed } }, .end = be + 3 };
             }
         } else {
-            // Full reference: [text][label]
             var le: usize = be + 2;
-            while (le < input.len and input[le] != ']') : (le += 1) {}
+            while (le < input.len and input[le] != ']') le += 1;
             if (le < input.len) {
-                const ref_label = input[be + 2 .. le];
-                const norm = normalizeLabel(allocator, ref_label) catch return null;
-                defer allocator.free(norm);
-                if (rm.get(norm)) |dest| {
-                    const url_copy = allocator.dupe(u8, dest.url) catch return null;
-                    const title_copy: ?[]const u8 = if (dest.title) |t| (allocator.dupe(u8, t) catch return null) else null;
-                    var link = AST.Link.init(allocator, .{ .url = url_copy, .title = title_copy }, .reference);
-                    var nested = parseInlineElements(allocator, link_text, rm) catch return null;
-                    defer nested.deinit(allocator);
-                    if (containsLink(nested.items)) return null;
-                    for (nested.items) |item| link.children.append(allocator, item) catch return null;
-                    return .{ .inline_node = .{ .link = link }, .end = le + 1 };
+                if (resolveRef(allocator, rm, input[be + 2 .. le])) |ref| {
+                    const flat = flattenInlineText(allocator, raw_alt, rm) catch return null;
+                    return .{ .inline_node = .{ .image = .{ .alt_text = flat, .destination = .{ .url = ref.url, .title = ref.title }, .link_type = .reference } }, .end = le + 1 };
                 }
             }
         }
     }
+    // Shortcut: ![alt]
+    if (resolveRef(allocator, rm, raw_alt)) |ref| {
+        const flat = flattenInlineText(allocator, raw_alt, rm) catch return null;
+        return .{ .inline_node = .{ .image = .{ .alt_text = flat, .destination = .{ .url = ref.url, .title = ref.title }, .link_type = .shortcut } }, .end = be + 1 };
+    }
+    return null;
+}
 
-    // Shortcut reference: [text] — only if we didn't already try a full/collapsed reference
-    if (!tried_full_ref) {
-        const norm = normalizeLabel(allocator, link_text) catch return null;
-        defer allocator.free(norm);
-        if (rm.get(norm)) |dest| {
-            const url_copy = allocator.dupe(u8, dest.url) catch return null;
-            const title_copy: ?[]const u8 = if (dest.title) |t| (allocator.dupe(u8, t) catch return null) else null;
-            var link = AST.Link.init(allocator, .{ .url = url_copy, .title = title_copy }, .shortcut);
-            var nested = parseInlineElements(allocator, link_text, rm) catch return null;
-            defer nested.deinit(allocator);
-            if (containsLink(nested.items)) return null;
-            for (nested.items) |item| link.children.append(allocator, item) catch return null;
-            return .{ .inline_node = .{ .link = link }, .end = be + 1 };
+fn tryParseRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap) ?InlineParseResult {
+    if (start >= input.len or input[start] != '[') return null;
+    const be = findClosingBracket(input, start + 1) orelse return null;
+    const link_text = input[start + 1 .. be];
+    var tried_full = false;
+
+    if (be + 1 < input.len and input[be + 1] == '[') {
+        tried_full = true;
+        // Collapsed: [text][]
+        if (be + 2 < input.len and input[be + 2] == ']') {
+            if (resolveRef(allocator, rm, link_text)) |ref|
+                return buildRefLink(allocator, link_text, ref, .collapsed, be + 3, rm);
+        } else {
+            // Full: [text][label]
+            var le: usize = be + 2;
+            while (le < input.len and input[le] != ']') le += 1;
+            if (le < input.len) {
+                if (resolveRef(allocator, rm, input[be + 2 .. le])) |ref|
+                    return buildRefLink(allocator, link_text, ref, .reference, le + 1, rm);
+            }
         }
     }
-
+    // Shortcut: [text]
+    if (!tried_full) {
+        if (resolveRef(allocator, rm, link_text)) |ref|
+            return buildRefLink(allocator, link_text, ref, .shortcut, be + 1, rm);
+    }
     return null;
+}
+
+fn buildRefLink(
+    allocator: Allocator,
+    text: []const u8,
+    ref: ResolvedRef,
+    link_type: AST.LinkType,
+    end: usize,
+    rm: ?*const RefMap,
+) ?InlineParseResult {
+    var link = AST.Link.init(allocator, .{ .url = ref.url, .title = ref.title }, link_type);
+    var nested = parseInlineElements(allocator, text, rm) catch return null;
+    defer nested.deinit(allocator);
+    if (containsLink(nested.items)) return null;
+    for (nested.items) |item| link.children.append(allocator, item) catch return null;
+    return .{ .inline_node = .{ .link = link }, .end = end };
 }
 
 // ── Block parser ──────────────────────────────────────────────────────────────
@@ -1887,7 +1465,6 @@ const Self = @This();
 pub fn init() Self {
     return Self{};
 }
-
 pub fn deinit(_: *Self, _: Allocator) void {}
 
 fn appendInlines(allocator: Allocator, dest: *std.ArrayList(AST.Inline), content: []const u8, ref_map: ?*const RefMap) !void {
@@ -1911,438 +1488,237 @@ pub fn parseMarkdown(self: Self, allocator: Allocator, input: []const u8) !AST.D
     return self.parseMarkdownWithRefs(allocator, input, &ref_map);
 }
 
+/// Split input into lines, normalising CRLF/CR to LF.
+fn splitLines(allocator: Allocator, input: []const u8) !std.ArrayList([]const u8) {
+    var list = std.ArrayList([]const u8){};
+    var it = mem.splitScalar(u8, input, '\n');
+    while (it.next()) |raw| {
+        const line = if (raw.len > 0 and raw[raw.len - 1] == '\r') raw[0 .. raw.len - 1] else raw;
+        try list.append(allocator, line);
+    }
+    return list;
+}
+
+/// Skip optional `---`/`+++`/`%%%` frontmatter; return first content line index.
+fn skipFrontmatter(lines: []const []const u8) usize {
+    if (lines.len == 0) return 0;
+    const fl = trimLine(lines[0]);
+    if (!mem.eql(u8, fl, "---") and !mem.eql(u8, fl, "+++") and !mem.eql(u8, fl, "%%%")) return 0;
+    var fi: usize = 1;
+    while (fi < lines.len) {
+        const tl = trimLine(lines[fi]);
+        fi += 1;
+        if (mem.eql(u8, tl, "---") or mem.eql(u8, tl, "+++") or mem.eql(u8, tl, "%%%")) return fi;
+    }
+    return 0;
+}
+
 fn collectLinkRefDefs(allocator: Allocator, input: []const u8, ref_map: *RefMap) !void {
-    var lines_list = std.ArrayList([]const u8){};
+    var lines_list = try splitLines(allocator, input);
     defer lines_list.deinit(allocator);
-    {
-        var it = mem.splitScalar(u8, input, '\n');
-        while (it.next()) |raw| {
-            const line = if (raw.len > 0 and raw[raw.len - 1] == '\r') raw[0 .. raw.len - 1] else raw;
-            try lines_list.append(allocator, line);
-        }
-    }
     const lines = lines_list.items;
-    var i: usize = 0;
+    var i = skipFrontmatter(lines);
 
-    // Skip frontmatter
-    if (lines.len > 0) {
-        const fl = trimLine(lines[0]);
-        if (mem.eql(u8, fl, "---") or mem.eql(u8, fl, "+++") or mem.eql(u8, fl, "%%%")) {
-            var fi: usize = 1;
-            while (fi < lines.len) {
-                const tl = trimLine(lines[fi]);
-                fi += 1;
-                if (mem.eql(u8, tl, "---") or mem.eql(u8, tl, "+++") or mem.eql(u8, tl, "%%%")) {
-                    i = fi;
-                    break;
-                }
-            }
-        }
-    }
-
-    // Track whether we're in a paragraph context. Link ref defs cannot
-    // interrupt paragraphs per CommonMark.
     var in_paragraph = false;
-    var in_fenced_code = false;
+    var in_fenced = false;
     var fence_info: ?parsers.FenceInfo = null;
 
     while (i < lines.len) {
         const line = lines[i];
         const t = trimLine(line);
 
-        // Handle fenced code blocks — skip everything inside them
-        if (in_fenced_code) {
-            if (fence_info) |fi| {
-                if (parsers.isFenceEnd(line, fi)) {
-                    in_fenced_code = false;
-                    fence_info = null;
-                }
-            }
+        if (in_fenced) {
+            if (fence_info) |fi| if (parsers.isFenceEnd(line, fi)) {
+                in_fenced = false;
+                fence_info = null;
+            };
             i += 1;
             continue;
         }
-
         if (parsers.tryFenceStart(line)) |fi| {
-            in_fenced_code = true;
+            in_fenced = true;
             fence_info = fi;
             in_paragraph = false;
             i += 1;
             continue;
         }
-
-        // Blank line ends paragraph context
         if (t.len == 0) {
             in_paragraph = false;
             i += 1;
             continue;
         }
-
-        // Block-level elements that end paragraph context
         if (t[0] == '#' or isThematicBreak(t)) {
             in_paragraph = false;
             i += 1;
             continue;
         }
 
-        // Blockquote: strip `> ` prefix and check for link ref defs inside
+        // Blockquote: strip prefixes and scan inner content for ref defs
         if (t[0] == '>') {
             in_paragraph = false;
-            // Collect all blockquote lines, strip `> ` prefix, and scan for link ref defs
-            var bq_content = std.ArrayList(u8){};
+            var bq = std.ArrayList(u8){};
             while (i < lines.len) {
-                const bq_line = lines[i];
-                const bq_t = trimLine(bq_line);
-                if (bq_t.len == 0) break;
-                if (bq_t[0] != '>') break;
-                // Strip `>` and optional following space
-                const stripped = if (bq_t.len > 1 and bq_t[1] == ' ') bq_t[2..] else bq_t[1..];
-                if (bq_content.items.len > 0) try bq_content.append(allocator, '\n');
-                try bq_content.appendSlice(allocator, stripped);
+                const bt = trimLine(lines[i]);
+                if (bt.len == 0 or bt[0] != '>') break;
+                const stripped = if (bt.len > 1 and bt[1] == ' ') bt[2..] else bt[1..];
+                if (bq.items.len > 0) try bq.append(allocator, '\n');
+                try bq.appendSlice(allocator, stripped);
                 i += 1;
             }
-            // Try to extract link ref defs from blockquote content
-            if (bq_content.items.len > 0) {
-                var bq_lines_list = std.ArrayList([]const u8){};
-                defer bq_lines_list.deinit(allocator);
-                var bq_it = mem.splitScalar(u8, bq_content.items, '\n');
-                while (bq_it.next()) |bl| try bq_lines_list.append(allocator, bl);
-                const bq_lines = bq_lines_list.items;
+            if (bq.items.len > 0) {
+                var inner = try splitLines(allocator, bq.items);
+                defer inner.deinit(allocator);
                 var bi: usize = 0;
-                while (bi < bq_lines.len) {
-                    const bl = bq_lines[bi];
-                    const bl_t = mem.trimLeft(u8, bl, " ");
-                    if (bl_t.len > 0 and bl_t[0] == '[' and !(bl_t.len > 1 and bl_t[1] == '^')) {
-                        var candidate = std.ArrayList(u8){};
-                        try candidate.appendSlice(allocator, bl);
-                        var bj = bi + 1;
-                        var bl_count: usize = 1;
-                        while (bj < bq_lines.len and bl_count < 5) : (bj += 1) {
-                            const bnext = bq_lines[bj];
-                            if (trimLine(bnext).len == 0) break;
-                            try candidate.append(allocator, '\n');
-                            try candidate.appendSlice(allocator, bnext);
-                            bl_count += 1;
-                        }
-                        if (parseLinkRefDef(candidate.items)) |def| {
-                            const norm = try normalizeLabel(allocator, def.label);
-                            if (!ref_map.contains(norm)) {
-                                const url_dupe = try allocator.dupe(u8, def.url);
-                                const title_dupe: ?[]const u8 = if (def.title) |tit| try allocator.dupe(u8, tit) else null;
-                                try ref_map.put(norm, .{ .url = url_dupe, .title = title_dupe });
-                            } else {
-                                allocator.free(norm);
-                            }
-                            var consumed: usize = 1;
-                            var ci: usize = 0;
-                            while (ci < def.consumed and ci < candidate.items.len) : (ci += 1) {
-                                if (candidate.items[ci] == '\n') consumed += 1;
-                            }
-                            candidate.deinit(allocator);
-                            bi += consumed;
-                            continue;
-                        }
-                        candidate.deinit(allocator);
-                    }
-                    bi += 1;
+                while (bi < inner.items.len) {
+                    if (try tryConsumeLinkRefDef(allocator, inner.items, bi, 5, ref_map)) |consumed| {
+                        bi += consumed;
+                    } else bi += 1;
                 }
             }
-            bq_content.deinit(allocator);
+            bq.deinit(allocator);
             continue;
         }
 
-        // Indented code block (4 spaces)
         if (parsers.tryIndentedCode(line) != null and !in_paragraph) {
             i += 1;
             continue;
         }
-
-        // Setext heading underline ends the paragraph (the para becomes a heading)
         if (in_paragraph and (isSetextEqLine(t) or isSetextDashLine(t))) {
             in_paragraph = false;
             i += 1;
             continue;
         }
-
-        // List items and blockquotes start new block context
         if (bulletListContentColumn(line) != null or orderedListContentColumn(line) != null) {
             in_paragraph = false;
             i += 1;
             continue;
         }
 
-        // Try link reference definition — only if NOT in paragraph context
-        const trimmed_left = mem.trimLeft(u8, line, " ");
-        if (!in_paragraph and trimmed_left.len > 0 and trimmed_left[0] == '[' and
-            !(trimmed_left.len > 1 and trimmed_left[1] == '^'))
-        {
-            var candidate = std.ArrayList(u8){};
-            try candidate.appendSlice(allocator, line);
-            var lrd_j = i + 1;
-            var lrd_lines: usize = 1;
-            while (lrd_j < lines.len and lrd_lines < 5) : (lrd_j += 1) {
-                const next = lines[lrd_j];
-                if (trimLine(next).len == 0) break;
-                try candidate.append(allocator, '\n');
-                try candidate.appendSlice(allocator, next);
-                lrd_lines += 1;
-            }
-
-            if (parseLinkRefDef(candidate.items)) |def| {
-                const norm = try normalizeLabel(allocator, def.label);
-                if (!ref_map.contains(norm)) {
-                    const url_dupe = try allocator.dupe(u8, def.url);
-                    const title_dupe: ?[]const u8 = if (def.title) |tit| try allocator.dupe(u8, tit) else null;
-                    try ref_map.put(norm, .{ .url = url_dupe, .title = title_dupe });
-                } else {
-                    allocator.free(norm);
-                }
-                // Count how many lines were consumed
-                var consumed_lines: usize = 1;
-                var ci: usize = 0;
-                while (ci < def.consumed and ci < candidate.items.len) : (ci += 1) {
-                    if (candidate.items[ci] == '\n') consumed_lines += 1;
-                }
-                candidate.deinit(allocator);
-                i += consumed_lines;
-                // After a def, we're still at block level (not in paragraph)
+        if (!in_paragraph) {
+            if (try tryConsumeLinkRefDef(allocator, lines, i, 5, ref_map)) |consumed| {
+                i += consumed;
                 continue;
-            } else {
-                candidate.deinit(allocator);
-                // Falls through to paragraph handling below
             }
         }
-
-        // This is a regular content line — it starts or continues a paragraph
         in_paragraph = true;
         i += 1;
     }
 }
 
+// ── List parsing ─────────────────────────────────────────────────────────────
+
 const ListParseConfig = struct {
     list_type: AST.ListType,
-    marker: u8, // for bullet lists: -, *, +
-    delimiter: u8, // for ordered lists: . or )
-    start_num: u32, // for ordered lists: starting number
+    marker: u8,
+    delimiter: u8,
+    start_num: u32,
 };
 
-const ListParseResult = struct {
-    list: AST.List,
+const ItemContinuation = struct {
     next_line: usize,
+    saw_blank: bool,
+    pending_blanks: usize,
 };
 
-/// Parse a complete list (bullet or ordered) starting at line index `start`.
-/// Collects multi-line items, handles continuation indentation, detects loose/tight,
-/// and recursively parses each item's content as blocks.
-fn parseList(
+/// Collect continuation lines for a single list item, starting from `start`
+/// (the line AFTER the marker line). Appends to `item_buf`.
+fn collectItemContinuation(
     allocator: Allocator,
+    item_buf: *std.ArrayList(u8),
     lines: []const []const u8,
     start: usize,
-    ref_map: *const RefMap,
+    content_col: usize,
     config: ListParseConfig,
-) anyerror!ListParseResult {
-    var list = AST.List.init(allocator, config.list_type);
-    if (config.list_type == .ordered) {
-        list.start = config.start_num;
-    }
-
+    is_blank_item: bool,
+) !ItemContinuation {
     var i = start;
-    var had_blank_between_items = false;
-    var any_item_has_blank = false;
+    var saw_blank = false;
+    var consecutive_blanks: usize = 0;
+    var pending_blanks: usize = 0;
 
     while (i < lines.len) {
-        // Try to parse a list marker on this line
-        var content_col: usize = undefined;
-        var item_first_line: []const u8 = undefined;
-        var is_blank_item = false;
+        const line = lines[i];
+        if (isBlankLine(line)) {
+            consecutive_blanks += 1;
+            pending_blanks += 1;
+            if (is_blank_item and consecutive_blanks >= 1 and trimLine(item_buf.items).len == 0) break;
+            i += 1;
+            continue;
+        }
+        consecutive_blanks = 0;
 
-        if (config.list_type == .unordered) {
-            const info = bulletListContentColumn(lines[i]) orelse break;
-            if (info.marker != config.marker) break;
-            content_col = info.col;
-            // Extract content after marker
-            item_first_line = extractFirstLineContent(lines[i], content_col);
-            is_blank_item = trimLine(item_first_line).len == 0;
+        // Check for sibling list item
+        if (isSiblingItem(line, content_col, config)) break;
+        // Check for different-marker list
+        if (isDifferentList(line, content_col, config)) break;
+
+        const leading = countLeadingSpaces(line);
+        if (leading >= content_col) {
+            if (pending_blanks > 0) {
+                saw_blank = true;
+                var b: usize = 0;
+                while (b < pending_blanks) : (b += 1) try item_buf.append(allocator, '\n');
+                pending_blanks = 0;
+            }
+            try item_buf.append(allocator, '\n');
+            try item_buf.appendSlice(allocator, stripIndent(line, content_col));
+            i += 1;
         } else {
-            const info = orderedListContentColumn(lines[i]) orelse break;
-            if (info.delimiter != config.delimiter) break;
-            content_col = info.col;
-            item_first_line = extractFirstLineContent(lines[i], content_col);
-            is_blank_item = trimLine(item_first_line).len == 0;
-        }
-
-        // Collect all lines belonging to this list item
-        var item_buf = std.ArrayList(u8){};
-        // Add the first line's content
-        try item_buf.appendSlice(allocator, item_first_line);
-        i += 1;
-
-        var saw_blank_in_item = false;
-        var consecutive_blanks: usize = 0;
-        var pending_blanks: usize = 0;
-
-        // Collect continuation lines
-        while (i < lines.len) {
-            const line = lines[i];
-
-            if (isBlankLine(line)) {
-                consecutive_blanks += 1;
-                pending_blanks += 1;
-                // For blank-start items, a blank line after the empty first line ends the item
-                // (at most one blank line allowed for blank-start items to pick up content)
-                if (is_blank_item and consecutive_blanks >= 1 and trimLine(item_buf.items).len == 0) break;
-                i += 1;
-                continue;
-            }
-            consecutive_blanks = 0;
-
-            // Check if this line starts a new list item at the same level
-            var is_new_sibling = false;
-            if (config.list_type == .unordered) {
-                if (bulletListContentColumn(line)) |new_info| {
-                    if (new_info.marker == config.marker and countLeadingSpaces(line) < content_col) {
-                        is_new_sibling = true;
-                    } else if (new_info.marker != config.marker and countLeadingSpaces(line) < content_col) {
-                        break; // Different marker, different list
-                    }
-                }
-            } else {
-                if (orderedListContentColumn(line)) |new_info| {
-                    if (new_info.delimiter == config.delimiter and
-                        countLeadingSpaces(line) < content_col)
-                    {
-                        is_new_sibling = true;
-                    }
-                }
-            }
-            if (is_new_sibling) break;
-
-            // Check if the line is indented to the content column
-            const leading = countLeadingSpaces(line);
-            if (leading >= content_col) {
-                // Continuation line: commit pending blank lines and strip indentation
-                if (pending_blanks > 0) {
-                    saw_blank_in_item = true;
-                    var b: usize = 0;
-                    while (b < pending_blanks) : (b += 1) {
-                        try item_buf.append(allocator, '\n');
-                    }
-                    pending_blanks = 0;
-                }
-                const stripped = stripIndent(line, content_col);
-                try item_buf.append(allocator, '\n');
-                try item_buf.appendSlice(allocator, stripped);
-                i += 1;
-            } else {
-                // Not indented enough — this line doesn't belong to the item.
-                // But check for lazy continuation (paragraph continuation):
-                if (pending_blanks > 0) break; // After a blank line, must be indented
-                // Lazy continuation only for paragraph text
-                const lt = trimLine(line);
-                if (lt.len == 0) break;
-                // If the line starts any block-level construct, it's not lazy
-                if (bulletListContentColumn(line) != null) break;
-                if (orderedListContentColumn(line) != null) break;
-                if (lt[0] == '#') break;
-                if (lt[0] == '>') break;
-                if (isThematicBreak(lt)) break;
-                if (parsers.tryFenceStart(line) != null) break;
-                // Lazy paragraph continuation
-                try item_buf.append(allocator, '\n');
-                try item_buf.appendSlice(allocator, lt);
-                i += 1;
-            }
-        }
-
-        // Track whether there were pending blank lines at the end of this item
-        // (they might be between this item and the next)
-        const had_pending_blanks = pending_blanks > 0;
-
-        // Parse the item's collected content as blocks
-        var item = AST.ListItem.init(allocator);
-        const item_content = try item_buf.toOwnedSlice(allocator);
-
-        if (trimLine(item_content).len > 0) {
-            var inner_parser = init();
-            var inner_doc = try inner_parser.parseMarkdownWithRefs(allocator, item_content, ref_map);
-            for (inner_doc.children.items) |block| {
-                try item.children.append(allocator, block);
-            }
-            inner_doc.children = std.ArrayList(AST.Block){};
-        }
-
-        // Determine if this item has blank lines separating block children.
-        // Blank lines inside fenced code blocks or nested lists don't count.
-        if (saw_blank_in_item) {
-            const is_single_code = item.children.items.len == 1 and
-                (item.children.items[0] == .code_block or item.children.items[0] == .fenced_code_block);
-            if (!is_single_code) {
-                // Check if blank lines were between direct block children (not inside nested lists).
-                var direct_para_count: usize = 0;
-                var direct_list_count: usize = 0;
-                var has_non_list_non_para_blocks = false;
-                for (item.children.items) |child| {
-                    switch (child) {
-                        .paragraph => direct_para_count += 1,
-                        .list => direct_list_count += 1,
-                        else => has_non_list_non_para_blocks = true,
-                    }
-                }
-                // Multiple paragraphs → blank lines between them
-                if (direct_para_count > 1) {
-                    any_item_has_blank = true;
-                }
-                // Paragraph + non-list block → blank lines between them
-                else if (direct_para_count >= 1 and has_non_list_non_para_blocks) {
-                    any_item_has_blank = true;
-                }
-                // Single paragraph + only lists: blank lines are inside nested lists, don't count
-                // UNLESS the raw content had blank lines that didn't go into nested lists
-                // (e.g. link ref defs that were consumed)
-                else if (direct_para_count == 1 and direct_list_count == 0 and !has_non_list_non_para_blocks) {
-                    // Item has one paragraph but had blank lines → something was consumed (link ref def)
-                    any_item_has_blank = true;
-                }
-                // No blocks at all → empty item with blank
-                else if (item.children.items.len == 0) {
-                    any_item_has_blank = true;
-                }
-            }
-        }
-
-        try list.items.append(allocator, item);
-
-        // Skip blank lines between items
-        var blanks_between: usize = 0;
-        while (i < lines.len and isBlankLine(lines[i])) {
-            blanks_between += 1;
+            if (pending_blanks > 0) break;
+            const lt = trimLine(line);
+            if (lt.len == 0) break;
+            if (bulletListContentColumn(line) != null or orderedListContentColumn(line) != null) break;
+            if (lt[0] == '#' or lt[0] == '>' or isThematicBreak(lt)) break;
+            if (parsers.tryFenceStart(line) != null) break;
+            // Lazy continuation
+            try item_buf.append(allocator, '\n');
+            try item_buf.appendSlice(allocator, lt);
             i += 1;
         }
-        const total_blanks_between = blanks_between + @as(usize, if (had_pending_blanks) 1 else 0);
-        if (total_blanks_between > 0 and i < lines.len) {
-            // Check if the next line starts a new item in this list
-            var is_next_item = false;
-            if (config.list_type == .unordered) {
-                if (bulletListContentColumn(lines[i])) |new_info| {
-                    is_next_item = new_info.marker == config.marker;
-                }
-            } else {
-                if (orderedListContentColumn(lines[i])) |new_info| {
-                    is_next_item = new_info.delimiter == config.delimiter;
-                }
-            }
-            if (!is_next_item) break; // blank line followed by non-list-item ends the list
-            had_blank_between_items = true;
-        }
     }
-
-    // A list is loose if there are blank lines between items OR
-    // any item contains blank lines separating block children
-    list.tight = !had_blank_between_items and !any_item_has_blank;
-
-    return .{ .list = list, .next_line = i };
+    return .{ .next_line = i, .saw_blank = saw_blank, .pending_blanks = pending_blanks };
 }
 
-/// Extract the content portion of a list item's first line, starting at content_col.
+fn isSiblingItem(line: []const u8, content_col: usize, config: ListParseConfig) bool {
+    if (config.list_type == .unordered) {
+        if (bulletListContentColumn(line)) |info|
+            return info.marker == config.marker and countLeadingSpaces(line) < content_col;
+    } else {
+        if (orderedListContentColumn(line)) |info|
+            return info.delimiter == config.delimiter and countLeadingSpaces(line) < content_col;
+    }
+    return false;
+}
+
+fn isDifferentList(line: []const u8, content_col: usize, config: ListParseConfig) bool {
+    if (config.list_type == .unordered) {
+        if (bulletListContentColumn(line)) |info|
+            return info.marker != config.marker and countLeadingSpaces(line) < content_col;
+    }
+    return false;
+}
+
+/// Determine whether an item's parsed blocks indicate loose content.
+fn hasLooseContent(children: []const AST.Block, saw_blank: bool) bool {
+    if (!saw_blank) return false;
+    if (children.len == 1) {
+        if (children[0] == .code_block or children[0] == .fenced_code_block) return false;
+    }
+    var paras: usize = 0;
+    var lists: usize = 0;
+    var other = false;
+    for (children) |child| switch (child) {
+        .paragraph => paras += 1,
+        .list => lists += 1,
+        else => other = true,
+    };
+    if (paras > 1) return true;
+    if (paras >= 1 and other) return true;
+    if (paras == 1 and lists == 0 and !other) return true;
+    if (children.len == 0) return true;
+    return false;
+}
+
 fn extractFirstLineContent(line: []const u8, content_col: usize) []const u8 {
     var pos: usize = 0;
     var col: usize = 0;
@@ -2354,11 +1730,9 @@ fn extractFirstLineContent(line: []const u8, content_col: usize) []const u8 {
         }
         pos += 1;
     }
-    if (pos >= line.len) return "";
-    return line[pos..];
+    return if (pos >= line.len) "" else line[pos..];
 }
 
-/// Strip `n` columns of indentation from a line.
 fn stripIndent(line: []const u8, n: usize) []const u8 {
     var pos: usize = 0;
     var col: usize = 0;
@@ -2373,43 +1747,91 @@ fn stripIndent(line: []const u8, n: usize) []const u8 {
     return line[pos..];
 }
 
+fn parseList(
+    allocator: Allocator,
+    lines: []const []const u8,
+    start: usize,
+    ref_map: *const RefMap,
+    config: ListParseConfig,
+) anyerror!struct { list: AST.List, next_line: usize } {
+    var list = AST.List.init(allocator, config.list_type);
+    if (config.list_type == .ordered) list.start = config.start_num;
+
+    var i = start;
+    var had_blank_between = false;
+    var any_item_loose = false;
+
+    while (i < lines.len) {
+        var content_col: usize = undefined;
+        var first_content: []const u8 = undefined;
+        var is_blank_item: bool = undefined;
+
+        if (config.list_type == .unordered) {
+            const info = bulletListContentColumn(lines[i]) orelse break;
+            if (info.marker != config.marker) break;
+            content_col = info.col;
+            first_content = extractFirstLineContent(lines[i], content_col);
+            is_blank_item = trimLine(first_content).len == 0;
+        } else {
+            const info = orderedListContentColumn(lines[i]) orelse break;
+            if (info.delimiter != config.delimiter) break;
+            content_col = info.col;
+            first_content = extractFirstLineContent(lines[i], content_col);
+            is_blank_item = trimLine(first_content).len == 0;
+        }
+
+        var item_buf = std.ArrayList(u8){};
+        try item_buf.appendSlice(allocator, first_content);
+        i += 1;
+
+        const cont = try collectItemContinuation(allocator, &item_buf, lines, i, content_col, config, is_blank_item);
+        i = cont.next_line;
+
+        var item = AST.ListItem.init(allocator);
+        const content = try item_buf.toOwnedSlice(allocator);
+        if (trimLine(content).len > 0) {
+            var inner = init();
+            var inner_doc = try inner.parseMarkdownWithRefs(allocator, content, ref_map);
+            for (inner_doc.children.items) |block| try item.children.append(allocator, block);
+            inner_doc.children = std.ArrayList(AST.Block){};
+        }
+
+        if (hasLooseContent(item.children.items, cont.saw_blank)) any_item_loose = true;
+        try list.items.append(allocator, item);
+
+        // Skip inter-item blank lines
+        var blanks: usize = 0;
+        while (i < lines.len and isBlankLine(lines[i])) {
+            blanks += 1;
+            i += 1;
+        }
+        const total_blanks = blanks + @as(usize, if (cont.pending_blanks > 0) 1 else 0);
+        if (total_blanks > 0 and i < lines.len) {
+            var is_next = false;
+            if (config.list_type == .unordered) {
+                if (bulletListContentColumn(lines[i])) |info| is_next = info.marker == config.marker;
+            } else {
+                if (orderedListContentColumn(lines[i])) |info| is_next = info.delimiter == config.delimiter;
+            }
+            if (!is_next) break;
+            had_blank_between = true;
+        }
+    }
+
+    list.tight = !had_blank_between and !any_item_loose;
+    return .{ .list = list, .next_line = i };
+}
+
 fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_map: *const RefMap) !AST.Document {
     var doc = AST.Document.init(allocator);
-
-    var lines_list = std.ArrayList([]const u8){};
+    var lines_list = try splitLines(allocator, input);
     defer lines_list.deinit(allocator);
-    {
-        var it = mem.splitScalar(u8, input, '\n');
-        while (it.next()) |raw| {
-            const line = if (raw.len > 0 and raw[raw.len - 1] == '\r') raw[0 .. raw.len - 1] else raw;
-            try lines_list.append(allocator, line);
-        }
-    }
     const lines = lines_list.items;
-    var i: usize = 0;
-
-    // Skip frontmatter
-    if (lines.len > 0) {
-        const fl = trimLine(lines[0]);
-        if (mem.eql(u8, fl, "---") or mem.eql(u8, fl, "+++") or mem.eql(u8, fl, "%%%")) {
-            var fi: usize = 1;
-            var found_close = false;
-            while (fi < lines.len) {
-                const tl = trimLine(lines[fi]);
-                fi += 1;
-                if (mem.eql(u8, tl, "---") or mem.eql(u8, tl, "+++") or mem.eql(u8, tl, "%%%")) {
-                    found_close = true;
-                    break;
-                }
-            }
-            if (found_close) i = fi;
-        }
-    }
+    var i = skipFrontmatter(lines);
 
     while (i < lines.len) {
         const raw = lines[i];
         const t = trimLine(raw);
-
         if (t.len == 0) {
             i += 1;
             continue;
@@ -2417,32 +1839,11 @@ fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_m
 
         // Link reference definition (already collected; skip)
         if (isLinkRefDefStart(raw)) {
-            // Build the same candidate as collectLinkRefDefs to determine
-            // how many lines are consumed by this definition.
-            var candidate = std.ArrayList(u8){};
-            try candidate.appendSlice(allocator, raw);
-            var lrd_lines: usize = 1;
-            var lrd_j = i + 1;
-            while (lrd_j < lines.len and lrd_lines < 5) : (lrd_j += 1) {
-                const next = lines[lrd_j];
-                if (trimLine(next).len == 0) break;
-                try candidate.append(allocator, '\n');
-                try candidate.appendSlice(allocator, next);
-                lrd_lines += 1;
-            }
-            if (parseLinkRefDef(candidate.items)) |def| {
-                // Count how many lines are consumed
-                var consumed_lines: usize = 1;
-                var ci: usize = 0;
-                while (ci < def.consumed and ci < candidate.items.len) : (ci += 1) {
-                    if (candidate.items[ci] == '\n') consumed_lines += 1;
-                }
-                candidate.deinit(allocator);
-                i += consumed_lines;
+            // Re-parse to determine how many lines to skip
+            if (try tryConsumeLinkRefDef(allocator, lines, i, 5, @constCast(ref_map))) |consumed| {
+                i += consumed;
                 continue;
             }
-            candidate.deinit(allocator);
-            // Not a valid link ref def — fall through to paragraph/other handling
         }
 
         // ATX heading
@@ -2478,9 +1879,7 @@ fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_m
                 try buf.appendSlice(allocator, stripped);
                 i += 1;
             }
-            try doc.children.append(allocator, .{ .code_block = .{
-                .content = try buf.toOwnedSlice(allocator),
-            } });
+            try doc.children.append(allocator, .{ .code_block = .{ .content = try buf.toOwnedSlice(allocator) } });
             continue;
         }
 
@@ -2498,12 +1897,7 @@ fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_m
                 i += 1;
             }
             const lang: ?[]const u8 = if (fence.info.len > 0) fence.info else null;
-            try doc.children.append(allocator, .{ .fenced_code_block = AST.FencedCodeBlock.init(
-                try buf.toOwnedSlice(allocator),
-                lang,
-                fence.char,
-                fence.len,
-            ) });
+            try doc.children.append(allocator, .{ .fenced_code_block = AST.FencedCodeBlock.init(try buf.toOwnedSlice(allocator), lang, fence.char, fence.len) });
             continue;
         }
 
@@ -2511,22 +1905,19 @@ fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_m
         if (parsers.tryBlockquoteLine(allocator, raw)) |_| {
             var bq_buf = std.ArrayList(u8){};
             while (i < lines.len) {
-                if (parsers.tryBlockquoteLine(allocator, lines[i])) |content_line| {
+                if (parsers.tryBlockquoteLine(allocator, lines[i])) |cl| {
                     if (bq_buf.items.len > 0) try bq_buf.append(allocator, '\n');
-                    try bq_buf.appendSlice(allocator, content_line);
+                    try bq_buf.appendSlice(allocator, cl);
                     i += 1;
                 } else if (!isBlankLine(lines[i])) {
                     if (bq_buf.items.len > 0) try bq_buf.append(allocator, '\n');
                     try bq_buf.appendSlice(allocator, lines[i]);
                     i += 1;
-                } else {
-                    break;
-                }
+                } else break;
             }
             const bq_str = try bq_buf.toOwnedSlice(allocator);
             var inner = init();
             var inner_doc = try inner.parseMarkdownWithRefs(allocator, bq_str, ref_map);
-
             var bq = AST.Blockquote.init(allocator);
             for (inner_doc.children.items) |block| try bq.children.append(allocator, block);
             inner_doc.children = std.ArrayList(AST.Block){};
@@ -2535,26 +1926,16 @@ fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_m
         }
 
         // Unordered list
-        if (bulletListContentColumn(raw)) |first_info| {
-            const result = try parseList(allocator, lines, i, ref_map, .{
-                .list_type = .unordered,
-                .marker = first_info.marker,
-                .delimiter = 0,
-                .start_num = 0,
-            });
+        if (bulletListContentColumn(raw)) |first| {
+            const result = try parseList(allocator, lines, i, ref_map, .{ .list_type = .unordered, .marker = first.marker, .delimiter = 0, .start_num = 0 });
             try doc.children.append(allocator, .{ .list = result.list });
             i = result.next_line;
             continue;
         }
 
         // Ordered list
-        if (orderedListContentColumn(raw)) |first_info| {
-            const result = try parseList(allocator, lines, i, ref_map, .{
-                .list_type = .ordered,
-                .marker = 0,
-                .delimiter = first_info.delimiter,
-                .start_num = first_info.num,
-            });
+        if (orderedListContentColumn(raw)) |first| {
+            const result = try parseList(allocator, lines, i, ref_map, .{ .list_type = .ordered, .marker = 0, .delimiter = first.delimiter, .start_num = first.num });
             try doc.children.append(allocator, .{ .list = result.list });
             i = result.next_line;
             continue;
@@ -2571,55 +1952,33 @@ fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_m
             continue;
         }
 
-        // Paragraph (possibly a setext heading)
+        // Paragraph (possibly setext heading)
         {
             var is_first = true;
             var para_buf = std.ArrayList(u8){};
-            // var line_count: usize = 0;
-            // _ = line_count;
-
             while (i < lines.len) {
                 const lr = lines[i];
                 const lt = trimLine(lr);
-
                 if (lt.len == 0) break;
                 if (!is_first and (isSetextEqLine(lt) or isSetextDashLine(lt))) break;
                 if (!is_first and isParaBreak(allocator, lt, lr)) break;
-
-                const next_setext = blk: {
-                    if (i + 1 >= lines.len) break :blk false;
-                    const nt = trimLine(lines[i + 1]);
-                    break :blk isSetextEqLine(nt) or isSetextDashLine(nt);
-                };
-
-                if (!is_first) {
-                    try para_buf.append(allocator, '\n');
-                }
+                const next_setext = i + 1 < lines.len and (isSetextEqLine(trimLine(lines[i + 1])) or isSetextDashLine(trimLine(lines[i + 1])));
+                if (!is_first) try para_buf.append(allocator, '\n');
                 is_first = false;
-
-                const lr_nocr = mem.trimRight(u8, lr, "\r");
-                const has_hard_break = lr_nocr.len >= 2 and
-                    lr_nocr[lr_nocr.len - 1] == ' ' and
-                    lr_nocr[lr_nocr.len - 2] == ' ';
-
-                if (has_hard_break) {
+                const nocr = mem.trimRight(u8, lr, "\r");
+                const hard = nocr.len >= 2 and nocr[nocr.len - 1] == ' ' and nocr[nocr.len - 2] == ' ';
+                if (hard) {
                     try para_buf.appendSlice(allocator, mem.trimRight(u8, lt, " "));
                     try para_buf.appendSlice(allocator, "  ");
-                } else {
-                    try para_buf.appendSlice(allocator, lt);
-                }
-
+                } else try para_buf.appendSlice(allocator, lt);
                 i += 1;
                 if (next_setext) break;
             }
-
             var para = AST.Paragraph.init(allocator);
             if (para_buf.items.len > 0) {
-                const para_content = try para_buf.toOwnedSlice(allocator);
-                try appendInlines(allocator, &para.children, para_content, ref_map);
+                const pc = try para_buf.toOwnedSlice(allocator);
+                try appendInlines(allocator, &para.children, pc, ref_map);
             }
-
-            // Setext heading?
             if (i < lines.len and para.children.items.len > 0) {
                 const st = trimLine(lines[i]);
                 if (isSetextEqLine(st) or isSetextDashLine(st)) {
@@ -2633,15 +1992,12 @@ fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_m
                     continue;
                 }
             }
-
-            if (para.children.items.len > 0) {
-                try doc.children.append(allocator, .{ .paragraph = para });
-            } else {
+            if (para.children.items.len > 0)
+                try doc.children.append(allocator, .{ .paragraph = para })
+            else
                 para.deinit(allocator);
-            }
         }
     }
-
     return doc;
 }
 
