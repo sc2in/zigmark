@@ -22,6 +22,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const clap_dep = b.dependency("clap", .{
+        .target = target,
+        .optimize = optimize,
+    });
 
     const zigmark = b.addModule("zigmark", .{
         .root_source_file = b.path("src/root.zig"),
@@ -41,6 +45,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "zigmark", .module = zigmark },
+                .{ .name = "clap", .module = clap_dep.module("clap") },
             },
         }),
     });
