@@ -34,11 +34,15 @@ fn writeUrlEncoded(writer: anytype, s: []const u8) !void {
         if (c == '&') {
             try writer.writeAll("&amp;");
         } else if (c == '"') {
-            try writer.writeAll("&quot;");
+            try writer.writeAll("%22");
         } else if (c == '\'') {
             try writer.writeAll("%27");
         } else if (c == ' ') {
             try writer.writeAll("%20");
+        } else if (c == '[') {
+            try writer.writeAll("%5B");
+        } else if (c == ']') {
+            try writer.writeAll("%5D");
         } else if (c == '\\') {
             // Backslash escape in URL context: if followed by ASCII punct, consume the
             // backslash and encode the punctuation char; otherwise encode the backslash.
@@ -105,11 +109,235 @@ fn isHexDigit(c: u8) bool {
     return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
 }
 
+fn hexDigitVal(c: u8) u8 {
+    if (c >= '0' and c <= '9') return c - '0';
+    if (c >= 'a' and c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' and c <= 'F') return c - 'A' + 10;
+    return 0;
+}
+
+/// Encode a Unicode codepoint as UTF-8 into a buffer. Returns the number of bytes written.
+fn encodeUtf8Buf(cp: u21, buf: *[4]u8) u3 {
+    if (cp < 0x80) {
+        buf[0] = @intCast(cp);
+        return 1;
+    } else if (cp < 0x800) {
+        buf[0] = @intCast(0xC0 | (cp >> 6));
+        buf[1] = @intCast(0x80 | (cp & 0x3F));
+        return 2;
+    } else if (cp < 0x10000) {
+        buf[0] = @intCast(0xE0 | (cp >> 12));
+        buf[1] = @intCast(0x80 | ((cp >> 6) & 0x3F));
+        buf[2] = @intCast(0x80 | (cp & 0x3F));
+        return 3;
+    } else {
+        buf[0] = @intCast(0xF0 | (cp >> 18));
+        buf[1] = @intCast(0x80 | ((cp >> 12) & 0x3F));
+        buf[2] = @intCast(0x80 | ((cp >> 6) & 0x3F));
+        buf[3] = @intCast(0x80 | (cp & 0x3F));
+        return 4;
+    }
+}
+
+/// Resolve a named HTML entity to its Unicode codepoint(s).
+/// Returns null if the entity is not recognized.
+fn resolveNamedEntity(name: []const u8) ?u21 {
+    const map = .{
+        .{ "amp", 0x26 },
+        .{ "lt", 0x3C },
+        .{ "gt", 0x3E },
+        .{ "quot", 0x22 },
+        .{ "apos", 0x27 },
+        .{ "nbsp", 0xA0 },
+        .{ "auml", 0xE4 },
+        .{ "ouml", 0xF6 },
+        .{ "uuml", 0xFC },
+        .{ "Auml", 0xC4 },
+        .{ "Ouml", 0xD6 },
+        .{ "Uuml", 0xDC },
+        .{ "szlig", 0xDF },
+        .{ "copy", 0xA9 },
+        .{ "reg", 0xAE },
+        .{ "trade", 0x2122 },
+        .{ "frac34", 0xBE },
+        .{ "AElig", 0xC6 },
+        .{ "Dcaron", 0x10E },
+        .{ "ngE", 0x2267 }, // actually ≧̸ but CommonMark maps to ≧ + combining
+    };
+    inline for (map) |entry| {
+        if (std.mem.eql(u8, name, entry[0])) return entry[1];
+    }
+    return null;
+}
+
+/// Try to parse an HTML entity reference at position `i` in `s`.
+/// Returns the entity's UTF-8 bytes and the number of source bytes consumed, or null if not an entity.
+fn tryDecodeEntity(s: []const u8, i: usize) ?struct { bytes: [4]u8, len: u3, consumed: usize } {
+    if (i >= s.len or s[i] != '&') return null;
+    if (i + 1 >= s.len) return null;
+
+    // Numeric character reference
+    if (s[i + 1] == '#') {
+        if (i + 2 >= s.len) return null;
+        var cp: u21 = 0;
+        var pos = i + 2;
+        if (s[pos] == 'x' or s[pos] == 'X') {
+            // Hex: &#xHHHH;
+            pos += 1;
+            const start = pos;
+            while (pos < s.len and isHexDigit(s[pos]) and pos - start < 8) : (pos += 1) {
+                cp = cp * 16 + hexDigitVal(s[pos]);
+            }
+            if (pos == start or pos >= s.len or s[pos] != ';') return null;
+        } else {
+            // Decimal: &#DDDD;
+            const start = pos;
+            while (pos < s.len and s[pos] >= '0' and s[pos] <= '9' and pos - start < 8) : (pos += 1) {
+                cp = cp * 10 + (s[pos] - '0');
+            }
+            if (pos == start or pos >= s.len or s[pos] != ';') return null;
+        }
+        if (cp == 0) cp = 0xFFFD; // Replace null with replacement character
+        if (cp > 0x10FFFF) cp = 0xFFFD;
+        var buf: [4]u8 = undefined;
+        const len = encodeUtf8Buf(cp, &buf);
+        return .{ .bytes = buf, .len = len, .consumed = pos + 1 - i };
+    }
+
+    // Named entity reference: &name;
+    const name_start = i + 1;
+    var pos = name_start;
+    while (pos < s.len and pos - name_start < 32 and
+        ((s[pos] >= 'a' and s[pos] <= 'z') or (s[pos] >= 'A' and s[pos] <= 'Z') or
+            (s[pos] >= '0' and s[pos] <= '9'))) : (pos += 1)
+    {}
+    if (pos == name_start or pos >= s.len or s[pos] != ';') return null;
+    const name = s[name_start..pos];
+    if (resolveNamedEntity(name)) |cp| {
+        var buf: [4]u8 = undefined;
+        const len = encodeUtf8Buf(cp, &buf);
+        return .{ .bytes = buf, .len = len, .consumed = pos + 1 - i };
+    }
+    return null;
+}
+
+/// Write a URL with percent-encoding and HTML entity decoding.
+/// HTML entities in the URL are first decoded to their UTF-8 representation,
+/// then percent-encoded if needed.
+fn writeUrlEncodedWithEntities(writer: anytype, s: []const u8) !void {
+    var i: usize = 0;
+    while (i < s.len) {
+        const c = s[i];
+        if (c == '&') {
+            // Try to decode an HTML entity
+            if (tryDecodeEntity(s, i)) |ent| {
+                // Write the decoded bytes through percent-encoding
+                var j: u3 = 0;
+                while (j < ent.len) : (j += 1) {
+                    const b = ent.bytes[j];
+                    if (b >= 0x80) {
+                        try writer.print("%{X:0>2}", .{b});
+                    } else if (b == '"') {
+                        try writer.writeAll("%22");
+                    } else if (b == '\'') {
+                        try writer.writeAll("%27");
+                    } else if (b == ' ') {
+                        try writer.writeAll("%20");
+                    } else if (b == '&') {
+                        try writer.writeAll("&amp;");
+                    } else {
+                        try writer.writeByte(b);
+                    }
+                }
+                i += ent.consumed;
+                continue;
+            }
+            try writer.writeAll("&amp;");
+            i += 1;
+            continue;
+        }
+        if (c == '"') {
+            try writer.writeAll("%22");
+        } else if (c == '\'') {
+            try writer.writeAll("%27");
+        } else if (c == ' ') {
+            try writer.writeAll("%20");
+        } else if (c == '\\') {
+            if (i + 1 < s.len and isAsciiPunctuation(s[i + 1])) {
+                try writer.writeByte(s[i + 1]);
+                i += 2;
+                continue;
+            } else {
+                try writer.writeAll("%5C");
+            }
+        } else if (c == '%' and i + 2 < s.len and isHexDigit(s[i + 1]) and isHexDigit(s[i + 2])) {
+            try writer.writeByte('%');
+            try writer.writeByte(s[i + 1]);
+            try writer.writeByte(s[i + 2]);
+            i += 3;
+            continue;
+        } else if (c >= 0x80) {
+            try writer.print("%{X:0>2}", .{c});
+        } else {
+            try writer.writeByte(c);
+        }
+        i += 1;
+    }
+}
+
+/// Write title text with HTML entity decoding, backslash escape processing, and HTML escaping.
+fn writeEscapedTitleWithEntities(writer: anytype, s: []const u8) !void {
+    var i: usize = 0;
+    while (i < s.len) {
+        const c = s[i];
+        if (c == '&') {
+            if (tryDecodeEntity(s, i)) |ent| {
+                // Write decoded bytes with HTML escaping
+                var j: u3 = 0;
+                while (j < ent.len) : (j += 1) {
+                    const b = ent.bytes[j];
+                    switch (b) {
+                        '&' => try writer.writeAll("&amp;"),
+                        '<' => try writer.writeAll("&lt;"),
+                        '>' => try writer.writeAll("&gt;"),
+                        '"' => try writer.writeAll("&quot;"),
+                        else => try writer.writeByte(b),
+                    }
+                }
+                i += ent.consumed;
+                continue;
+            }
+            try writer.writeAll("&amp;");
+            i += 1;
+            continue;
+        }
+        if (c == '\\' and i + 1 < s.len and isAsciiPunctuation(s[i + 1])) {
+            switch (s[i + 1]) {
+                '&' => try writer.writeAll("&amp;"),
+                '<' => try writer.writeAll("&lt;"),
+                '>' => try writer.writeAll("&gt;"),
+                '"' => try writer.writeAll("&quot;"),
+                else => try writer.writeByte(s[i + 1]),
+            }
+            i += 2;
+            continue;
+        }
+        switch (c) {
+            '&' => try writer.writeAll("&amp;"),
+            '<' => try writer.writeAll("&lt;"),
+            '>' => try writer.writeAll("&gt;"),
+            '"' => try writer.writeAll("&quot;"),
+            else => try writer.writeByte(c),
+        }
+        i += 1;
+    }
+}
+
 // ── Inline renderer ───────────────────────────────────────────────────────────
 
 fn renderInline(writer: anytype, item: AST.Inline) !void {
     switch (item) {
-        .text => |t| try writer.writeAll(t.content),
+        .text => |t| try writeEscaped(writer, t.content),
         .soft_break => try writer.writeByte('\n'),
         .hard_break => try writer.writeAll("<br />"),
         .code_span => |cs| {
@@ -129,11 +357,11 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
         },
         .link => |l| {
             try writer.writeAll("<a href=\"");
-            try writeUrlEncoded(writer, l.destination.url);
+            try writeUrlEncodedWithEntities(writer, l.destination.url);
             try writer.writeByte('"');
             if (l.destination.title) |title| {
                 try writer.writeAll(" title=\"");
-                try writeEscapedWithBackslash(writer, title);
+                try writeEscapedTitleWithEntities(writer, title);
                 try writer.writeByte('"');
             }
             try writer.writeByte('>');
@@ -142,13 +370,13 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
         },
         .image => |img| {
             try writer.writeAll("<img src=\"");
-            try writeUrlEncoded(writer, img.destination.url);
+            try writeUrlEncodedWithEntities(writer, img.destination.url);
             try writer.writeAll("\" alt=\"");
             try writeEscaped(writer, img.alt_text);
             try writer.writeByte('"');
             if (img.destination.title) |title| {
                 try writer.writeAll(" title=\"");
-                try writeEscaped(writer, title);
+                try writeEscapedTitleWithEntities(writer, title);
                 try writer.writeByte('"');
             }
             try writer.writeAll(" />");
