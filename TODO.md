@@ -2,7 +2,7 @@
 
 This document tracks the work needed to achieve full CommonMark 0.30 specification compliance.
 
-**Current score: 531 / 655 (81%) — spec tests passing, 0 memory leaks**
+**Current score: 547 / 655 (83%) — spec tests passing, 0 memory leaks**
 
 Per-section breakdown (via `zig build spec`):
 
@@ -17,11 +17,11 @@ Per-section breakdown (via `zig build spec`):
 | Fenced code | 20 | 9 | 29 |
 | **Lists** | **62** | **5** | **67** |
 | Backslash escapes | 9 | 4 | 13 |
-| Entities | 7 | 10 | 17 |
+| **Entities** | **16** | **1** | **17** |
 | Code spans | 20 | 2 | 22 |
-| **Emphasis** | **130** | **2** | **132** |
+| **Emphasis** | **132** | **0** | **132** |
 | **Links** | **117** | **0** | **117** |
-| Images | 17 | 5 | 22 |
+| **Images** | **22** | **0** | **22** |
 | Autolinks | 16 | 3 | 19 |
 | Raw HTML | 19 | 2 | 21 |
 | Hard line breaks | 7 | 8 | 15 |
@@ -70,17 +70,20 @@ Per-section breakdown (via `zig build spec`):
 
 ### Character References
 
-- [ ] **Entity and numeric character references** - `&amp;`, `&#123;`, etc.
-  - HTML entity resolution
-  - Numeric character references (decimal and hex)
+- [x] **Entity and numeric character references** - `&amp;`, `&#123;`, etc. — 16/17 passing
+  - HTML entity resolution (120+ named entities)
+  - Numeric character references (decimal 1-7 digits, hex 1-6 digits)
+  - Multi-codepoint entities (e.g. `&ngE;` → U+2267 U+0338)
+  - Entity decoding in inline text, link URLs/titles, fenced code info strings
+  - Remaining failure (test 31) requires HTML block type 6 detection
 
 ### Emphasis and Strong Emphasis
 
-- [x] **Proper emphasis/strong emphasis rules** - Complex delimiter matching
+- [x] **Proper emphasis/strong emphasis rules** - Complex delimiter matching — **132/132 passing** ✨
   - 17 rules for emphasis from CommonMark spec
   - Left/right-flanking delimiter runs
   - Can open/close emphasis based on surrounding characters
-  - 130/132 passing (2 remaining edge cases)
+  - Multi-byte Unicode whitespace/punctuation detection for flanking rules
 
 ### Links
 
@@ -100,12 +103,12 @@ Per-section breakdown (via `zig build spec`):
 
 ### Images
 
-- [ ] **Complete image syntax** - Full support with all reference styles
+- [x] **Complete image syntax** - Full support with all reference styles — **22/22 passing** ✨
   - Inline images: `![alt](url "title")`
   - Reference images: `![alt][ref]`
   - Collapsed: `![alt][]`
   - Shortcut: `![alt]`
-  - Proper alt text (plain text content)
+  - Proper alt text flattening (nested formatting → plain text)
 
 ## Specification Compliance
 
@@ -183,7 +186,8 @@ Per-section breakdown (via `zig build spec`):
 - ✅ Basic ATX headings (`#` to `######`) — 12/18 passing
 - ✅ Setext headings (`===` and `---` underlines) — 20/27 passing
 - ✅ Paragraphs (basic) — 7/8 passing
-- ✅ Emphasis/strong (`*` and `_` variants) — 130/132 passing
+- ✅ Emphasis/strong (`*` and `_` variants) — **132/132 passing** ✨
+- ✅ Multi-byte Unicode whitespace/punctuation detection for emphasis flanking rules
 - ✅ Inline links `[text](url)` with nested parens, angle-bracket destinations, backslash escapes
 - ✅ Link reference definitions `[label]: url "title"` — two-pass architecture
 - ✅ Reference links: full `[text][label]`, collapsed `[text][]`, shortcut `[text]` — **117/117 passing** ✨
@@ -194,7 +198,8 @@ Per-section breakdown (via `zig build spec`):
 - ✅ Multi-line link reference definition labels (up to 999 characters)
 - ✅ Link ref defs inside blockquotes (document-scoped)
 - ✅ Proper image alt text flattening (nested links/images → plain text)
-- ✅ Images `![alt](url)` — 17/22 passing
+- ✅ Images `![alt](url)` — **22/22 passing** ✨
+- ✅ Entity & numeric character references — **16/17 passing** (120+ named entities, multi-codepoint support)
 - ✅ Autolinks (`<uri>` and `<email>`) — 16/19 passing
 - ✅ Unordered and ordered lists (multi-line, nested) — 62/67 passing
 - ✅ Loose vs tight list detection (blank lines in code blocks/nested lists excluded)
@@ -225,16 +230,16 @@ Per-section breakdown (via `zig build spec`):
 
 ## Biggest Opportunities (by failing test count)
 
-1. **Entities** — 10 failures (HTML entity & numeric character reference resolution)
-2. **Fenced code** — 9 failures (indentation stripping, closing fence rules)
-3. **Hard line breaks** — 8 failures (trailing spaces, backslash breaks)
-4. **Setext headings** — 7 failures (interaction with other block types)
-5. **ATX headings** — 6 failures
-6. **Images** — 5 failures (reference images, nested alt text)
-7. **Lists** — 5 failures (blockquote lazy continuation, HTML blocks, lazy paragraph continuation)
-8. **Backslash escapes** — 4 failures (escaping in various contexts)
-9. **Autolinks** — 3 failures (edge cases)
-10. **Raw HTML** — 2 failures (HTML block types)
-11. **Code spans** — 2 failures
-12. **Emphasis** — 2 failures (remaining edge cases)
+1. **Fenced code** — 9 failures (indentation stripping, closing fence rules)
+2. **Hard line breaks** — 8 failures (trailing spaces, backslash breaks)
+3. **Setext headings** — 7 failures (interaction with other block types)
+4. **ATX headings** — 6 failures
+5. **Lists** — 5 failures (blockquote lazy continuation, HTML blocks, lazy paragraph continuation)
+6. **Backslash escapes** — 4 failures (escaping in various contexts)
+7. **Autolinks** — 3 failures (edge cases)
+8. **Raw HTML** — 2 failures (HTML block types)
+9. **Code spans** — 2 failures
+10. **Entities** — 1 failure (requires HTML block type 6 detection)
+11. ~~**Emphasis** — 0 failures~~ ✅ **Complete!**
+12. ~~**Images** — 0 failures~~ ✅ **Complete!**
 13. ~~**Links** — 0 failures~~ ✅ **Complete!**

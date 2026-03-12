@@ -15,6 +15,7 @@ A simple and efficient markdown parser and renderer library for Zig. Converts Co
   - Images with `![alt](url)` and reference-style syntax
   - Autolinks with `<url>` and `<email>` syntax
   - Backslash escapes of ASCII punctuation
+  - Entity and numeric character references (`&amp;`, `&#123;`, `&#x7E;`)
   - Hard line breaks (trailing spaces and backslash)
   - Footnotes with `[^label]` references
 - **Block Elements**:
@@ -186,7 +187,7 @@ zig build test
 
 Priority features and improvements planned for future releases:
 
-1. **CommonMark Spec Compliance**: 531/655 (81%) spec tests passing — tracked in [TODO.md](TODO.md)
+1. **CommonMark Spec Compliance**: 547/655 (83%) spec tests passing — tracked in [TODO.md](TODO.md)
 2. **Extended Syntax Support**:
    - Tables (GFM-style)
    - Strikethrough with `~~text~~`

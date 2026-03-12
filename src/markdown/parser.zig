@@ -22,6 +22,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const tst = std.testing;
 const mem = std.mem;
+const unicode = std.unicode;
 
 const mecha = @import("mecha");
 
@@ -1073,36 +1074,62 @@ fn tryParseLink(input: []const u8, start: usize) ?struct {
 
 // ── CommonMark delimiter-based emphasis algorithm ─────────────────────────────
 
-fn isUnicodeWhitespace(c: u8) bool {
-    return c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == 0x0c or c == 0x0b;
+/// Walk backwards from `pos` to find the start of the UTF-8 character.
+/// If `pos` points to a continuation byte (0x80..0xBF), we go back
+/// up to 3 bytes to find the leading byte.
+fn utf8CharStart(input: []const u8, pos: usize) usize {
+    var p = pos;
+    // continuation bytes are 10xxxxxx (0x80..0xBF)
+    while (p > 0 and (input[p] & 0xC0) == 0x80) p -= 1;
+    return p;
+}
+
+/// Decode the UTF-8 codepoint starting at `pos` using std.unicode.
+/// Returns the codepoint and byte length, or null on invalid data.
+fn decodeUtf8At(input: []const u8, pos: usize) ?struct { cp: u21, len: u3 } {
+    if (pos >= input.len) return null;
+    const seq_len = unicode.utf8ByteSequenceLength(input[pos]) catch return null;
+    if (pos + seq_len > input.len) return null;
+    const cp = unicode.utf8Decode(input[pos..][0..seq_len]) catch return null;
+    return .{ .cp = cp, .len = seq_len };
+}
+
+fn isUnicodeWhitespace(input: []const u8, pos: usize) bool {
+    if (pos >= input.len) return false;
+    const c = input[pos];
+    // ASCII whitespace
+    if (c == ' ' or c == '\t' or c == '\n' or c == '\r' or c == 0x0c or c == 0x0b) return true;
+    // Multi-byte Unicode whitespace: decode at char start
+    const start = utf8CharStart(input, pos);
+    if (decodeUtf8At(input, start)) |r| {
+        return isUnicodeCodepointWhitespace(r.cp);
+    }
+    return false;
+}
+
+/// Check if a Unicode codepoint is whitespace per CommonMark (Unicode Zs + ASCII whitespace).
+fn isUnicodeCodepointWhitespace(cp: u21) bool {
+    // ASCII whitespace is handled by the caller; this covers Unicode Zs category
+    return switch (cp) {
+        0x00A0, // NBSP
+        0x1680, // Ogham space mark
+        0x2000...0x200A, // En quad through hair space
+        0x202F, // Narrow no-break space
+        0x205F, // Medium mathematical space
+        0x3000, // Ideographic space
+        => true,
+        else => false,
+    };
 }
 
 fn isUnicodePunct(input: []const u8, pos: usize) bool {
     if (pos >= input.len) return false;
-    const c = input[pos];
-    if (isAsciiPunct(c)) return true;
-    if (c >= 0x80) {
-        if (c < 0xC0) return false;
-        if (c >= 0xC0 and c < 0xE0) {
-            if (pos + 1 >= input.len) return false;
-            const cp = (@as(u32, c & 0x1F) << 6) | @as(u32, input[pos + 1] & 0x3F);
-            return isUnicodeCodepointPunct(cp);
-        }
-        if (c >= 0xE0 and c < 0xF0) {
-            if (pos + 2 >= input.len) return false;
-            const cp = (@as(u32, c & 0x0F) << 12) |
-                (@as(u32, input[pos + 1] & 0x3F) << 6) |
-                @as(u32, input[pos + 2] & 0x3F);
-            return isUnicodeCodepointPunct(cp);
-        }
-        if (c >= 0xF0) {
-            if (pos + 3 >= input.len) return false;
-            const cp = (@as(u32, c & 0x07) << 18) |
-                (@as(u32, input[pos + 1] & 0x3F) << 12) |
-                (@as(u32, input[pos + 2] & 0x3F) << 6) |
-                @as(u32, input[pos + 3] & 0x3F);
-            return isUnicodeCodepointPunct(cp);
-        }
+    // Find the real start of the character (in case pos is a continuation byte)
+    const start = utf8CharStart(input, pos);
+    const c = input[start];
+    if (c < 0x80) return isAsciiPunct(c);
+    if (decodeUtf8At(input, start)) |r| {
+        return isUnicodeCodepointPunct(r.cp);
     }
     return false;
 }
@@ -1124,15 +1151,67 @@ fn isUnicodeCodepointPunct(cp: u32) bool {
         .{ 0x0609, 0x060D }, .{ 0x061B, 0x061B }, .{ 0x061D, 0x061F },
         .{ 0x066A, 0x066D }, .{ 0x06D4, 0x06D4 }, .{ 0x0F3A, 0x0F3D },
         .{ 0x1400, 0x1400 }, .{ 0x169B, 0x169C }, .{ 0x1806, 0x1806 },
-        .{ 0x2010, 0x2027 }, .{ 0x2030, 0x205E }, .{ 0x2190, 0x23FF },
-        .{ 0x2500, 0x27BF }, .{ 0x27C5, 0x27EF }, .{ 0x2900, 0x2998 },
-        .{ 0x29D8, 0x29DB }, .{ 0x29FC, 0x29FD }, .{ 0x2CF9, 0x2CFF },
-        .{ 0x2E00, 0x2E42 }, .{ 0x3001, 0x3003 }, .{ 0x3008, 0x301F },
-        .{ 0x3030, 0x3030 }, .{ 0x303D, 0x303D }, .{ 0x30A0, 0x30A0 },
-        .{ 0xFD3E, 0xFD3F }, .{ 0xFE17, 0xFE18 }, .{ 0xFE31, 0xFE44 },
-        .{ 0xFE47, 0xFE4F }, .{ 0xFE50, 0xFE5E }, .{ 0xFE63, 0xFE63 },
-        .{ 0xFF08, 0xFF09 }, .{ 0xFF0D, 0xFF0D }, .{ 0xFF3B, 0xFF3F },
-        .{ 0xFF5B, 0xFF5D }, .{ 0xFF5F, 0xFF63 },
+        .{ 0x2010, 0x2027 }, .{ 0x2030, 0x205E }, .{ 0x2070, 0x209C },
+        .{ 0x20A0, 0x20CF }, // Currency symbols (Sc) — includes € U+20AC
+        .{ 0x20D0, 0x20F0 }, // Combining marks for symbols
+        .{ 0x2100, 0x218F }, // Letterlike symbols, Number forms
+        .{ 0x2190, 0x23FF },
+        .{ 0x2440, 0x244A }, // OCR
+        .{ 0x2460, 0x24FF }, // Enclosed alphanumerics
+        .{ 0x2500, 0x27BF },
+        .{ 0x27C5, 0x27EF },
+        .{ 0x2900, 0x2998 },
+        .{ 0x29D8, 0x29DB },
+        .{ 0x29FC, 0x29FD },
+        .{ 0x2CF9, 0x2CFF },
+        .{ 0x2E00, 0x2E52 },
+        .{ 0x3001, 0x3003 },
+        .{ 0x3008, 0x301F },
+        .{ 0x3030, 0x3030 },
+        .{ 0x303D, 0x303D },
+        .{ 0x30A0, 0x30A0 },
+        .{ 0xA490, 0xA4CF }, // Yi radicals
+        .{ 0xA700, 0xA721 }, // Modifier tone letters
+        .{ 0xA788, 0xA788 }, // Modifier letter low circumflex accent
+        .{ 0xA828, 0xA82B }, // North Indic number forms
+        .{ 0xA874, 0xA877 }, // Phags-pa single/double head marks
+        .{ 0xFD3E, 0xFD3F },
+        .{ 0xFE17, 0xFE18 },
+        .{ 0xFE31, 0xFE44 },
+        .{ 0xFE47, 0xFE4F },
+        .{ 0xFE50, 0xFE6B },
+        .{ 0xFE63, 0xFE63 },
+        .{ 0xFF01, 0xFF0F },
+        .{ 0xFF1A, 0xFF20 },
+        .{ 0xFF3B, 0xFF40 },
+        .{ 0xFF5B, 0xFF65 },
+        .{ 0xFFE0, 0xFFEE },
+        // Supplementary planes — miscellaneous symbols, emoticons, etc.
+        .{ 0x10100, 0x10102 },
+        .{ 0x10137, 0x1013F },
+        .{ 0x10190, 0x1019C },
+        .{ 0x101D0, 0x101FC },
+        .{ 0x1CF50, 0x1CFC3 },
+        .{ 0x1D000, 0x1D1FF }, // Musical symbols, Byzantine musical symbols
+        .{ 0x1D200, 0x1D245 }, // Ancient Greek musical notation
+        .{ 0x1D300, 0x1D356 }, // Tai Xuan Jing symbols
+        .{ 0x1D6C1, 0x1D6C1 },
+        .{ 0x1D6DB, 0x1D6DB },
+        .{ 0x1D6FB, 0x1D6FB },
+        .{ 0x1D715, 0x1D715 },
+        .{ 0x1D735, 0x1D735 },
+        .{ 0x1D74F, 0x1D74F },
+        .{ 0x1D76F, 0x1D76F },
+        .{ 0x1D789, 0x1D789 },
+        .{ 0x1D7A9, 0x1D7A9 },
+        .{ 0x1D7C3, 0x1D7C3 },
+        .{ 0x1E2FF, 0x1E2FF }, // Wancho Naga digit nine (So)
+        .{ 0x1ECAC, 0x1ECAC },
+        .{ 0x1ECB0, 0x1ECB0 },
+        .{ 0x1F000, 0x1F0FF }, // Mahjong, dominos
+        .{ 0x1F100, 0x1F9FF }, // Enclosed, emoticons, dingbats, symbols
+        .{ 0x1FA00, 0x1FA6F },
+        .{ 0x1FA70, 0x1FAFF },
     };
     for (ranges) |r| {
         if (cp < r[0]) return false; // sorted: no point continuing
@@ -1144,11 +1223,11 @@ fn isUnicodeCodepointPunct(cp: u32) bool {
 fn isLeftFlanking(input: []const u8, run_start: usize, run_len: usize) bool {
     const run_end = run_start + run_len;
     if (run_end >= input.len) return false;
-    if (isUnicodeWhitespace(input[run_end])) return false;
+    if (isUnicodeWhitespace(input, run_end)) return false;
     const followed_by_punct = isUnicodePunct(input, run_end);
     if (!followed_by_punct) return true;
     if (run_start == 0) return true;
-    if (isUnicodeWhitespace(input[run_start - 1])) return true;
+    if (isUnicodeWhitespace(input, run_start - 1)) return true;
     if (isUnicodePunct(input, run_start - 1)) return true;
     return false;
 }
@@ -1156,11 +1235,11 @@ fn isLeftFlanking(input: []const u8, run_start: usize, run_len: usize) bool {
 fn isRightFlanking(input: []const u8, run_start: usize, run_len: usize) bool {
     const run_end = run_start + run_len;
     if (run_start == 0) return false;
-    if (isUnicodeWhitespace(input[run_start - 1])) return false;
+    if (isUnicodeWhitespace(input, run_start - 1)) return false;
     const preceded_by_punct = isUnicodePunct(input, run_start - 1);
     if (!preceded_by_punct) return true;
     if (run_end >= input.len) return true;
-    if (isUnicodeWhitespace(input[run_end])) return true;
+    if (isUnicodeWhitespace(input, run_end)) return true;
     if (isUnicodePunct(input, run_end)) return true;
     return false;
 }
@@ -1572,7 +1651,7 @@ fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, r
 } {
     if (start >= input.len or input[start] != '!' or start + 1 >= input.len or input[start + 1] != '[') return null;
     const be = findClosingBracket(input, start + 2) orelse return null;
-    const alt_text = input[start + 2 .. be];
+    const raw_alt = input[start + 2 .. be];
 
     if (be + 1 < input.len and input[be + 1] == '[') {
         var le: usize = be + 2;
@@ -1584,8 +1663,9 @@ fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, r
             if (rm.get(norm)) |dest| {
                 const url_copy = allocator.dupe(u8, dest.url) catch return null;
                 const title_copy: ?[]const u8 = if (dest.title) |t| (allocator.dupe(u8, t) catch return null) else null;
+                const flat_alt = flattenInlineText(allocator, raw_alt, rm) catch return null;
                 return .{ .inline_node = .{ .image = .{
-                    .alt_text = alt_text,
+                    .alt_text = flat_alt,
                     .destination = .{ .url = url_copy, .title = title_copy },
                     .link_type = .reference,
                 } }, .end = le + 1 };
@@ -1594,13 +1674,14 @@ fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, r
     }
 
     if (be + 2 < input.len and input[be + 1] == '[' and input[be + 2] == ']') {
-        const norm = normalizeLabel(allocator, alt_text) catch return null;
+        const norm = normalizeLabel(allocator, raw_alt) catch return null;
         defer allocator.free(norm);
         if (rm.get(norm)) |dest| {
             const url_copy = allocator.dupe(u8, dest.url) catch return null;
             const title_copy: ?[]const u8 = if (dest.title) |t| (allocator.dupe(u8, t) catch return null) else null;
+            const flat_alt = flattenInlineText(allocator, raw_alt, rm) catch return null;
             return .{ .inline_node = .{ .image = .{
-                .alt_text = alt_text,
+                .alt_text = flat_alt,
                 .destination = .{ .url = url_copy, .title = title_copy },
                 .link_type = .collapsed,
             } }, .end = be + 3 };
@@ -1608,13 +1689,14 @@ fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, r
     }
 
     {
-        const norm = normalizeLabel(allocator, alt_text) catch return null;
+        const norm = normalizeLabel(allocator, raw_alt) catch return null;
         defer allocator.free(norm);
         if (rm.get(norm)) |dest| {
             const url_copy = allocator.dupe(u8, dest.url) catch return null;
             const title_copy: ?[]const u8 = if (dest.title) |t| (allocator.dupe(u8, t) catch return null) else null;
+            const flat_alt = flattenInlineText(allocator, raw_alt, rm) catch return null;
             return .{ .inline_node = .{ .image = .{
-                .alt_text = alt_text,
+                .alt_text = flat_alt,
                 .destination = .{ .url = url_copy, .title = title_copy },
                 .link_type = .shortcut,
             } }, .end = be + 1 };
