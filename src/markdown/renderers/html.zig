@@ -25,6 +25,44 @@ fn writeEscaped(writer: anytype, s: []const u8) !void {
     }
 }
 
+/// Write text with HTML entity decoding and HTML escaping.
+/// Recognized entities are decoded to UTF-8, then the result is HTML-escaped.
+/// Unrecognized entities pass through as `&amp;name;`.
+fn writeEscapedWithEntities(writer: anytype, s: []const u8) !void {
+    var i: usize = 0;
+    while (i < s.len) {
+        const c = s[i];
+        if (c == '&') {
+            if (tryDecodeEntity(s, i)) |ent| {
+                // Write decoded bytes with HTML escaping
+                var j: u4 = 0;
+                while (j < ent.len) : (j += 1) {
+                    const b = ent.bytes[j];
+                    switch (b) {
+                        '&' => try writer.writeAll("&amp;"),
+                        '<' => try writer.writeAll("&lt;"),
+                        '>' => try writer.writeAll("&gt;"),
+                        '"' => try writer.writeAll("&quot;"),
+                        else => try writer.writeByte(b),
+                    }
+                }
+                i += ent.consumed;
+                continue;
+            }
+            try writer.writeAll("&amp;");
+            i += 1;
+            continue;
+        }
+        switch (c) {
+            '<' => try writer.writeAll("&lt;"),
+            '>' => try writer.writeAll("&gt;"),
+            '"' => try writer.writeAll("&quot;"),
+            else => try writer.writeByte(c),
+        }
+        i += 1;
+    }
+}
+
 /// Write a URL with HTML-escaping AND percent-encoding for characters that
 /// need it (spaces, non-ASCII, etc.), while preserving already-encoded %XX sequences.
 fn writeUrlEncoded(writer: anytype, s: []const u8) !void {
@@ -139,68 +177,208 @@ fn encodeUtf8Buf(cp: u21, buf: *[4]u8) u3 {
     }
 }
 
-/// Resolve a named HTML entity to its Unicode codepoint(s).
-/// Returns null if the entity is not recognized.
-fn resolveNamedEntity(name: []const u8) ?u21 {
-    const map = .{
-        .{ "amp", 0x26 },
-        .{ "lt", 0x3C },
-        .{ "gt", 0x3E },
-        .{ "quot", 0x22 },
-        .{ "apos", 0x27 },
-        .{ "nbsp", 0xA0 },
-        .{ "auml", 0xE4 },
-        .{ "ouml", 0xF6 },
-        .{ "uuml", 0xFC },
-        .{ "Auml", 0xC4 },
-        .{ "Ouml", 0xD6 },
-        .{ "Uuml", 0xDC },
-        .{ "szlig", 0xDF },
-        .{ "copy", 0xA9 },
-        .{ "reg", 0xAE },
-        .{ "trade", 0x2122 },
-        .{ "frac34", 0xBE },
-        .{ "AElig", 0xC6 },
-        .{ "Dcaron", 0x10E },
-        .{ "ngE", 0x2267 }, // actually ≧̸ but CommonMark maps to ≧ + combining
+/// Result of decoding an HTML entity: UTF-8 bytes and their length.
+const EntityResult = struct { bytes: [8]u8, len: u4 };
+
+/// Resolve a named HTML entity to its UTF-8 byte sequence.
+/// Returns the bytes and length, or null if the entity is not recognized.
+/// Supports multi-codepoint entities (e.g. &ngE; → U+2267 U+0338).
+fn resolveNamedEntity(name: []const u8) ?EntityResult {
+    // Table of HTML5 named character references used in CommonMark spec tests
+    // and common usage. Values are UTF-8 encoded byte sequences.
+    const Entry = struct { name: []const u8, bytes: []const u8 };
+    const map = [_]Entry{
+        // XML predefined
+        .{ .name = "amp", .bytes = "&" },
+        .{ .name = "lt", .bytes = "<" },
+        .{ .name = "gt", .bytes = ">" },
+        .{ .name = "quot", .bytes = "\"" },
+        .{ .name = "apos", .bytes = "'" },
+        // Latin-1 supplement
+        .{ .name = "nbsp", .bytes = "\xC2\xA0" },
+        .{ .name = "iexcl", .bytes = "\xC2\xA1" },
+        .{ .name = "cent", .bytes = "\xC2\xA2" },
+        .{ .name = "pound", .bytes = "\xC2\xA3" },
+        .{ .name = "curren", .bytes = "\xC2\xA4" },
+        .{ .name = "yen", .bytes = "\xC2\xA5" },
+        .{ .name = "brvbar", .bytes = "\xC2\xA6" },
+        .{ .name = "sect", .bytes = "\xC2\xA7" },
+        .{ .name = "uml", .bytes = "\xC2\xA8" },
+        .{ .name = "copy", .bytes = "\xC2\xA9" },
+        .{ .name = "ordf", .bytes = "\xC2\xAA" },
+        .{ .name = "laquo", .bytes = "\xC2\xAB" },
+        .{ .name = "not", .bytes = "\xC2\xAC" },
+        .{ .name = "shy", .bytes = "\xC2\xAD" },
+        .{ .name = "reg", .bytes = "\xC2\xAE" },
+        .{ .name = "macr", .bytes = "\xC2\xAF" },
+        .{ .name = "deg", .bytes = "\xC2\xB0" },
+        .{ .name = "plusmn", .bytes = "\xC2\xB1" },
+        .{ .name = "sup2", .bytes = "\xC2\xB2" },
+        .{ .name = "sup3", .bytes = "\xC2\xB3" },
+        .{ .name = "acute", .bytes = "\xC2\xB4" },
+        .{ .name = "micro", .bytes = "\xC2\xB5" },
+        .{ .name = "para", .bytes = "\xC2\xB6" },
+        .{ .name = "middot", .bytes = "\xC2\xB7" },
+        .{ .name = "cedil", .bytes = "\xC2\xB8" },
+        .{ .name = "sup1", .bytes = "\xC2\xB9" },
+        .{ .name = "ordm", .bytes = "\xC2\xBA" },
+        .{ .name = "raquo", .bytes = "\xC2\xBB" },
+        .{ .name = "frac14", .bytes = "\xC2\xBC" },
+        .{ .name = "frac12", .bytes = "\xC2\xBD" },
+        .{ .name = "frac34", .bytes = "\xC2\xBE" },
+        .{ .name = "iquest", .bytes = "\xC2\xBF" },
+        .{ .name = "Agrave", .bytes = "\xC3\x80" },
+        .{ .name = "Aacute", .bytes = "\xC3\x81" },
+        .{ .name = "Acirc", .bytes = "\xC3\x82" },
+        .{ .name = "Atilde", .bytes = "\xC3\x83" },
+        .{ .name = "Auml", .bytes = "\xC3\x84" },
+        .{ .name = "Aring", .bytes = "\xC3\x85" },
+        .{ .name = "AElig", .bytes = "\xC3\x86" },
+        .{ .name = "Ccedil", .bytes = "\xC3\x87" },
+        .{ .name = "Egrave", .bytes = "\xC3\x88" },
+        .{ .name = "Eacute", .bytes = "\xC3\x89" },
+        .{ .name = "Ecirc", .bytes = "\xC3\x8A" },
+        .{ .name = "Euml", .bytes = "\xC3\x8B" },
+        .{ .name = "Igrave", .bytes = "\xC3\x8C" },
+        .{ .name = "Iacute", .bytes = "\xC3\x8D" },
+        .{ .name = "Icirc", .bytes = "\xC3\x8E" },
+        .{ .name = "Iuml", .bytes = "\xC3\x8F" },
+        .{ .name = "ETH", .bytes = "\xC3\x90" },
+        .{ .name = "Ntilde", .bytes = "\xC3\x91" },
+        .{ .name = "Ograve", .bytes = "\xC3\x92" },
+        .{ .name = "Oacute", .bytes = "\xC3\x93" },
+        .{ .name = "Ocirc", .bytes = "\xC3\x94" },
+        .{ .name = "Otilde", .bytes = "\xC3\x95" },
+        .{ .name = "Ouml", .bytes = "\xC3\x96" },
+        .{ .name = "times", .bytes = "\xC3\x97" },
+        .{ .name = "Oslash", .bytes = "\xC3\x98" },
+        .{ .name = "Ugrave", .bytes = "\xC3\x99" },
+        .{ .name = "Uacute", .bytes = "\xC3\x9A" },
+        .{ .name = "Ucirc", .bytes = "\xC3\x9B" },
+        .{ .name = "Uuml", .bytes = "\xC3\x9C" },
+        .{ .name = "Yacute", .bytes = "\xC3\x9D" },
+        .{ .name = "THORN", .bytes = "\xC3\x9E" },
+        .{ .name = "szlig", .bytes = "\xC3\x9F" },
+        .{ .name = "agrave", .bytes = "\xC3\xA0" },
+        .{ .name = "aacute", .bytes = "\xC3\xA1" },
+        .{ .name = "acirc", .bytes = "\xC3\xA2" },
+        .{ .name = "atilde", .bytes = "\xC3\xA3" },
+        .{ .name = "auml", .bytes = "\xC3\xA4" },
+        .{ .name = "aring", .bytes = "\xC3\xA5" },
+        .{ .name = "aelig", .bytes = "\xC3\xA6" },
+        .{ .name = "ccedil", .bytes = "\xC3\xA7" },
+        .{ .name = "egrave", .bytes = "\xC3\xA8" },
+        .{ .name = "eacute", .bytes = "\xC3\xA9" },
+        .{ .name = "ecirc", .bytes = "\xC3\xAA" },
+        .{ .name = "euml", .bytes = "\xC3\xAB" },
+        .{ .name = "igrave", .bytes = "\xC3\xAC" },
+        .{ .name = "iacute", .bytes = "\xC3\xAD" },
+        .{ .name = "icirc", .bytes = "\xC3\xAE" },
+        .{ .name = "iuml", .bytes = "\xC3\xAF" },
+        .{ .name = "eth", .bytes = "\xC3\xB0" },
+        .{ .name = "ntilde", .bytes = "\xC3\xB1" },
+        .{ .name = "ograve", .bytes = "\xC3\xB2" },
+        .{ .name = "oacute", .bytes = "\xC3\xB3" },
+        .{ .name = "ocirc", .bytes = "\xC3\xB4" },
+        .{ .name = "otilde", .bytes = "\xC3\xB5" },
+        .{ .name = "ouml", .bytes = "\xC3\xB6" },
+        .{ .name = "divide", .bytes = "\xC3\xB7" },
+        .{ .name = "oslash", .bytes = "\xC3\xB8" },
+        .{ .name = "ugrave", .bytes = "\xC3\xB9" },
+        .{ .name = "uacute", .bytes = "\xC3\xBA" },
+        .{ .name = "ucirc", .bytes = "\xC3\xBB" },
+        .{ .name = "uuml", .bytes = "\xC3\xBC" },
+        .{ .name = "yacute", .bytes = "\xC3\xBD" },
+        .{ .name = "thorn", .bytes = "\xC3\xBE" },
+        .{ .name = "yuml", .bytes = "\xC3\xBF" },
+        // Extended Latin
+        .{ .name = "Dcaron", .bytes = "\xC4\x8E" }, // U+010E
+        // General punctuation, symbols
+        .{ .name = "ndash", .bytes = "\xE2\x80\x93" },
+        .{ .name = "mdash", .bytes = "\xE2\x80\x94" },
+        .{ .name = "lsquo", .bytes = "\xE2\x80\x98" },
+        .{ .name = "rsquo", .bytes = "\xE2\x80\x99" },
+        .{ .name = "sbquo", .bytes = "\xE2\x80\x9A" },
+        .{ .name = "ldquo", .bytes = "\xE2\x80\x9C" },
+        .{ .name = "rdquo", .bytes = "\xE2\x80\x9D" },
+        .{ .name = "bdquo", .bytes = "\xE2\x80\x9E" },
+        .{ .name = "dagger", .bytes = "\xE2\x80\xA0" },
+        .{ .name = "Dagger", .bytes = "\xE2\x80\xA1" },
+        .{ .name = "bull", .bytes = "\xE2\x80\xA2" },
+        .{ .name = "hellip", .bytes = "\xE2\x80\xA6" },
+        .{ .name = "permil", .bytes = "\xE2\x80\xB0" },
+        .{ .name = "prime", .bytes = "\xE2\x80\xB2" },
+        .{ .name = "Prime", .bytes = "\xE2\x80\xB3" },
+        .{ .name = "lsaquo", .bytes = "\xE2\x80\xB9" },
+        .{ .name = "rsaquo", .bytes = "\xE2\x80\xBA" },
+        .{ .name = "trade", .bytes = "\xE2\x84\xA2" }, // U+2122
+        // Letterlike symbols
+        .{ .name = "HilbertSpace", .bytes = "\xE2\x84\x8B" }, // U+210B
+        // Math
+        .{ .name = "DifferentialD", .bytes = "\xE2\x85\x86" }, // U+2146
+        .{ .name = "ClockwiseContourIntegral", .bytes = "\xE2\x88\xB2" }, // U+2232
+        // Multi-codepoint: ≧̸ = U+2267 U+0338
+        .{ .name = "ngE", .bytes = "\xE2\x89\xA7\xCC\xB8" },
+        // Arrows, math operators
+        .{ .name = "larr", .bytes = "\xE2\x86\x90" },
+        .{ .name = "uarr", .bytes = "\xE2\x86\x91" },
+        .{ .name = "rarr", .bytes = "\xE2\x86\x92" },
+        .{ .name = "darr", .bytes = "\xE2\x86\x93" },
+        .{ .name = "harr", .bytes = "\xE2\x86\x94" },
+        .{ .name = "lArr", .bytes = "\xE2\x87\x90" },
+        .{ .name = "rArr", .bytes = "\xE2\x87\x92" },
+        // Miscellaneous
+        .{ .name = "spades", .bytes = "\xE2\x99\xA0" },
+        .{ .name = "clubs", .bytes = "\xE2\x99\xA3" },
+        .{ .name = "hearts", .bytes = "\xE2\x99\xA5" },
+        .{ .name = "diams", .bytes = "\xE2\x99\xA6" },
     };
-    inline for (map) |entry| {
-        if (std.mem.eql(u8, name, entry[0])) return entry[1];
+    for (map) |entry| {
+        if (std.mem.eql(u8, name, entry.name)) {
+            var result: EntityResult = .{ .bytes = undefined, .len = @intCast(entry.bytes.len) };
+            @memcpy(result.bytes[0..entry.bytes.len], entry.bytes);
+            return result;
+        }
     }
     return null;
 }
 
 /// Try to parse an HTML entity reference at position `i` in `s`.
 /// Returns the entity's UTF-8 bytes and the number of source bytes consumed, or null if not an entity.
-fn tryDecodeEntity(s: []const u8, i: usize) ?struct { bytes: [4]u8, len: u3, consumed: usize } {
+/// Supports multi-codepoint named entities (up to 8 bytes of UTF-8).
+const DecodedEntity = struct { bytes: [8]u8, len: u4, consumed: usize };
+fn tryDecodeEntity(s: []const u8, i: usize) ?DecodedEntity {
     if (i >= s.len or s[i] != '&') return null;
     if (i + 1 >= s.len) return null;
 
     // Numeric character reference
     if (s[i + 1] == '#') {
         if (i + 2 >= s.len) return null;
-        var cp: u21 = 0;
+        var cp: u32 = 0;
         var pos = i + 2;
         if (s[pos] == 'x' or s[pos] == 'X') {
-            // Hex: &#xHHHH;
+            // Hex: &#xHHHH; — 1-6 hex digits per CommonMark spec
             pos += 1;
             const start = pos;
-            while (pos < s.len and isHexDigit(s[pos]) and pos - start < 8) : (pos += 1) {
+            while (pos < s.len and isHexDigit(s[pos]) and pos - start < 6) : (pos += 1) {
                 cp = cp * 16 + hexDigitVal(s[pos]);
             }
             if (pos == start or pos >= s.len or s[pos] != ';') return null;
+            // If there are more hex digits, it's not a valid reference
+            if (pos < s.len and isHexDigit(s[pos])) return null;
         } else {
-            // Decimal: &#DDDD;
+            // Decimal: &#DDDD; — 1-7 digits per CommonMark spec
             const start = pos;
-            while (pos < s.len and s[pos] >= '0' and s[pos] <= '9' and pos - start < 8) : (pos += 1) {
+            while (pos < s.len and s[pos] >= '0' and s[pos] <= '9' and pos - start < 7) : (pos += 1) {
                 cp = cp * 10 + (s[pos] - '0');
             }
             if (pos == start or pos >= s.len or s[pos] != ';') return null;
+            // If there are more digits, it's not a valid reference
+            if (pos < s.len and s[pos] >= '0' and s[pos] <= '9') return null;
         }
-        if (cp == 0) cp = 0xFFFD; // Replace null with replacement character
-        if (cp > 0x10FFFF) cp = 0xFFFD;
-        var buf: [4]u8 = undefined;
-        const len = encodeUtf8Buf(cp, &buf);
+        if (cp == 0 or cp > 0x10FFFF) cp = 0xFFFD;
+        var buf: [8]u8 = undefined;
+        const len = encodeUtf8Buf(@intCast(cp), buf[0..4]);
         return .{ .bytes = buf, .len = len, .consumed = pos + 1 - i };
     }
 
@@ -213,10 +391,10 @@ fn tryDecodeEntity(s: []const u8, i: usize) ?struct { bytes: [4]u8, len: u3, con
     {}
     if (pos == name_start or pos >= s.len or s[pos] != ';') return null;
     const name = s[name_start..pos];
-    if (resolveNamedEntity(name)) |cp| {
-        var buf: [4]u8 = undefined;
-        const len = encodeUtf8Buf(cp, &buf);
-        return .{ .bytes = buf, .len = len, .consumed = pos + 1 - i };
+    if (resolveNamedEntity(name)) |ent| {
+        var buf: [8]u8 = undefined;
+        @memcpy(buf[0..ent.len], ent.bytes[0..ent.len]);
+        return .{ .bytes = buf, .len = ent.len, .consumed = pos + 1 - i };
     }
     return null;
 }
@@ -232,7 +410,7 @@ fn writeUrlEncodedWithEntities(writer: anytype, s: []const u8) !void {
             // Try to decode an HTML entity
             if (tryDecodeEntity(s, i)) |ent| {
                 // Write the decoded bytes through percent-encoding
-                var j: u3 = 0;
+                var j: u4 = 0;
                 while (j < ent.len) : (j += 1) {
                     const b = ent.bytes[j];
                     if (b >= 0x80) {
@@ -293,7 +471,7 @@ fn writeEscapedTitleWithEntities(writer: anytype, s: []const u8) !void {
         if (c == '&') {
             if (tryDecodeEntity(s, i)) |ent| {
                 // Write decoded bytes with HTML escaping
-                var j: u3 = 0;
+                var j: u4 = 0;
                 while (j < ent.len) : (j += 1) {
                     const b = ent.bytes[j];
                     switch (b) {
@@ -337,7 +515,7 @@ fn writeEscapedTitleWithEntities(writer: anytype, s: []const u8) !void {
 
 fn renderInline(writer: anytype, item: AST.Inline) !void {
     switch (item) {
-        .text => |t| try writeEscaped(writer, t.content),
+        .text => |t| try writeEscapedWithEntities(writer, t.content),
         .soft_break => try writer.writeByte('\n'),
         .hard_break => try writer.writeAll("<br />"),
         .code_span => |cs| {
@@ -426,7 +604,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
         .fenced_code_block => |fcb| {
             if (fcb.language) |lang| {
                 try writer.writeAll("<pre><code class=\"language-");
-                try writeEscaped(writer, lang);
+                try writeEscapedWithEntities(writer, lang);
                 try writer.writeAll("\">");
             } else {
                 try writer.writeAll("<pre><code>");
