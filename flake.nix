@@ -40,10 +40,20 @@
       system: let
         env = zig2nix.outputs.zig-env.${system} {};
         pkgs = nixpkgs.legacyPackages.${system};
+        benchmark = pkgs.writeShellApplication {
+          name = "benchmark";
+          runtimeInputs = with pkgs; [
+            hyperfine
+          ];
+          text = ''
+            hyperfine -N --warmup 100 -m 1000 --export-markdown benchmark.md -L mode "Safe,Small,Fast" --setup "zig build -Doptimize=Release{mode}"  "./zig-out/bin/zigmark ./Readme.md > /dev/null"
+          '';
+        };
       in {
         default = env.mkShell {
           nativeBuildInputs = [
             pkgs.zls
+            benchmark
           ];
 
           shellHook = ''
