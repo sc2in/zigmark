@@ -2,29 +2,29 @@
 
 This document tracks the work needed to achieve full CommonMark 0.30 specification compliance.
 
-**Current score: 421 / 564 (75%) — spec tests passing, 0 memory leaks**
+**Current score: 531 / 655 (81%) — spec tests passing, 0 memory leaks**
 
 Per-section breakdown (via `zig build spec`):
 
 | Section | Pass | Fail | Total |
 |---------|------|------|-------|
 | ATX headings | 12 | 6 | 18 |
-| Setext headings | 18 | 9 | 27 |
+| Setext headings | 20 | 7 | 27 |
 | Thematic breaks | 16 | 3 | 19 |
 | Paragraphs | 7 | 1 | 8 |
 | Blank lines | 1 | 0 | 1 |
 | Indented code | 11 | 1 | 12 |
 | Fenced code | 20 | 9 | 29 |
 | **Lists** | **62** | **5** | **67** |
-| Backslash escapes | 7 | 6 | 13 |
-| Entities | 3 | 14 | 17 |
-| Code spans | 17 | 5 | 22 |
-| **Emphasis** | **124** | **8** | **132** |
-| **Links** | **75** | **42** | **117** |
-| Images | 14 | 8 | 22 |
-| Autolinks | 12 | 7 | 19 |
-| Raw HTML | 12 | 9 | 21 |
-| Hard line breaks | 5 | 10 | 15 |
+| Backslash escapes | 9 | 4 | 13 |
+| Entities | 7 | 10 | 17 |
+| Code spans | 20 | 2 | 22 |
+| **Emphasis** | **130** | **2** | **132** |
+| **Links** | **117** | **0** | **117** |
+| Images | 17 | 5 | 22 |
+| Autolinks | 16 | 3 | 19 |
+| Raw HTML | 19 | 2 | 21 |
+| Hard line breaks | 7 | 8 | 15 |
 | Soft line breaks | 2 | 0 | 2 |
 | Textual content | 3 | 0 | 3 |
 
@@ -80,7 +80,7 @@ Per-section breakdown (via `zig build spec`):
   - 17 rules for emphasis from CommonMark spec
   - Left/right-flanking delimiter runs
   - Can open/close emphasis based on surrounding characters
-  - 124/132 passing (8 remaining edge cases)
+  - 130/132 passing (2 remaining edge cases)
 
 ### Links
 
@@ -89,7 +89,7 @@ Per-section breakdown (via `zig build spec`):
 - [x] **Reference links (shortcut)** - `[text]` with definition elsewhere
 - [x] **Proper link destination parsing** - Nested parentheses, angle-bracket destinations, backslash escapes, space rejection in bare URLs
 - [x] **Link titles** - Support `"`, `'`, and `(…)` quote styles
-- [ ] **Nested links** - Links inside link text (CommonMark forbids nesting)
+- [x] **Nested links** - Links inside link text (CommonMark forbids nesting)
 
 ### Autolinks
 
@@ -175,33 +175,40 @@ Per-section breakdown (via `zig build spec`):
 - [x] **Thematic break interruption** - Can interrupt paragraphs
 - [ ] **Paragraph interruption rules** - Various block types can interrupt
 - [ ] **Container nesting** - Proper nesting of blockquotes, lists, etc.
-- [ ] **Reference link definition placement** - Can occur anywhere, affects whole document
-  - *(Partially done — two-pass architecture implemented, but ref defs inside blockquotes/lists not yet fully handled)*
+- [x] **Reference link definition placement** - Can occur anywhere, affects whole document
+  - Two-pass architecture implemented, ref defs inside blockquotes extracted to document scope
 
 ## Currently Implemented ✅
 
 - ✅ Basic ATX headings (`#` to `######`) — 12/18 passing
-- ✅ Setext headings (`===` and `---` underlines) — 18/27 passing
+- ✅ Setext headings (`===` and `---` underlines) — 20/27 passing
 - ✅ Paragraphs (basic) — 7/8 passing
-- ✅ Emphasis/strong (`*` and `_` variants) — 124/132 passing
+- ✅ Emphasis/strong (`*` and `_` variants) — 130/132 passing
 - ✅ Inline links `[text](url)` with nested parens, angle-bracket destinations, backslash escapes
 - ✅ Link reference definitions `[label]: url "title"` — two-pass architecture
-- ✅ Reference links: full `[text][label]`, collapsed `[text][]`, shortcut `[text]` — 75/117 passing
+- ✅ Reference links: full `[text][label]`, collapsed `[text][]`, shortcut `[text]` — **117/117 passing** ✨
 - ✅ Link titles (all three quote styles: `"`, `'`, `(…)`)
-- ✅ URL percent-encoding in rendered HTML (`writeUrlEncoded`)
-- ✅ Images `![alt](url)` — 14/22 passing
-- ✅ Autolinks (`<uri>` and `<email>`) — 12/19 passing
+- ✅ URL percent-encoding in rendered HTML with HTML entity decoding
+- ✅ Nested link prevention (CommonMark: links cannot contain other links)
+- ✅ Unicode case folding for link labels (Greek, Cyrillic, Latin Extended, ẞ→ss)
+- ✅ Multi-line link reference definition labels (up to 999 characters)
+- ✅ Link ref defs inside blockquotes (document-scoped)
+- ✅ Proper image alt text flattening (nested links/images → plain text)
+- ✅ Images `![alt](url)` — 17/22 passing
+- ✅ Autolinks (`<uri>` and `<email>`) — 16/19 passing
 - ✅ Unordered and ordered lists (multi-line, nested) — 62/67 passing
 - ✅ Loose vs tight list detection (blank lines in code blocks/nested lists excluded)
 - ✅ List interruption rules (empty items can't interrupt; ordered must start with 1)
 - ✅ Content column–based list item continuation and recursive block parsing
 - ✅ Blockquotes (basic, with lazy continuation)
-- ✅ Code spans — 17/22 passing
+- ✅ Code spans — 20/22 passing
 - ✅ Fenced code blocks (with info strings) — 20/29 passing
 - ✅ Indented code blocks (4-space / tab) — 11/12 passing
 - ✅ Thematic breaks — 16/19 passing
-- ✅ Backslash escapes of ASCII punctuation — 7/13 passing
-- ✅ Soft breaks and hard breaks (2+ trailing spaces) — 7/17 passing
+- ✅ Backslash escapes of ASCII punctuation — 9/13 passing
+- ✅ Soft breaks and hard breaks (2+ trailing spaces) — 9/17 passing
+- ✅ Raw HTML (inline and block) — 19/21 passing
+- ✅ HTML entity decoding in URLs and titles (`&auml;`, `&#x...;`, etc.)
 - ✅ Line ending normalization (CRLF, CR, LF)
 - ✅ Footnotes (extension, not in CommonMark)
 - ✅ Frontmatter support (YAML/TOML — extension, not in CommonMark)
@@ -218,16 +225,16 @@ Per-section breakdown (via `zig build spec`):
 
 ## Biggest Opportunities (by failing test count)
 
-1. **Links** — 42 failures (edge cases: nested links, entity handling in URLs, etc.)
-2. **Entities** — 14 failures (HTML entity & numeric character reference resolution)
-3. **Hard line breaks** — 10 failures (trailing spaces, backslash breaks)
-4. **Fenced code** — 9 failures (indentation stripping, closing fence rules)
-5. **Setext headings** — 9 failures (interaction with other block types)
-6. **Raw HTML** — 9 failures (HTML block types, inline HTML parsing)
-7. **Images** — 8 failures (reference images, nested alt text)
-8. **Emphasis** — 8 failures (remaining edge cases)
-9. **Autolinks** — 7 failures (edge cases)
-10. **ATX headings** — 6 failures
-11. **Backslash escapes** — 6 failures (escaping in various contexts)
-12. **Lists** — 5 failures (blockquote lazy continuation, HTML blocks, lazy paragraph continuation)
-13. **Code spans** — 5 failures
+1. **Entities** — 10 failures (HTML entity & numeric character reference resolution)
+2. **Fenced code** — 9 failures (indentation stripping, closing fence rules)
+3. **Hard line breaks** — 8 failures (trailing spaces, backslash breaks)
+4. **Setext headings** — 7 failures (interaction with other block types)
+5. **ATX headings** — 6 failures
+6. **Images** — 5 failures (reference images, nested alt text)
+7. **Lists** — 5 failures (blockquote lazy continuation, HTML blocks, lazy paragraph continuation)
+8. **Backslash escapes** — 4 failures (escaping in various contexts)
+9. **Autolinks** — 3 failures (edge cases)
+10. **Raw HTML** — 2 failures (HTML block types)
+11. **Code spans** — 2 failures
+12. **Emphasis** — 2 failures (remaining edge cases)
+13. ~~**Links** — 0 failures~~ ✅ **Complete!**

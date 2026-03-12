@@ -186,7 +186,7 @@ zig build test
 
 Priority features and improvements planned for future releases:
 
-1. **CommonMark Spec Compliance**: 341/564 (60%) spec tests passing — tracked in [TODO.md](TODO.md)
+1. **CommonMark Spec Compliance**: 531/655 (81%) spec tests passing — tracked in [TODO.md](TODO.md)
 2. **Extended Syntax Support**:
    - Tables (GFM-style)
    - Strikethrough with `~~text~~`
