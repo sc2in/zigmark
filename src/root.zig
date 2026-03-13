@@ -13,12 +13,19 @@ const mecha = @import("mecha");
 
 /// Abstract syntax tree types for the parsed Markdown document.
 pub const AST = @import("markdown/ast.zig");
+pub const Frontmatter = @import("markdown/frontmatter.zig");
 /// Markdown parser that transforms raw text into an `AST.Document`.
 pub const Parser = @import("markdown/parser.zig");
+/// Renderers
+const ast_mod = @import("markdown/renderers/ast_renderer.zig");
 const html = @import("markdown/renderers/html.zig");
 
 /// Pre-built renderer that serialises an `AST.Document` to CommonMark-compliant HTML.
 pub const HTMLRenderer = Renderer.create(html);
+
+/// Pre-built renderer that serialises an `AST.Document` to a human-readable
+/// tree diagram with box-drawing characters.
+pub const ASTRenderer = Renderer.create(ast_mod);
 
 /// A type-erased rendering back-end.
 ///

@@ -109,9 +109,20 @@ fn writeUrlEncoded(writer: anytype, s: []const u8) !void {
     }
 }
 
+/// Comptime-generated lookup table for ASCII punctuation characters.
+/// Branchless O(1) check instead of 4 range comparisons.
+const ascii_punct_table = blk: {
+    var table = [_]bool{false} ** 128;
+    for (0..128) |i| {
+        const c: u8 = @intCast(i);
+        table[i] = (c >= '!' and c <= '/') or (c >= ':' and c <= '@') or
+            (c >= '[' and c <= '`') or (c >= '{' and c <= '~');
+    }
+    break :blk table;
+};
+
 fn isAsciiPunctuation(c: u8) bool {
-    return (c >= '!' and c <= '/') or (c >= ':' and c <= '@') or
-        (c >= '[' and c <= '`') or (c >= '{' and c <= '~');
+    return c < 128 and ascii_punct_table[c];
 }
 
 /// Write a URL literally (no backslash escape processing), with percent-encoding
@@ -181,8 +192,17 @@ fn writeEscapedWithBackslash(writer: anytype, s: []const u8) !void {
     }
 }
 
+/// Comptime-generated lookup table for hex digit detection.
+const hex_digit_table = blk: {
+    var table = [_]bool{false} ** 128;
+    for ('0'..'9' + 1) |i| table[i] = true;
+    for ('a'..'f' + 1) |i| table[i] = true;
+    for ('A'..'F' + 1) |i| table[i] = true;
+    break :blk table;
+};
+
 fn isHexDigit(c: u8) bool {
-    return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
+    return c < 128 and hex_digit_table[c];
 }
 
 fn hexDigitVal(c: u8) u8 {
@@ -221,19 +241,24 @@ const EntityResult = struct { bytes: [8]u8, len: u4 };
 /// Resolve a named HTML entity to its UTF-8 byte sequence.
 /// Returns the bytes and length, or null if the entity is not recognized.
 /// Supports multi-codepoint entities (e.g. &ngE; → U+2267 U+0338).
+///
+/// Uses a comptime-generated `StaticStringMap` for O(1) average-case lookup
+/// instead of a linear scan through the entity table.
 fn resolveNamedEntity(name: []const u8) ?EntityResult {
-    // Table of HTML5 named character references used in CommonMark spec tests
-    // and common usage. Values are UTF-8 encoded byte sequences.
-
-    for (EntryMap) |entry| {
-        if (std.mem.eql(u8, name, entry.name)) {
-            var result: EntityResult = .{ .bytes = undefined, .len = @intCast(entry.bytes.len) };
-            @memcpy(result.bytes[0..entry.bytes.len], entry.bytes);
-            return result;
-        }
-    }
-    return null;
+    const bytes = entity_map.get(name) orelse return null;
+    var result: EntityResult = .{ .bytes = undefined, .len = @intCast(bytes.len) };
+    @memcpy(result.bytes[0..bytes.len], bytes);
+    return result;
 }
+
+/// Comptime-generated perfect hash map from entity name → UTF-8 bytes.
+const entity_map = std.StaticStringMap([]const u8).initComptime(blk: {
+    var kvs: [EntryMap.len]struct { []const u8, []const u8 } = undefined;
+    for (EntryMap, 0..) |entry, i| {
+        kvs[i] = .{ entry.name, entry.bytes };
+    }
+    break :blk &kvs;
+});
 
 /// Try to parse an HTML entity reference at position `i` in `s`.
 /// Returns the entity's UTF-8 bytes and the number of source bytes consumed, or null if not an entity.

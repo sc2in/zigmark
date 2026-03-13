@@ -69,12 +69,12 @@ pub const Document = struct {
         }
 
         /// Return every top-level block whose active tag equals `block_type`.
-        pub fn blocks(self: Query, allocator: std.mem.Allocator, block_type: std.meta.Tag(Block)) !std.ArrayList(*const Block) {
-            var results = std.ArrayList(*const Block).init(allocator);
+        pub fn blocks(self: Query, allocator: std.mem.Allocator, block_type: std.meta.Tag(Block)) !std.ArrayList(Block) {
+            var results = std.ArrayList(Block){};
 
             for (self.document.children.items) |block| {
                 if (std.meta.activeTag(block) == block_type) {
-                    try results.append(block);
+                    try results.append(allocator, block);
                 }
             }
 
@@ -84,16 +84,16 @@ pub const Document = struct {
         /// Return all headings, optionally filtered to a single `level` (1–6).
         /// Pass `null` to return headings of every level.
         pub fn headings(self: Query, allocator: std.mem.Allocator, level: ?u8) !std.ArrayList(*const Heading) {
-            var results = std.ArrayList(*const Heading).init(allocator);
+            var results = std.ArrayList(*const Heading){};
 
-            for (self.document.children.items) |block| {
-                if (block == .heading) {
+            for (self.document.children.items) |*block| {
+                if (block.* == .heading) {
                     if (level) |target_level| {
                         if (block.heading.level == target_level) {
-                            try results.append(&block.heading);
+                            try results.append(allocator, &block.heading);
                         }
                     } else {
-                        try results.append(&block.heading);
+                        try results.append(allocator, &block.heading);
                     }
                 }
             }
@@ -103,13 +103,13 @@ pub const Document = struct {
 
         /// Return every paragraph that contains at least one inline of `inline_type`.
         pub fn paragraphsWithInlines(self: Query, allocator: std.mem.Allocator, inline_type: std.meta.Tag(Inline)) !std.ArrayList(*const Paragraph) {
-            var results = std.ArrayList(*const Paragraph).init(allocator);
+            var results = std.ArrayList(*const Paragraph){};
 
             for (self.document.children.items) |*block| {
                 if (block.* == .paragraph) {
                     for (block.paragraph.children.items) |*inline_elem| {
                         if (std.meta.activeTag(inline_elem.*) == inline_type) {
-                            try results.append(&block.paragraph);
+                            try results.append(allocator, &block.paragraph);
                             break;
                         }
                     }
@@ -122,7 +122,7 @@ pub const Document = struct {
         /// Collect every `Link` inline across all blocks (paragraphs, headings,
         /// blockquotes, and list items) in document order.
         pub fn links(self: Query, allocator: std.mem.Allocator) !std.ArrayList(*const Link) {
-            var results = std.ArrayList(*const Link).init(allocator);
+            var results = std.ArrayList(*const Link){};
 
             for (self.document.children.items) |*block| {
                 try self.collectLinksFromBlock(allocator, block, &results);
@@ -158,12 +158,14 @@ pub const Document = struct {
             return null;
         }
 
-        /// Count the number of top-level blocks matching `element_type`.
-        pub fn count(self: Query, element_type: anytype) usize {
+        /// Count the number of top-level blocks matching `block_type`.
+        pub fn count(self: Query, block_type: std.meta.Tag(Block)) usize {
             var counter: usize = 0;
 
-            for (self.document.children.items) |*block| {
-                counter += self.countInBlock(block, element_type);
+            for (self.document.children.items) |block| {
+                if (std.meta.activeTag(block) == block_type) {
+                    counter += 1;
+                }
             }
 
             return counter;
@@ -175,14 +177,14 @@ pub const Document = struct {
                 .paragraph => |*p| {
                     for (p.children.items) |*inline_elem| {
                         if (inline_elem.* == .link) {
-                            try results.append(&inline_elem.link);
+                            try results.append(allocator, &inline_elem.link);
                         }
                     }
                 },
                 .heading => |*h| {
                     for (h.children.items) |*inline_elem| {
                         if (inline_elem.* == .link) {
-                            try results.append(&inline_elem.link);
+                            try results.append(allocator, &inline_elem.link);
                         }
                     }
                 },
@@ -200,26 +202,6 @@ pub const Document = struct {
                 },
                 else => {},
             }
-        }
-
-        fn countInBlock(self: Query, block: *const Block, element_type: anytype) usize {
-            _ = self;
-            var counter: usize = 0;
-
-            switch (@TypeOf(element_type)) {
-                Heading => {
-                    if (block.* == .heading) counter += 1;
-                },
-                Paragraph => {
-                    if (block.* == .paragraph) counter += 1;
-                },
-                List => {
-                    if (block.* == .list) counter += 1;
-                },
-                else => {},
-            }
-
-            return counter;
         }
     };
 
@@ -726,3 +708,7 @@ pub const HtmlInline = struct {
         return HtmlInline{ .content = content };
     }
 };
+
+test {
+    _ = @import("query_test.zig");
+}

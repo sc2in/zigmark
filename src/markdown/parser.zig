@@ -1967,20 +1967,25 @@ const html_block_type1_tags = [_][]const u8{
     "pre", "script", "style", "textarea",
 };
 
-/// CommonMark HTML block type 6 tags
-const html_block_type6_tags = [_][]const u8{
-    "address",  "article",    "aside",   "base",     "basefont", "blockquote",
-    "body",     "caption",    "center",  "col",      "colgroup", "dd",
-    "details",  "dialog",     "dir",     "div",      "dl",       "dt",
-    "fieldset", "figcaption", "figure",  "footer",   "form",     "frame",
-    "frameset", "h1",         "h2",      "h3",       "h4",       "h5",
-    "h6",       "head",       "header",  "hr",       "html",     "iframe",
-    "legend",   "li",         "link",    "main",     "menu",     "menuitem",
-    "nav",      "noframes",   "ol",      "optgroup", "option",   "p",
-    "param",    "search",     "section", "summary",  "table",    "tbody",
-    "td",       "tfoot",      "th",      "thead",    "title",    "tr",
-    "track",    "ul",
-};
+/// Comptime set for O(1) type-6 tag lookups, replacing linear scans.
+const html_block_type6_set = std.StaticStringMap(void).initComptime(.{
+    .{ "address", {} },  .{ "article", {} },    .{ "aside", {} },    .{ "base", {} },
+    .{ "basefont", {} }, .{ "blockquote", {} }, .{ "body", {} },     .{ "caption", {} },
+    .{ "center", {} },   .{ "col", {} },        .{ "colgroup", {} }, .{ "dd", {} },
+    .{ "details", {} },  .{ "dialog", {} },     .{ "dir", {} },      .{ "div", {} },
+    .{ "dl", {} },       .{ "dt", {} },         .{ "fieldset", {} }, .{ "figcaption", {} },
+    .{ "figure", {} },   .{ "footer", {} },     .{ "form", {} },     .{ "frame", {} },
+    .{ "frameset", {} }, .{ "h1", {} },         .{ "h2", {} },       .{ "h3", {} },
+    .{ "h4", {} },       .{ "h5", {} },         .{ "h6", {} },       .{ "head", {} },
+    .{ "header", {} },   .{ "hr", {} },         .{ "html", {} },     .{ "iframe", {} },
+    .{ "legend", {} },   .{ "li", {} },         .{ "link", {} },     .{ "main", {} },
+    .{ "menu", {} },     .{ "menuitem", {} },   .{ "nav", {} },      .{ "noframes", {} },
+    .{ "ol", {} },       .{ "optgroup", {} },   .{ "option", {} },   .{ "p", {} },
+    .{ "param", {} },    .{ "search", {} },     .{ "section", {} },  .{ "summary", {} },
+    .{ "table", {} },    .{ "tbody", {} },      .{ "td", {} },       .{ "tfoot", {} },
+    .{ "th", {} },       .{ "thead", {} },      .{ "title", {} },    .{ "tr", {} },
+    .{ "track", {} },    .{ "ul", {} },
+});
 
 fn startsWithTagCaseInsensitive(line: []const u8, tag: []const u8) bool {
     if (line.len < tag.len) return false;
@@ -1993,6 +1998,29 @@ fn startsWithTagCaseInsensitive(line: []const u8, tag: []const u8) bool {
     if (line.len == tag.len) return true;
     const after = line[tag.len];
     return after == ' ' or after == '\t' or after == '>' or after == '/' or after == '\n' or after == '\r';
+}
+
+/// Extract an ASCII tag name from the start of a slice.
+/// Returns the tag name (letters/digits only) or null if the slice
+/// does not start with a valid tag name character.
+fn extractTagName(s: []const u8) ?[]const u8 {
+    if (s.len == 0) return null;
+    if (!((s[0] >= 'a' and s[0] <= 'z') or (s[0] >= 'A' and s[0] <= 'Z'))) return null;
+    var end: usize = 1;
+    while (end < s.len and
+        ((s[end] >= 'a' and s[end] <= 'z') or
+            (s[end] >= 'A' and s[end] <= 'Z') or
+            (s[end] >= '0' and s[end] <= '9')))
+    {
+        end += 1;
+    }
+    // After the tag name, must be whitespace, >, />, or end of line
+    if (end < s.len) {
+        const after = s[end];
+        if (after != ' ' and after != '\t' and after != '>' and
+            after != '/' and after != '\n' and after != '\r') return null;
+    }
+    return s[0..end];
 }
 
 fn isHtmlBlockStart(t: []const u8) bool {
@@ -2024,9 +2052,15 @@ fn isHtmlBlockStart(t: []const u8) bool {
         if (startsWithTagCaseInsensitive(rest[tag_start..], tag)) return true;
     }
 
-    // Type 6: other block-level tags
-    for (html_block_type6_tags) |tag| {
-        if (startsWithTagCaseInsensitive(rest[tag_start..], tag)) return true;
+    // Type 6: other block-level tags — use comptime set for O(1) lookup
+    if (extractTagName(rest[tag_start..])) |tag_name| {
+        var lower_buf: [32]u8 = undefined;
+        if (tag_name.len <= lower_buf.len) {
+            for (tag_name, 0..) |ch, idx| {
+                lower_buf[idx] = if (ch >= 'A' and ch <= 'Z') ch + 32 else ch;
+            }
+            if (html_block_type6_set.has(lower_buf[0..tag_name.len])) return true;
+        }
     }
 
     // Type 7: a complete open or closing tag followed only by optional whitespace
