@@ -270,9 +270,11 @@ pub fn parseSpecTests(allocator: std.mem.Allocator, spec_content: []const u8) !s
         line_number += 1;
         const trimmed = std.mem.trim(u8, line, " \t\r");
 
-        // Detect section headers (only when not inside an example block)
-        if (state == 0 and std.mem.startsWith(u8, trimmed, "#")) {
-            current_section = std.mem.trim(u8, trimmed, "# \t");
+        // Detect section headers (## Title) only when not inside an example block.
+        // Use the raw line (not trimmed) so indented content like "#1--5" is
+        // not mistaken for a heading.
+        if (state == 0 and std.mem.startsWith(u8, line, "## ")) {
+            current_section = std.mem.trim(u8, line["## ".len..], " \t\r");
             continue;
         }
 
@@ -590,17 +592,46 @@ test "CommonMark spec compliance" {
 
     const allocator = arena.allocator();
 
-    // Per-section breakdown
+    // Exact section names from CommonMark spec.txt (## headings).
     const sections = [_][]const u8{
-        "ATX",      "Setext",    "Thematic",   "Paragraph", "Blank",
-        "Indented", "Fenced",    "Blockquote", "List",      "Backslash",
-        "Entity",   "Code span", "Emphasis",   "Link",      "Image",
-        "Autolink", "Raw HTML",  "Hard line",  "Soft line", "Textual",
+        "Tabs",
+        "Backslash escapes",
+        "Entity and numeric character references",
+        "Precedence",
+        "Thematic breaks",
+        "ATX headings",
+        "Setext headings",
+        "Indented code blocks",
+        "Fenced code blocks",
+        "HTML blocks",
+        "Link reference definitions",
+        "Paragraphs",
+        "Blank lines",
+        "Block quotes",
+        "List items",
+        "Lists",
+        "Inlines",
+        "Code spans",
+        "Emphasis and strong emphasis",
+        "Links",
+        "Images",
+        "Autolinks",
+        "Raw HTML",
+        "Hard line breaks",
+        "Soft line breaks",
+        "Textual content",
     };
 
-    std.debug.print("\n{s:<25} {s:>6} {s:>6} {s:>6}\n", .{ "Section", "Pass", "Fail", "Total" });
-    std.debug.print("{s:-<50}\n", .{""});
+    // Known-failing test numbers.  Update this set when fixing spec
+    // compliance bugs so that regressions are caught immediately.
+    const expected_failures = [_]usize{
+        2, 5, 7, 9, 148, 171, 172, 173, 174, 175, 180, 182, 187, 238, 239, 240, 251,
+    };
 
+    std.debug.print("\n{s:<40} {s:>6} {s:>6} {s:>6}\n", .{ "Section", "Pass", "Fail", "Total" });
+    std.debug.print("{s:-<58}\n", .{""});
+
+    var section_total: usize = 0;
     for (sections) |section| {
         const r = try runCommonMarkSpecTests(allocator, "./src/markdown/spec.txt", .{
             .pattern = section,
@@ -608,8 +639,9 @@ test "CommonMark spec compliance" {
             .verbose = false,
         });
         const total = r.passed + r.failed + r.errors;
+        section_total += total;
         if (total > 0) {
-            std.debug.print("{s:<25} {d:>6} {d:>6} {d:>6}\n", .{ section, r.passed, r.failed, total });
+            std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{ section, r.passed, r.failed, total });
         }
     }
 
@@ -619,13 +651,18 @@ test "CommonMark spec compliance" {
         .verbose = false,
     });
 
-    std.debug.print("\nCommonMark spec test results: {any}\n", .{result});
-    try testing.expect(result.total() > 0);
+    std.debug.print("{s:-<58}\n", .{""});
+    std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{
+        "TOTAL", result.passed, result.failed, result.passed + result.failed + result.errors,
+    });
 
-    if (result.failed > 0) {
-        std.debug.print("Warning: {d} CommonMark spec tests failed\n", .{result.failed});
-        std.debug.print("This is expected as the parser implementation is still basic\n", .{});
-    }
+    // Verify the section breakdown covers all tests (no miscategorization).
+    try testing.expectEqual(result.passed + result.failed + result.errors, section_total);
+
+    // Hard-fail on unexpected results so regressions are caught.
+    try testing.expectEqual(@as(usize, expected_failures.len), result.failed);
+    try testing.expectEqual(@as(usize, 655 - expected_failures.len), result.passed);
+    try testing.expectEqual(@as(usize, 0), result.errors);
 }
 
 // CommonMark specification compliance test

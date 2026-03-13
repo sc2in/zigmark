@@ -61,11 +61,34 @@ pub fn main() !void {
 }
 
 fn printSummary(allocator: std.mem.Allocator) !void {
+    // Exact section names from CommonMark spec.txt (## headings).
     const sections = [_][]const u8{
-        "ATX",      "Setext",    "Thematic",   "Paragraph", "Blank",
-        "Indented", "Fenced",    "Blockquote", "List",      "Backslash",
-        "Entity",   "Code span", "Emphasis",   "Link",      "Image",
-        "Autolink", "Raw HTML",  "Hard line",  "Soft line", "Textual",
+        "Tabs",
+        "Backslash escapes",
+        "Entity and num/char refs",
+        "Precedence",
+        "Thematic breaks",
+        "ATX headings",
+        "Setext headings",
+        "Indented code blocks",
+        "Fenced code blocks",
+        "HTML blocks",
+        "Link ref definitions",
+        "Paragraphs",
+        "Blank lines",
+        "Block quotes",
+        "List items",
+        "Lists",
+        "Inlines",
+        "Code spans",
+        "Emphasis/strong emphasis",
+        "Links",
+        "Images",
+        "Autolinks",
+        "Raw HTML",
+        "Hard line breaks",
+        "Soft line breaks",
+        "Textual content",
     };
 
     print("\n{s:<25} {s:>6} {s:>6} {s:>6} {s:>10}\n", .{ "Section", "Pass", "Fail", "Total", "Time (ms)" });
