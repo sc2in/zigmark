@@ -851,7 +851,7 @@ test "backslash escape" {
 }
 
 test "hard break" {
-    try ok("line one  \nline two", "<p>line one<br />line two</p>\n");
+    try ok("line one  \nline two", "<p>line one<br />\nline two</p>\n");
 }
 
 test "link reference" {

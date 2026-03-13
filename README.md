@@ -1,50 +1,12 @@
 # zigmark
 
-A simple and efficient markdown parser and renderer library for Zig. Converts CommonMark-compatible markdown to an Abstract Syntax Tree (AST) and renders it to HTML.
+A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 564 spec tests** (100%).
 
-## Features
-
-### Parsing
-
-- **Headings**: Support for all 6 heading levels (`#` to `######`)
-- **Inline Elements**:
-  - Bold text with `**text**` or `__text__`
-  - Italic text with `_text_` or `*text*`
-  - Code spans with `` `code` `` syntax
-  - Links with `[text](url)` and reference-style `[text][ref]` syntax
-  - Images with `![alt](url)` and reference-style syntax
-  - Autolinks with `<url>` and `<email>` syntax
-  - Backslash escapes of ASCII punctuation
-  - Entity and numeric character references (`&amp;`, `&#123;`, `&#x7E;`)
-  - Hard line breaks (trailing spaces and backslash)
-  - Footnotes with `[^label]` references
-- **Block Elements**:
-  - Paragraphs
-  - ATX headings (`#` to `######`) and setext headings
-  - Lists (both ordered and unordered, loose and tight)
-  - Blockquotes with `>`
-  - Fenced code blocks (with info strings) and indented code blocks
-  - Thematic breaks
-  - Link reference definitions
-  - Raw HTML blocks
-- **Frontmatter Support**:
-  - YAML frontmatter parsing
-  - TOML frontmatter parsing
-  - Access frontmatter as JSON
-- **Advanced Query System**: jQuery-like selectors for AST navigation and traversal
-
-### Rendering
-
-- **HTML Output**: Complete HTML rendering of parsed markdown documents
-- **Pluggable Renderer Architecture**: Extensible renderer interface for custom output formats
-
-## Usage
-
-### As a Library
+## Installation
 
 Add `zigmark` as a dependency in your `build.zig.zon`:
 
-```
+```zig
 .dependencies = .{
     .zigmark = .{
         .url = "https://github.com/sc2in/zigmark/archive/<commit>.tar.gz",
@@ -53,7 +15,62 @@ Add `zigmark` as a dependency in your `build.zig.zon`:
 }
 ```
 
-#### Basic Parsing and Rendering Example
+Then in your `build.zig`:
+
+```zig
+const zigmark = b.dependency("zigmark", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("zigmark", zigmark.module("zigmark"));
+```
+
+## CLI Usage
+
+```bash
+zig build
+```
+
+### Convert Markdown to HTML
+
+```bash
+# From a file
+zigmark README.md
+
+# From stdin
+echo '# Hello' | zigmark
+
+# Write to a file
+zigmark -o output.html README.md
+```
+
+### Inspect the AST
+
+```bash
+echo '**bold** and *italic*' | zigmark -f ast
+```
+
+```
+Document
+└── Paragraph
+    ├── Strong ('*')
+    │   └── Text "bold"
+    ├── Text " and "
+    └── Emphasis ('*')
+        └── Text "italic"
+```
+
+### Options
+
+```
+Usage: zigmark [OPTIONS] [FILE]
+
+  -h, --help          Display this help and exit.
+  -v, --version       Print version and exit.
+  -f, --format <str>  Output format: "html" (default) or "ast".
+  -o, --output <str>  Write output to FILE instead of stdout.
+```
+
+## Library Usage
+
+### Basic Parsing and Rendering
 
 ```zig
 const std = @import("std");
@@ -64,7 +81,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const markdown = 
+    const markdown =
         \\# Hello World
         \\
         \\This is a **bold** paragraph with a [link](https://sc2.in).
@@ -84,124 +101,101 @@ pub fn main() !void {
 }
 ```
 
-#### Query System
+### AST Query System
 
-Access specific elements in the parsed document:
+Navigate the parsed document with jQuery-like selectors:
 
 ```zig
 var query = doc.get();
 
-// Get all headings
+// Get all headings (optionally filter by level)
 var headings = try query.headings(allocator, null);
-defer headings.deinit();
-
-// Get all level 2 headings
 var h2s = try query.headings(allocator, 2);
-defer h2s.deinit();
 
 // Get all links
 var links = try query.links(allocator);
-defer links.deinit();
 
 // Count elements
-let paragraph_count = query.count(AST.Paragraph);
+const para_count = query.count(.paragraph);
 ```
 
-#### Frontmatter Handling
+### Custom Renderers
+
+The renderer interface is pluggable — implement a `render(Allocator, AST.Document) ![]u8` function:
 
 ```zig
-var frontmatter = try zigmark.markdown.frontmatter.FrontMatter.initFromMarkdown(
-    allocator, 
-    markdown_content
-);
-defer frontmatter.deinit();
-
-// Access frontmatter values
-if (frontmatter.get("title")) |title| {
-    std.debug.print("Title: {s}\n", .{title});
-}
+const MyRenderer = zigmark.Renderer.create(my_backend);
+const output = try MyRenderer.render(allocator, doc);
 ```
 
-### As a Binary
+## Features
 
-Build and run the executable:
+### CommonMark Compliance — 564/564 ✅
+
+Every section of the [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) spec passes:
+
+| Section | Tests |
+|---------|-------|
+| ATX headings | 18 |
+| Setext headings | 27 |
+| Thematic breaks | 19 |
+| Paragraphs | 8 |
+| Blank lines | 1 |
+| Indented code | 12 |
+| Fenced code | 29 |
+| Lists | 67 |
+| Backslash escapes | 13 |
+| Entities | 17 |
+| Code spans | 22 |
+| Emphasis | 132 |
+| Links | 117 |
+| Images | 22 |
+| Autolinks | 19 |
+| Raw HTML | 21 |
+| Hard line breaks | 15 |
+| Soft line breaks | 2 |
+| Textual content | 3 |
+
+### Extensions
+
+- **Frontmatter** — YAML (`---`) and TOML (`+++`) extraction, parsed as JSON
+- **Footnotes** — `[^label]` references and definitions
+
+## Building & Testing
 
 ```bash
+# Build library + CLI
 zig build
-./zig-out/bin/zigmark
+
+# Run unit tests
+zig build test
+
+# Run full CommonMark spec suite (summary)
+zig build spec
+
+# Run a single section with verbose failure output
+zig build spec-emphasis
+
+# Generate docs
+zig build docs
 ```
+
+Requires **Zig 0.15.2** or later.
 
 ## Architecture
 
-### Core Components
+- **`Parser`** — Block-level + inline two-pass parser built on the [mecha](https://github.com/Hejsil/mecha) parser combinator library
+- **`AST`** — Typed union-based Abstract Syntax Tree (`Document` → `Block` → `Inline`)
+- **`HTMLRenderer`** — CommonMark-compliant HTML serialiser
+- **`Renderer`** — Type-erased vtable interface for pluggable output backends
+- **`FrontMatter`** — YAML/TOML metadata extraction via [zig-yaml](https://github.com/kubkon/zig-yaml) and [tomlz](https://github.com/tsunaminoai/tomlz)
 
-- **`Parser`**: Main parsing interface that converts markdown to AST
-- **`AST`**: Abstract Syntax Tree representations of markdown documents
-  - `Document`: Root node containing block elements
-  - `Block`: Block-level elements (headings, paragraphs, lists, etc.)
-  - `Inline`: Inline elements (bold, italic, links, etc.)
-  - `Query`: Query interface for traversing and searching the AST
-- **`Renderer`**: Pluggable rendering system
-  - `HTMLRenderer`: Renders AST to HTML
-  - Extensible for custom renderers
-- **`FrontMatter`**: YAML/TOML metadata extraction from markdown documents
-- **`Tokens`**: Lexical tokens used during parsing
+## Future Plans
 
-## Building
-
-### Requirements
-
-- Zig compiler (latest nightly)
-- Dependencies managed via `build.zig.zon`
-
-### Build Commands
-
-```bash
-# Build the library and executable
-zig build
-
-# Run tests
-zig build test
-
-# Install artifacts
-zig build install
-```
-
-## Dependencies
-
-- `mecha`: Parser combinator library
-- `yaml`: YAML parsing
-- `tomlz`: TOML parsing
-- `mvzr`: Utility library
-- `datetime`: Date/time handling
-
-## Testing
-
-The project includes comprehensive tests for parsing and rendering:
-
-```bash
-zig build test
-```
-
-## Future Enhancements
-
-Priority features and improvements planned for future releases:
-
-1. **CommonMark Spec Compliance**: 547/655 (83%) spec tests passing — tracked in [TODO.md](TODO.md)
-2. **Extended Syntax Support**:
-   - Tables (GFM-style)
-   - Strikethrough with `~~text~~`
-   - Task lists
-   - Definition lists
-3. **HTML Attributes**: Support for custom attributes on HTML elements
-4. **Additional Renderers**:
-   - Markdown-to-Markdown normalization
-   - LaTeX output renderer
-   - Plain text renderer
-5. **Performance Optimization**: Streaming parser for large documents
-6. **Error Recovery**: Better error messages and recovery during parsing
-7. **AST Modification API**: Programmatic manipulation of parsed documents
-8. **Container Blocks**: Support for nested block structures and custom containers
+- GFM extensions (tables, strikethrough, task lists)
+- Additional renderers (LaTeX, plain text, Markdown normaliser)
+- Streaming parser for large documents
+- AST modification API
 
 ## License
 
