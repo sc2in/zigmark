@@ -2,6 +2,8 @@
 
 A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 655 spec tests** (100%).
 
+Builds as both a **CLI tool** and a **C-callable shared library** (`libzigmark.so`).
+
 ## Installation
 
 Add `zigmark` as a dependency in your `build.zig.zon`:
@@ -57,6 +59,14 @@ Document
         └── Text "italic"
 ```
 
+### AI-Friendly Output
+
+```bash
+zigmark -f ai README.md
+```
+
+Produces a token-efficient AST representation suitable for LLM consumption.
+
 ### Options
 
 ```
@@ -64,11 +74,11 @@ Usage: zigmark [OPTIONS] [FILE]
 
   -h, --help          Display this help and exit.
   -v, --version       Print version and exit.
-  -f, --format <str>  Output format: "html" (default) or "ast".
+  -f, --format <str>  Output format: "html" (default), "ast", or "ai".
   -o, --output <str>  Write output to FILE instead of stdout.
 ```
 
-## Library Usage
+## Zig Library Usage
 
 ### Basic Parsing and Rendering
 
@@ -128,6 +138,53 @@ const MyRenderer = zigmark.Renderer.create(my_backend);
 const output = try MyRenderer.render(allocator, doc);
 ```
 
+## C Shared Library
+
+The build produces `libzigmark.so` and `include/zigmark.h` — a self-contained shared library with no libc dependency.
+
+### C API
+
+```c
+#include "zigmark.h"
+
+ZigmarkDocument *zigmark_parse(const char *input, size_t len);
+void             zigmark_free_document(ZigmarkDocument *doc);
+
+char            *zigmark_render_html(ZigmarkDocument *doc);
+char            *zigmark_render_ast(ZigmarkDocument *doc);
+char            *zigmark_render_ai(ZigmarkDocument *doc);
+void             zigmark_free_string(char *str);
+
+const char      *zigmark_version(void);
+```
+
+### Example
+
+```c
+#include <stdio.h>
+#include "zigmark.h"
+
+int main(void) {
+    const char *md = "# Hello\n\nWorld.";
+    ZigmarkDocument *doc = zigmark_parse(md, 15);
+    if (!doc) return 1;
+
+    char *html = zigmark_render_html(doc);
+    if (html) { printf("%s", html); zigmark_free_string(html); }
+
+    zigmark_free_document(doc);
+    return 0;
+}
+```
+
+### Compile and Link
+
+```bash
+zig build -Doptimize=ReleaseSafe
+zig cc -o example example.c -Izig-out/include -Lzig-out/lib -lzigmark
+LD_LIBRARY_PATH=zig-out/lib ./example
+```
+
 ## Features
 
 ### CommonMark Compliance — 655/655 ✅
@@ -170,8 +227,11 @@ Every section of the [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) sp
 ## Building & Testing
 
 ```bash
-# Build library + CLI
+# Build CLI + shared library + docs
 zig build
+
+# Release build
+zig build -Doptimize=ReleaseSafe
 
 # Run unit tests
 zig build test
@@ -186,6 +246,16 @@ zig build spec-emphasis
 zig build docs
 ```
 
+### Build Outputs
+
+```
+zig-out/
+├── bin/zigmark           # CLI executable
+├── lib/libzigmark.so     # C-callable shared library
+├── include/zigmark.h     # C header
+└── docs/                 # Generated documentation
+```
+
 Requires **Zig 0.15.2** or later.
 
 ## Architecture
@@ -193,8 +263,11 @@ Requires **Zig 0.15.2** or later.
 - **`Parser`** — Block-level + inline two-pass parser built on the [mecha](https://github.com/Hejsil/mecha) parser combinator library
 - **`AST`** — Typed union-based Abstract Syntax Tree (`Document` → `Block` → `Inline`)
 - **`HTMLRenderer`** — CommonMark-compliant HTML serialiser
+- **`ASTRenderer`** — Human-readable tree diagram with box-drawing characters
+- **`AIRenderer`** — Token-efficient AST representation for LLM consumption
 - **`Renderer`** — Type-erased vtable interface for pluggable output backends
-- **`FrontMatter`** — YAML/TOML metadata extraction via [zig-yaml](https://github.com/kubkon/zig-yaml) and [tomlz](https://github.com/tsunaminoai/tomlz)
+- **`Frontmatter`** — YAML/TOML metadata extraction via [zig-yaml](https://github.com/kubkon/zig-yaml) and [tomlz](https://github.com/tsunaminoai/tomlz)
+- **C ABI** — Opaque-pointer API in `root.zig` exported as `libzigmark.so`
 
 ## Future Plans
 
