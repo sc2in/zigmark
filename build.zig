@@ -42,6 +42,22 @@ pub fn build(b: *std.Build) void {
     zigmark.addImport("mvzr", mvzr.module("mvzr"));
     zigmark.addImport("mecha", mecha.module("mecha"));
     zigmark.addImport("dt", dt.module("datetime"));
+
+    // The shared library needs its own module instance so the exe doesn't
+    // get implicitly linked against the .so (which causes TLS / undefined
+    // symbol errors in ReleaseSafe).
+    const zigmark_lib = b.addModule("zigmark_lib", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    zigmark_lib.addOptions("config", options);
+    zigmark_lib.addImport("tomlz", tomlz.module("tomlz"));
+    zigmark_lib.addImport("yaml", yaml.module("yaml"));
+    zigmark_lib.addImport("mvzr", mvzr.module("mvzr"));
+    zigmark_lib.addImport("mecha", mecha.module("mecha"));
+    zigmark_lib.addImport("dt", dt.module("datetime"));
+
     const exe = b.addExecutable(.{
         .name = "zigmark",
         .root_module = b.createModule(.{
@@ -56,11 +72,15 @@ pub fn build(b: *std.Build) void {
     });
     const lib = b.addLibrary(.{
         .name = "zigmark",
-        .root_module = zigmark,
+        .root_module = zigmark_lib,
         .linkage = .dynamic,
     });
     b.installArtifact(exe);
     b.installArtifact(lib);
+    // Install the C header alongside the shared library.
+    // NOTE: Zig 0.15's -femit-h silently produces nothing on the LLVM
+    // backend, so we maintain the header by hand for now.
+    b.installFile("include/zigmark.h", "include/zigmark.h");
 
     const docs_step = b.step("docs", "Build documentation");
     const docs = b.addInstallDirectory(.{

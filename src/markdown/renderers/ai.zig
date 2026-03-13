@@ -19,12 +19,12 @@
 //!   FN=label        Footnote definition
 //!
 //! Inline tags:
-//!   . "…"           Text
-//!   E* / E_         Emphasis (marker)
-//!   S* / S_         Strong   (marker)
+//!   . "…"           Text (adjacent text nodes merged)
+//!   E* / E_         Emphasis (marker; single-child collapses)
+//!   S* / S_         Strong   (marker; single-child collapses)
 //!   ` "…"           Code span
-//!   L(url) / L(url "title")  Link (children indented below)
-//!   I(url "alt")    Image
+//!   L(url) "text"   Link (single-text-child collapses; otherwise children below)
+//!   I(url) "alt"    Image
 //!   <url>           Autolink
 //!   ^label          Footnote reference
 //!   BR              Hard break
@@ -33,6 +33,16 @@
 //!
 //! Content is quoted with `"…"` only when it could be ambiguous (text
 //! nodes, code spans, HTML).  Structural tags never need quoting.
+//!
+//! ### Optimisations
+//!
+//! - **Adjacent text merging**: consecutive `.text` nodes (split by the
+//!   parser due to failed bracket/delimiter matching) are merged into a
+//!   single `. "…"` line.
+//! - **Single-child collapsing**: headings, paragraphs, emphasis, strong,
+//!   and links with exactly one text child render on one line.
+//! - **Code blocks**: fenced content is written as indented lines (no
+//!   quoting), trailing empty lines stripped.
 //!
 //! ### Example
 //!
@@ -52,11 +62,9 @@
 //!    E* "italic"
 //!   UL tight
 //!    +
-//!     P
-//!      . "a"
+//!     P "a"
 //!    +
-//!     P
-//!      . "b"
+//!     P "b"
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -85,40 +93,79 @@ fn writeQuoted(w: anytype, s: []const u8) !void {
     try w.writeByte('"');
 }
 
+/// Merge adjacent `.text` inlines into a single string.
+/// Returns the content and number of inlines consumed (always >= 1).
+fn mergedTextRun(items: []const AST.Inline, start: usize, allocator: Allocator) !struct { text: []const u8, consumed: usize, allocated: bool } {
+    // First node must be .text
+    const first = items[start].text.content;
+    var end = start + 1;
+    while (end < items.len) {
+        if (items[end] != .text) break;
+        end += 1;
+    }
+    const consumed = end - start;
+    if (consumed == 1) return .{ .text = first, .consumed = 1, .allocated = false };
+
+    // Multiple adjacent text nodes — merge
+    var buf = std.ArrayList(u8){};
+    for (items[start..end]) |item| try buf.appendSlice(allocator, item.text.content);
+    return .{ .text = try buf.toOwnedSlice(allocator), .consumed = consumed, .allocated = true };
+}
+
+/// Check if a slice of inlines is effectively a single text run
+/// (all nodes are .text, no structural inlines mixed in).
+fn isSingleTextRun(items: []const AST.Inline) bool {
+    if (items.len == 0) return false;
+    for (items) |item| if (item != .text) return false;
+    return true;
+}
+
+/// Collect the merged text content of a pure text run.
+fn collectTextRun(items: []const AST.Inline, allocator: Allocator) !struct { text: []const u8, allocated: bool } {
+    if (items.len == 1) return .{ .text = items[0].text.content, .allocated = false };
+    var buf = std.ArrayList(u8){};
+    for (items) |item| try buf.appendSlice(allocator, item.text.content);
+    return .{ .text = try buf.toOwnedSlice(allocator), .allocated = true };
+}
+
 // ── Block renderer ───────────────────────────────────────────────────────────
 
-fn renderBlock(w: anytype, block: AST.Block, depth: usize) !void {
+fn renderBlock(w: anytype, block: AST.Block, depth: usize, allocator: Allocator) !void {
     switch (block) {
         .heading => |h| {
             try writeIndent(w, depth);
             try w.print("H{d}", .{h.level});
-            // Collapse single-text-child headings onto one line
-            if (h.children.items.len == 1 and h.children.items[0] == .text) {
+            if (isSingleTextRun(h.children.items)) {
+                const run = try collectTextRun(h.children.items, allocator);
+                defer if (run.allocated) allocator.free(run.text);
                 try w.writeByte(' ');
-                try writeQuoted(w, h.children.items[0].text.content);
+                try writeQuoted(w, run.text);
+                try w.writeByte('\n');
+            } else if (h.children.items.len == 0) {
                 try w.writeByte('\n');
             } else {
                 try w.writeByte('\n');
-                for (h.children.items) |inl| try renderInline(w, inl, depth + 1);
+                try renderInlineList(w, h.children.items, depth + 1, allocator);
             }
         },
         .paragraph => |para| {
-            // Collapse single-text-child paragraphs
-            if (para.children.items.len == 1 and para.children.items[0] == .text) {
-                try writeIndent(w, depth);
+            try writeIndent(w, depth);
+            if (isSingleTextRun(para.children.items)) {
+                const run = try collectTextRun(para.children.items, allocator);
+                defer if (run.allocated) allocator.free(run.text);
                 try w.writeAll("P ");
-                try writeQuoted(w, para.children.items[0].text.content);
+                try writeQuoted(w, run.text);
                 try w.writeByte('\n');
-            } else {
-                try writeIndent(w, depth);
+            } else if (para.children.items.len == 0) {
                 try w.writeAll("P\n");
-                for (para.children.items) |inl| try renderInline(w, inl, depth + 1);
+            } else {
+                try w.writeAll("P\n");
+                try renderInlineList(w, para.children.items, depth + 1, allocator);
             }
         },
         .code_block => |cb| {
             try writeIndent(w, depth);
-            try w.writeAll("CB\n");
-            try writeIndent(w, depth + 1);
+            try w.writeAll("CB ");
             try writeQuoted(w, cb.content);
             try w.writeByte('\n');
         },
@@ -127,9 +174,10 @@ fn renderBlock(w: anytype, block: AST.Block, depth: usize) !void {
             try w.print("F{c}", .{fcb.fence_char});
             if (fcb.language) |lang| try w.writeAll(lang);
             try w.writeByte('\n');
-            // Write code content as indented lines (preserves readability)
             var it = std.mem.splitScalar(u8, fcb.content, '\n');
             while (it.next()) |line| {
+                // Skip trailing empty line from split
+                if (line.len == 0 and it.peek() == null) break;
                 try writeIndent(w, depth + 1);
                 try w.writeAll(line);
                 try w.writeByte('\n');
@@ -138,16 +186,12 @@ fn renderBlock(w: anytype, block: AST.Block, depth: usize) !void {
         .blockquote => |bq| {
             try writeIndent(w, depth);
             try w.writeAll("BQ\n");
-            for (bq.children.items) |child| try renderBlock(w, child, depth + 1);
+            for (bq.children.items) |child| try renderBlock(w, child, depth + 1, allocator);
         },
         .list => |lst| {
             try writeIndent(w, depth);
             if (lst.type == .ordered) {
-                if (lst.start) |s| {
-                    try w.print("OL={d}", .{s});
-                } else {
-                    try w.writeAll("OL");
-                }
+                if (lst.start) |s| try w.print("OL={d}", .{s}) else try w.writeAll("OL");
             } else {
                 try w.writeAll("UL");
             }
@@ -155,7 +199,7 @@ fn renderBlock(w: anytype, block: AST.Block, depth: usize) !void {
             for (lst.items.items) |item| {
                 try writeIndent(w, depth + 1);
                 try w.writeAll("+\n");
-                for (item.children.items) |child| try renderBlock(w, child, depth + 2);
+                for (item.children.items) |child| try renderBlock(w, child, depth + 2, allocator);
             }
         },
         .thematic_break => {
@@ -171,14 +215,33 @@ fn renderBlock(w: anytype, block: AST.Block, depth: usize) !void {
         .footnote_definition => |fd| {
             try writeIndent(w, depth);
             try w.print("FN={s}\n", .{fd.label});
-            for (fd.children.items) |child| try renderBlock(w, child, depth + 1);
+            for (fd.children.items) |child| try renderBlock(w, child, depth + 1, allocator);
         },
     }
 }
 
 // ── Inline renderer ──────────────────────────────────────────────────────────
 
-fn renderInline(w: anytype, inl: AST.Inline, depth: usize) !void {
+/// Render a list of inlines, merging adjacent text nodes.
+fn renderInlineList(w: anytype, items: []const AST.Inline, depth: usize, allocator: Allocator) !void {
+    var i: usize = 0;
+    while (i < items.len) {
+        if (items[i] == .text) {
+            const run = try mergedTextRun(items, i, allocator);
+            defer if (run.allocated) allocator.free(run.text);
+            try writeIndent(w, depth);
+            try w.writeAll(". ");
+            try writeQuoted(w, run.text);
+            try w.writeByte('\n');
+            i += run.consumed;
+        } else {
+            try renderInline(w, items[i], depth, allocator);
+            i += 1;
+        }
+    }
+}
+
+fn renderInline(w: anytype, inl: AST.Inline, depth: usize, allocator: Allocator) anyerror!void {
     switch (inl) {
         .text => |t| {
             try writeIndent(w, depth);
@@ -187,28 +250,31 @@ fn renderInline(w: anytype, inl: AST.Inline, depth: usize) !void {
             try w.writeByte('\n');
         },
         .emphasis => |em| {
-            // Collapse single-text-child emphasis inline
-            if (em.children.items.len == 1 and em.children.items[0] == .text) {
-                try writeIndent(w, depth);
-                try w.print("E{c} ", .{em.marker});
-                try writeQuoted(w, em.children.items[0].text.content);
+            try writeIndent(w, depth);
+            try w.print("E{c}", .{em.marker});
+            if (isSingleTextRun(em.children.items)) {
+                const run = try collectTextRun(em.children.items, allocator);
+                defer if (run.allocated) allocator.free(run.text);
+                try w.writeByte(' ');
+                try writeQuoted(w, run.text);
                 try w.writeByte('\n');
             } else {
-                try writeIndent(w, depth);
-                try w.print("E{c}\n", .{em.marker});
-                for (em.children.items) |child| try renderInline(w, child, depth + 1);
+                try w.writeByte('\n');
+                try renderInlineList(w, em.children.items, depth + 1, allocator);
             }
         },
         .strong => |s| {
-            if (s.children.items.len == 1 and s.children.items[0] == .text) {
-                try writeIndent(w, depth);
-                try w.print("S{c} ", .{s.marker});
-                try writeQuoted(w, s.children.items[0].text.content);
+            try writeIndent(w, depth);
+            try w.print("S{c}", .{s.marker});
+            if (isSingleTextRun(s.children.items)) {
+                const run = try collectTextRun(s.children.items, allocator);
+                defer if (run.allocated) allocator.free(run.text);
+                try w.writeByte(' ');
+                try writeQuoted(w, run.text);
                 try w.writeByte('\n');
             } else {
-                try writeIndent(w, depth);
-                try w.print("S{c}\n", .{s.marker});
-                for (s.children.items) |child| try renderInline(w, child, depth + 1);
+                try w.writeByte('\n');
+                try renderInlineList(w, s.children.items, depth + 1, allocator);
             }
         },
         .code_span => |cs| {
@@ -225,8 +291,18 @@ fn renderInline(w: anytype, inl: AST.Inline, depth: usize) !void {
                 try w.writeByte(' ');
                 try writeQuoted(w, title);
             }
-            try w.writeAll(")\n");
-            for (lnk.children.items) |child| try renderInline(w, child, depth + 1);
+            try w.writeByte(')');
+            // Collapse single-text-child links onto one line
+            if (isSingleTextRun(lnk.children.items)) {
+                const run = try collectTextRun(lnk.children.items, allocator);
+                defer if (run.allocated) allocator.free(run.text);
+                try w.writeByte(' ');
+                try writeQuoted(w, run.text);
+                try w.writeByte('\n');
+            } else {
+                try w.writeByte('\n');
+                try renderInlineList(w, lnk.children.items, depth + 1, allocator);
+            }
         },
         .image => |img| {
             try writeIndent(w, depth);
@@ -236,7 +312,7 @@ fn renderInline(w: anytype, inl: AST.Inline, depth: usize) !void {
                 try w.writeByte(' ');
                 try writeQuoted(w, title);
             }
-            try w.print(") ", .{});
+            try w.writeAll(") ");
             try writeQuoted(w, img.alt_text);
             try w.writeByte('\n');
         },
@@ -270,7 +346,7 @@ fn renderInline(w: anytype, inl: AST.Inline, depth: usize) !void {
 pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-    for (doc.children.items) |block| try renderBlock(&aw.writer, block, 0);
+    for (doc.children.items) |block| try renderBlock(&aw.writer, block, 0, allocator);
     return aw.toOwnedSlice();
 }
 
@@ -338,11 +414,20 @@ test "ai: blockquote" {
     );
 }
 
-test "ai: link with children" {
+test "ai: link collapses to one line" {
     try ok("[text](https://example.com)",
         \\P
+        \\ L(https://example.com) "text"
+        \\
+    );
+}
+
+test "ai: link with mixed children" {
+    try ok("[**bold** link](https://example.com)",
+        \\P
         \\ L(https://example.com)
-        \\  . "text"
+        \\  S* "bold"
+        \\  . " link"
         \\
     );
 }
@@ -415,6 +500,34 @@ test "ai: code span" {
         \\ . "Use "
         \\ ` "code"
         \\ . " here"
+        \\
+    );
+}
+
+test "ai: adjacent text nodes merge" {
+    // The parser splits [x] into "[" + "x] " due to failed bracket matching.
+    // The renderer should merge them back.
+    try ok("- [x] done",
+        \\UL tight
+        \\ +
+        \\  P "[x] done"
+        \\
+    );
+}
+
+test "ai: indented code block" {
+    try ok("    code here",
+        \\CB "code here"
+        \\
+    );
+}
+
+test "ai: footnote" {
+    try ok("[^1]\n[^1]: content",
+        \\P
+        \\ ^1
+        \\FN=1
+        \\ P "content"
         \\
     );
 }

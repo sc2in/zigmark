@@ -90,6 +90,86 @@ pub const chars = struct {
     }
 };
 
+// ── C ABI ────────────────────────────────────────────────────────────────────
+//
+// Opaque-pointer API exported from the shared library so that C (and any
+// language with a C FFI) can parse Markdown and render it to HTML / AST / AI
+// without touching Zig internals.
+
+/// Internal wrapper that pairs a Document with the allocator that owns it so
+/// that `zigmark_free_document` can clean up without the caller having to
+/// carry around an allocator handle.
+const OpaqueDoc = struct {
+    doc: AST.Document,
+    allocator: Allocator,
+};
+
+/// Parse a UTF-8 Markdown buffer and return an opaque document handle.
+/// Returns `null` on allocation / parse failure.
+export fn zigmark_parse(input: [*]const u8, len: usize) ?*OpaqueDoc {
+    const allocator = std.heap.page_allocator;
+    const slice = input[0..len];
+    var p = Parser.init();
+    var doc = p.parseMarkdown(allocator, slice) catch return null;
+    const wrapper = allocator.create(OpaqueDoc) catch {
+        doc.deinit(allocator);
+        return null;
+    };
+    wrapper.* = .{ .doc = doc, .allocator = allocator };
+    return wrapper;
+}
+
+/// Free a document previously returned by `zigmark_parse`.
+export fn zigmark_free_document(ptr: ?*OpaqueDoc) void {
+    const wrapper = ptr orelse return;
+    wrapper.doc.deinit(wrapper.allocator);
+    wrapper.allocator.destroy(wrapper);
+}
+
+/// Render a document to a NUL-terminated C string using the given renderer.
+/// Returns `null` on failure.  Free the result with `zigmark_free_string`.
+fn renderC(wrapper: ?*OpaqueDoc, renderer: Renderer) ?[*:0]u8 {
+    const w = wrapper orelse return null;
+    const buf = renderer.render(w.allocator, w.doc) catch return null;
+    // Append a sentinel NUL so the caller can use normal C string functions.
+    const c_str = w.allocator.realloc(buf, buf.len + 1) catch {
+        w.allocator.free(buf);
+        return null;
+    };
+    c_str[buf.len] = 0;
+    return c_str[0..buf.len :0];
+}
+
+/// Render the document to CommonMark-compliant HTML.
+export fn zigmark_render_html(doc: ?*OpaqueDoc) ?[*:0]u8 {
+    return renderC(doc, HTMLRenderer);
+}
+
+/// Render the document to a human-readable AST tree diagram.
+export fn zigmark_render_ast(doc: ?*OpaqueDoc) ?[*:0]u8 {
+    return renderC(doc, ASTRenderer);
+}
+
+/// Render the document to a token-efficient AI representation.
+export fn zigmark_render_ai(doc: ?*OpaqueDoc) ?[*:0]u8 {
+    return renderC(doc, AIRenderer);
+}
+
+/// Free a C string previously returned by one of the render functions.
+export fn zigmark_free_string(ptr: ?[*:0]u8) void {
+    const p = ptr orelse return;
+    // We don't know the length at this point, so scan for the sentinel.
+    var len: usize = 0;
+    while (p[len] != 0) : (len += 1) {}
+    std.heap.page_allocator.free(p[0 .. len + 1]);
+}
+
+/// Return the library version as a NUL-terminated static string.
+/// The pointer is valid for the lifetime of the process (string literal).
+export fn zigmark_version() [*:0]const u8 {
+    return version.ptr[0..version.len :0];
+}
+
 test "enhanced parse and render" {
     const allocator = std.testing.allocator;
 
