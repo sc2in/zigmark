@@ -1,6 +1,8 @@
 # zigmark
 
-A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 564 spec tests** (100%).
+A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 655 spec tests** (100%).
+
+Builds as both a **CLI tool** and a **C-callable shared library** (`libzigmark.so`).
 
 ## Installation
 
@@ -57,6 +59,14 @@ Document
         └── Text "italic"
 ```
 
+### AI-Friendly Output
+
+```bash
+zigmark -f ai README.md
+```
+
+Produces a token-efficient AST representation suitable for LLM consumption.
+
 ### Options
 
 ```
@@ -64,11 +74,11 @@ Usage: zigmark [OPTIONS] [FILE]
 
   -h, --help          Display this help and exit.
   -v, --version       Print version and exit.
-  -f, --format <str>  Output format: "html" (default) or "ast".
+  -f, --format <str>  Output format: "html" (default), "ast", or "ai".
   -o, --output <str>  Write output to FILE instead of stdout.
 ```
 
-## Library Usage
+## Zig Library Usage
 
 ### Basic Parsing and Rendering
 
@@ -128,27 +138,80 @@ const MyRenderer = zigmark.Renderer.create(my_backend);
 const output = try MyRenderer.render(allocator, doc);
 ```
 
+## C Shared Library
+
+The build produces `libzigmark.so` and `include/zigmark.h` — a self-contained shared library with no libc dependency.
+
+### C API
+
+```c
+#include "zigmark.h"
+
+ZigmarkDocument *zigmark_parse(const char *input, size_t len);
+void             zigmark_free_document(ZigmarkDocument *doc);
+
+char            *zigmark_render_html(ZigmarkDocument *doc);
+char            *zigmark_render_ast(ZigmarkDocument *doc);
+char            *zigmark_render_ai(ZigmarkDocument *doc);
+void             zigmark_free_string(char *str);
+
+const char      *zigmark_version(void);
+```
+
+### Example
+
+```c
+#include <stdio.h>
+#include "zigmark.h"
+
+int main(void) {
+    const char *md = "# Hello\n\nWorld.";
+    ZigmarkDocument *doc = zigmark_parse(md, 15);
+    if (!doc) return 1;
+
+    char *html = zigmark_render_html(doc);
+    if (html) { printf("%s", html); zigmark_free_string(html); }
+
+    zigmark_free_document(doc);
+    return 0;
+}
+```
+
+### Compile and Link
+
+```bash
+zig build -Doptimize=ReleaseSafe
+zig cc -o example example.c -Izig-out/include -Lzig-out/lib -lzigmark
+LD_LIBRARY_PATH=zig-out/lib ./example
+```
+
 ## Features
 
-### CommonMark Compliance — 564/564 ✅
+### CommonMark Compliance — 655/655 ✅
 
 Every section of the [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) spec passes:
 
 | Section | Tests |
 |---------|-------|
+| Tabs | 11 |
+| Backslash escapes | 13 |
+| Entity and numeric character references | 17 |
+| Precedence | 1 |
+| Thematic breaks | 19 |
 | ATX headings | 18 |
 | Setext headings | 27 |
-| Thematic breaks | 19 |
+| Indented code blocks | 12 |
+| Fenced code blocks | 29 |
+| HTML blocks | 46 |
+| Link reference definitions | 27 |
 | Paragraphs | 8 |
 | Blank lines | 1 |
-| Indented code | 12 |
-| Fenced code | 29 |
-| Lists | 67 |
-| Backslash escapes | 13 |
-| Entities | 17 |
+| Block quotes | 25 |
+| List items | 48 |
+| Lists | 27 |
 | Code spans | 22 |
-| Emphasis | 132 |
-| Links | 117 |
+| Emphasis and strong emphasis | 132 |
+| Links | 90 |
 | Images | 22 |
 | Autolinks | 19 |
 | Raw HTML | 21 |
@@ -164,8 +227,11 @@ Every section of the [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) sp
 ## Building & Testing
 
 ```bash
-# Build library + CLI
+# Build CLI + shared library + docs
 zig build
+
+# Release build
+zig build -Doptimize=ReleaseSafe
 
 # Run unit tests
 zig build test
@@ -180,6 +246,58 @@ zig build spec-emphasis
 zig build docs
 ```
 
+### Build Outputs
+
+```
+zig-out/
+├── bin/zigmark           # CLI executable
+├── lib/libzigmark.so     # C-callable shared library
+├── include/zigmark.h     # C header
+├── docs/                 # Generated documentation
+└── wasm/                 # WebAssembly module (zig build wasm)
+    ├── zigmark.wasm
+    └── index.html        # Live preview demo
+```
+
+### WASM
+
+Build the WebAssembly module (~81 KiB):
+
+```bash
+zig build wasm
+```
+
+Serve the live preview demo locally:
+
+```bash
+# With Python
+python3 -m http.server 8080 -d zig-out/wasm
+
+# With Nix
+nix run .#wasm-demo
+```
+
+Open `http://localhost:8080` — the demo renders Markdown in real-time using the
+WASM module and includes a side-by-side benchmark against [marked.js](https://marked.js.org/).
+
+See `examples/wasm/` for the WASM entry point and demo source.
+
+### Nix
+
+```bash
+# Build
+nix build
+
+# Run
+nix run . -- README.md
+
+# Dev shell (includes zls, benchmark tool, auto-updates zon2json-lock)
+nix develop
+
+# WASM live preview demo
+nix run .#wasm-demo
+```
+
 Requires **Zig 0.15.2** or later.
 
 ## Architecture
@@ -187,8 +305,11 @@ Requires **Zig 0.15.2** or later.
 - **`Parser`** — Block-level + inline two-pass parser built on the [mecha](https://github.com/Hejsil/mecha) parser combinator library
 - **`AST`** — Typed union-based Abstract Syntax Tree (`Document` → `Block` → `Inline`)
 - **`HTMLRenderer`** — CommonMark-compliant HTML serialiser
+- **`ASTRenderer`** — Human-readable tree diagram with box-drawing characters
+- **`AIRenderer`** — Token-efficient AST representation for LLM consumption
 - **`Renderer`** — Type-erased vtable interface for pluggable output backends
-- **`FrontMatter`** — YAML/TOML metadata extraction via [zig-yaml](https://github.com/kubkon/zig-yaml) and [tomlz](https://github.com/tsunaminoai/tomlz)
+- **`Frontmatter`** — YAML/TOML metadata extraction via [zig-yaml](https://github.com/kubkon/zig-yaml) and [tomlz](https://github.com/tsunaminoai/tomlz)
+- **C ABI** — Opaque-pointer API in `root.zig` exported as `libzigmark.so`
 
 ## Future Plans
 
@@ -200,3 +321,33 @@ Requires **Zig 0.15.2** or later.
 ## License
 
 AGPL-3.0-or-later © 2025 Star City Security Consulting, LLC (SC2)
+
+## Contributing
+
+Contributions are welcome. By submitting a pull request you agree that your
+contribution is licensed under the same AGPL-3.0-or-later terms as the rest of
+this project.
+
+### Security
+
+**Do not open a public issue for security vulnerabilities.**
+
+If you discover a security issue, please report it responsibly by emailing
+**security@sc2.in** with a description of the vulnerability, steps to
+reproduce, and any relevant details. You will receive acknowledgement within 72
+hours and we will work with you on a fix before any public disclosure.
+
+### Guidelines
+
+- **Tests must pass.** Run `zig build test` (unit) and `zig build spec` (all
+  655 CommonMark spec tests) before opening a PR.
+- **One concern per PR.** Keep pull requests focused — a bug fix, a new
+  feature, or a refactor, not all three at once.
+- **No spec regressions.** The 655/655 CommonMark 0.31.2 pass rate is the
+  baseline. PRs that cause spec failures will not be merged.
+- **Follow existing style.** The codebase uses `zig fmt`-standard formatting
+  and descriptive naming. When in doubt, match what's already there.
+- **Document public API changes.** If you add or change an exported function,
+  update the README and/or `include/zigmark.h` accordingly.
+- **Sign your commits.** Use `git commit -s` to add a `Signed-off-by` line
+  ([DCO](https://developercertificate.org/)).

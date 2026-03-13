@@ -1,24 +1,30 @@
 # CommonMark Compliance
 
-**Current score: 564 / 564 (100%) — all spec tests passing, 0 memory leaks** ✅ 🎉
+**Current score: 655 / 655 (100%) — all spec tests passing, 0 memory leaks** ✅ 🎉
 
 Per-section breakdown (via `zig build spec`):
 
 | Section | Pass | Fail | Total |
 |---------|------|------|-------|
+| Tabs | 11 | 0 | 11 | ✅
+| Backslash escapes | 13 | 0 | 13 | ✅
+| Entity and numeric character references | 17 | 0 | 17 | ✅
+| Precedence | 1 | 0 | 1 | ✅
+| Thematic breaks | 19 | 0 | 19 | ✅
 | ATX headings | 18 | 0 | 18 | ✅
 | Setext headings | 27 | 0 | 27 | ✅
-| Thematic breaks | 19 | 0 | 19 | ✅
+| Indented code blocks | 12 | 0 | 12 | ✅
+| Fenced code blocks | 29 | 0 | 29 | ✅
+| HTML blocks | 46 | 0 | 46 | ✅
+| Link reference definitions | 27 | 0 | 27 | ✅
 | Paragraphs | 8 | 0 | 8 | ✅
 | Blank lines | 1 | 0 | 1 | ✅
-| Indented code | 12 | 0 | 12 | ✅
-| Fenced code | 29 | 0 | 29 | ✅
-| Lists | 67 | 0 | 67 | ✅
-| Backslash escapes | 13 | 0 | 13 | ✅
-| Entities | 17 | 0 | 17 | ✅
+| Block quotes | 25 | 0 | 25 | ✅
+| List items | 48 | 0 | 48 | ✅
+| Lists | 27 | 0 | 27 | ✅
 | Code spans | 22 | 0 | 22 | ✅
-| Emphasis | 132 | 0 | 132 | ✅
-| Links | 117 | 0 | 117 | ✅
+| Emphasis and strong emphasis | 132 | 0 | 132 | ✅
+| Links | 90 | 0 | 90 | ✅
 | Images | 22 | 0 | 22 | ✅
 | Autolinks | 19 | 0 | 19 | ✅
 | Raw HTML | 21 | 0 | 21 | ✅

@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const zon = @import("build.zig.zon");
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -26,17 +28,48 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const options = b.addOptions();
+    // Version priority: -Dversion flag > git describe > build.zig.zon
+    // The flag lets Nix (and other sandboxed builds) inject the version
+    // without requiring git to be present in the build environment.
+    const version = b.option([]const u8, "version", "Override version string") orelse blk: {
+        var exit_code: u8 = undefined;
+        const git_describe = b.runAllowFail(
+            &.{ "git", "describe", "--tags", "--always" },
+            &exit_code,
+            .Ignore,
+        ) catch "";
+        break :blk if (git_describe.len > 0) trimLeadingV(git_describe) else zon.version;
+    };
+    options.addOption([]const u8, "version", version);
 
     const zigmark = b.addModule("zigmark", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    zigmark.addOptions("config", options);
     zigmark.addImport("tomlz", tomlz.module("tomlz"));
     zigmark.addImport("yaml", yaml.module("yaml"));
     zigmark.addImport("mvzr", mvzr.module("mvzr"));
     zigmark.addImport("mecha", mecha.module("mecha"));
     zigmark.addImport("dt", dt.module("datetime"));
+
+    // The shared library needs its own module instance so the exe doesn't
+    // get implicitly linked against the .so (which causes TLS / undefined
+    // symbol errors in ReleaseSafe).
+    const zigmark_lib = b.addModule("zigmark_lib", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    zigmark_lib.addOptions("config", options);
+    zigmark_lib.addImport("tomlz", tomlz.module("tomlz"));
+    zigmark_lib.addImport("yaml", yaml.module("yaml"));
+    zigmark_lib.addImport("mvzr", mvzr.module("mvzr"));
+    zigmark_lib.addImport("mecha", mecha.module("mecha"));
+    zigmark_lib.addImport("dt", dt.module("datetime"));
+
     const exe = b.addExecutable(.{
         .name = "zigmark",
         .root_module = b.createModule(.{
@@ -51,11 +84,15 @@ pub fn build(b: *std.Build) void {
     });
     const lib = b.addLibrary(.{
         .name = "zigmark",
-        .root_module = zigmark,
+        .root_module = zigmark_lib,
         .linkage = .dynamic,
     });
     b.installArtifact(exe);
     b.installArtifact(lib);
+    // Install the C header alongside the shared library.
+    // NOTE: Zig 0.15's -femit-h silently produces nothing on the LLVM
+    // backend, so we maintain the header by hand for now.
+    b.installFile("include/zigmark.h", "include/zigmark.h");
 
     const docs_step = b.step("docs", "Build documentation");
     const docs = b.addInstallDirectory(.{
@@ -64,7 +101,6 @@ pub fn build(b: *std.Build) void {
         .install_subdir = "docs",
     });
     docs_step.dependOn(&docs.step);
-    b.getInstallStep().dependOn(docs_step);
 
     const run_step = b.step("run", "Run the app");
     const run_cmd = b.addRunArtifact(exe);
@@ -141,4 +177,69 @@ pub fn build(b: *std.Build) void {
         run.addArgs(&.{ "--section", def[1], "--verbose" });
         step.dependOn(&run.step);
     }
+
+    // ── WASM build ───────────────────────────────────────────────────────────
+
+    const wasm_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+    });
+    const wasm_optimize = .ReleaseSmall;
+
+    const wasm_tomlz = b.dependency("tomlz", .{ .target = wasm_target, .optimize = wasm_optimize });
+    const wasm_yaml = b.dependency("yaml", .{ .target = wasm_target, .optimize = wasm_optimize });
+    const wasm_mvzr = b.dependency("mvzr", .{ .target = wasm_target, .optimize = wasm_optimize });
+    const wasm_mecha = b.dependency("mecha", .{});
+    const wasm_dt = b.dependency("datetime", .{ .target = wasm_target, .optimize = wasm_optimize });
+
+    const zigmark_wasm_mod = b.addModule("zigmark_wasm", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = wasm_target,
+        .optimize = wasm_optimize,
+    });
+    zigmark_wasm_mod.addOptions("config", options);
+    zigmark_wasm_mod.addImport("tomlz", wasm_tomlz.module("tomlz"));
+    zigmark_wasm_mod.addImport("yaml", wasm_yaml.module("yaml"));
+    zigmark_wasm_mod.addImport("mvzr", wasm_mvzr.module("mvzr"));
+    zigmark_wasm_mod.addImport("mecha", wasm_mecha.module("mecha"));
+    zigmark_wasm_mod.addImport("dt", wasm_dt.module("datetime"));
+
+    const wasm_lib = b.addExecutable(.{
+        .name = "zigmark",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/wasm/zigmark-wasm.zig"),
+            .target = wasm_target,
+            .optimize = wasm_optimize,
+            .imports = &.{
+                .{ .name = "zigmark", .module = zigmark_wasm_mod },
+            },
+        }),
+    });
+    wasm_lib.entry = .disabled;
+    wasm_lib.root_module.export_symbol_names = &.{
+        "render_html",
+        "render_ast",
+        "render_ai",
+        "result_len",
+        "alloc_buf",
+        "free_buf",
+        "version_ptr",
+        "version_len",
+    };
+
+    const wasm_step = b.step("wasm", "Build the WASM module (examples/wasm/)");
+    const install_wasm = b.addInstallArtifact(wasm_lib, .{
+        .dest_dir = .{ .override = .{ .custom = "wasm" } },
+    });
+    // Also copy the demo HTML alongside the .wasm
+    const install_html = b.addInstallFile(b.path("examples/wasm/index.html"), "wasm/index.html");
+    wasm_step.dependOn(&install_wasm.step);
+    wasm_step.dependOn(&install_html.step);
+}
+
+/// Strip a leading "v" and trailing whitespace from a git describe string,
+/// e.g. "v0.2.0\n" → "0.2.0", "v0.2.0-3-gabcdef\n" → "0.2.0-3-gabcdef".
+fn trimLeadingV(s: []const u8) []const u8 {
+    const trimmed = std.mem.trim(u8, s, " \t\r\n");
+    return if (trimmed.len > 0 and trimmed[0] == 'v') trimmed[1..] else trimmed;
 }

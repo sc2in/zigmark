@@ -44,9 +44,7 @@ test "mecha ordered_list_item parser" {
 }
 
 fn ok(s: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
     var p = Parser.init();
     defer p.deinit(alloc);
     var res = try p.parseMarkdown(alloc, s);
@@ -60,9 +58,7 @@ test "heading" {
 }
 
 test "setext heading" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
     var p = Parser.init();
     {
         var doc = try p.parseMarkdown(alloc, "Heading\n=======\n");
@@ -80,9 +76,7 @@ test "setext heading" {
 }
 
 test "thematic break" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
     var p = Parser.init();
     var doc = try p.parseMarkdown(alloc, "---\n");
     defer doc.deinit(alloc);
@@ -96,9 +90,7 @@ test "paragraph" {
 }
 
 test "multi-line paragraph" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
     var p = Parser.init();
     var doc = try p.parseMarkdown(alloc, "line one\nline two\n");
     defer doc.deinit(alloc);
@@ -110,9 +102,7 @@ test "multi-line paragraph" {
 }
 
 test "indented code block" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
     var p = Parser.init();
     var doc = try p.parseMarkdown(alloc, "    code here\n");
     defer doc.deinit(alloc);
@@ -124,9 +114,7 @@ test "fenced code block" {
     try ok("```\ncode\n```\n");
     try ok("~~~zig\ncode\n~~~\n");
     {
-        var arena = std.heap.ArenaAllocator.init(tst.allocator);
-        defer arena.deinit();
-        const alloc = arena.allocator();
+        const alloc = tst.allocator;
         var p = Parser.init();
         var doc = try p.parseMarkdown(alloc, "```zig\nconst x = 1;\n```\n");
         defer doc.deinit(alloc);
@@ -137,9 +125,7 @@ test "fenced code block" {
 }
 
 test "list grouping" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
     var p = Parser.init();
     var doc = try p.parseMarkdown(alloc, "- item1\n- item2\n- item3\n");
     defer doc.deinit(alloc);
@@ -150,9 +136,7 @@ test "list grouping" {
 }
 
 test "loose list" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
     var p = Parser.init();
     var doc = try p.parseMarkdown(alloc, "- item1\n\n- item2\n");
     defer doc.deinit(alloc);
@@ -161,9 +145,7 @@ test "loose list" {
 }
 
 test "ordered list" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
     var p = Parser.init();
     var doc = try p.parseMarkdown(alloc, "1. first\n2. second\n");
     defer doc.deinit(alloc);
@@ -198,9 +180,7 @@ test "footnote" {
 }
 
 test "backslash escape" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
     var p = Parser.init();
     var doc = try p.parseMarkdown(alloc, "\\*not emphasis\\*\n");
     defer doc.deinit(alloc);
@@ -209,9 +189,7 @@ test "backslash escape" {
 }
 
 test "code span" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
     var p = Parser.init();
     var doc = try p.parseMarkdown(alloc, "Use `code` here\n");
     defer doc.deinit(alloc);
@@ -224,9 +202,7 @@ test "code span" {
 }
 
 test "autolink" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
     var p = Parser.init();
     var doc = try p.parseMarkdown(alloc, "<https://example.com>\n");
     defer doc.deinit(alloc);
@@ -236,9 +212,7 @@ test "autolink" {
 }
 
 test "image" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
     try ok("![alt](image.png)\n");
     var p = Parser.init();
     var doc = try p.parseMarkdown(alloc, "![alt text](img.png)\n");

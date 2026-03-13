@@ -84,6 +84,7 @@ pub fn deinit(self: *FrontMatter) void {
 /// The first line must be `---` (YAML) or `+++` (TOML).  The
 /// frontmatter extends to the next matching delimiter.
 pub fn initFromMarkdown(alloc: Allocator, txt: []const u8) !FrontMatter {
+    if (txt.len < 3) return error.InvalidFrontMatter;
     const kind: Kind = switch (txt[0]) {
         '-' => .yaml,
         '+' => .toml,
@@ -305,8 +306,8 @@ pub fn get(self: FrontMatter, path: []const u8) ?std.json.Value {
 }
 
 /// Looks up a value in a std.json.Value tree using a dot-separated key path.
-/// Returns a pointer to the found value, or null if any part of the path is missing.
-fn jsonFindByPath(root: std.json.Value, path: []const u8) ?std.json.Value {
+/// Returns the found value, or null if any part of the path is missing.
+pub fn jsonFindByPath(root: std.json.Value, path: []const u8) ?std.json.Value {
     var it = std.mem.tokenizeScalar(u8, path, '.');
     var current = root;
     while (it.next()) |segment| {
@@ -349,43 +350,8 @@ test "jsonFindByPath works" {
     try tst.expect(not_found == null);
 }
 
+// tera integration test moved to the standalone tera package
+
 test {
-    const tera = @import("tera/tera.zig");
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-    var t = tera.Tera.init(alloc);
-    defer t.deinit();
-
-    const template_content =
-        \\<h2>{{ config.title }}</h2>
-        \\<div class="config">
-        \\    <p>Debug Mode: {{ config.extra.last_reviewed_date }}</p>
-        \\</div>
-    ;
-    try t.addTemplate("test", template_content);
-
-    const ex =
-        \\[config]
-        \\title="something"
-        \\[config.extra]
-        \\last_reviewed_date="2025-06-01"
-    ;
-
-    var f = try init(alloc, ex, .toml);
-    defer f.deinit();
-
-    const j = f.root;
-
-    var ctx = try tera.context.Context.fromJsonValue(alloc, j);
-    defer ctx.deinit();
-
-    const result = try t.render("test", ctx);
-    const expect =
-        \\<h2>something</h2>
-        \\<div class="config">
-        \\    <p>Debug Mode: 2025-06-01</p>
-        \\</div>
-    ;
-    try std.testing.expectEqualStrings(expect, result);
+    _ = @import("frontmatter_test.zig");
 }

@@ -10,15 +10,27 @@ const tst = std.testing;
 const math = std.math;
 
 const mecha = @import("mecha");
+pub const version = @import("config").version;
 
 /// Abstract syntax tree types for the parsed Markdown document.
 pub const AST = @import("markdown/ast.zig");
+pub const Frontmatter = @import("markdown/frontmatter.zig");
 /// Markdown parser that transforms raw text into an `AST.Document`.
 pub const Parser = @import("markdown/parser.zig");
+const ai = @import("markdown/renderers/ai.zig");
+/// Renderers
+const ast_mod = @import("markdown/renderers/ast_renderer.zig");
 const html = @import("markdown/renderers/html.zig");
 
 /// Pre-built renderer that serialises an `AST.Document` to CommonMark-compliant HTML.
 pub const HTMLRenderer = Renderer.create(html);
+
+/// Pre-built renderer that serialises an `AST.Document` to a human-readable
+/// tree diagram with box-drawing characters.
+pub const ASTRenderer = Renderer.create(ast_mod);
+
+/// Pre-built renderer that serialises an `AST.Document` to token-efficient AST representation.
+pub const AIRenderer = Renderer.create(ai);
 
 /// A type-erased rendering back-end.
 ///
@@ -78,12 +90,88 @@ pub const chars = struct {
     }
 };
 
-test "enhanced parse and render" {
-    const a = std.testing.allocator;
-    var arena = std.heap.ArenaAllocator.init(a);
-    defer arena.deinit();
+// ── C ABI ────────────────────────────────────────────────────────────────────
+//
+// Opaque-pointer API exported from the shared library so that C (and any
+// language with a C FFI) can parse Markdown and render it to HTML / AST / AI
+// without touching Zig internals.
 
-    const allocator = arena.allocator();
+/// Internal wrapper that pairs a Document with the allocator that owns it so
+/// that `zigmark_free_document` can clean up without the caller having to
+/// carry around an allocator handle.
+const OpaqueDoc = struct {
+    doc: AST.Document,
+    allocator: Allocator,
+};
+
+/// Parse a UTF-8 Markdown buffer and return an opaque document handle.
+/// Returns `null` on allocation / parse failure.
+export fn zigmark_parse(input: [*]const u8, len: usize) ?*OpaqueDoc {
+    const allocator = std.heap.page_allocator;
+    const slice = input[0..len];
+    var p = Parser.init();
+    var doc = p.parseMarkdown(allocator, slice) catch return null;
+    const wrapper = allocator.create(OpaqueDoc) catch {
+        doc.deinit(allocator);
+        return null;
+    };
+    wrapper.* = .{ .doc = doc, .allocator = allocator };
+    return wrapper;
+}
+
+/// Free a document previously returned by `zigmark_parse`.
+export fn zigmark_free_document(ptr: ?*OpaqueDoc) void {
+    const wrapper = ptr orelse return;
+    wrapper.doc.deinit(wrapper.allocator);
+    wrapper.allocator.destroy(wrapper);
+}
+
+/// Render a document to a NUL-terminated C string using the given renderer.
+/// Returns `null` on failure.  Free the result with `zigmark_free_string`.
+fn renderC(wrapper: ?*OpaqueDoc, renderer: Renderer) ?[*:0]u8 {
+    const w = wrapper orelse return null;
+    const buf = renderer.render(w.allocator, w.doc) catch return null;
+    // Append a sentinel NUL so the caller can use normal C string functions.
+    const c_str = w.allocator.realloc(buf, buf.len + 1) catch {
+        w.allocator.free(buf);
+        return null;
+    };
+    c_str[buf.len] = 0;
+    return c_str[0..buf.len :0];
+}
+
+/// Render the document to CommonMark-compliant HTML.
+export fn zigmark_render_html(doc: ?*OpaqueDoc) ?[*:0]u8 {
+    return renderC(doc, HTMLRenderer);
+}
+
+/// Render the document to a human-readable AST tree diagram.
+export fn zigmark_render_ast(doc: ?*OpaqueDoc) ?[*:0]u8 {
+    return renderC(doc, ASTRenderer);
+}
+
+/// Render the document to a token-efficient AI representation.
+export fn zigmark_render_ai(doc: ?*OpaqueDoc) ?[*:0]u8 {
+    return renderC(doc, AIRenderer);
+}
+
+/// Free a C string previously returned by one of the render functions.
+export fn zigmark_free_string(ptr: ?[*:0]u8) void {
+    const p = ptr orelse return;
+    // We don't know the length at this point, so scan for the sentinel.
+    var len: usize = 0;
+    while (p[len] != 0) : (len += 1) {}
+    std.heap.page_allocator.free(p[0 .. len + 1]);
+}
+
+/// Return the library version as a NUL-terminated static string.
+/// The pointer is valid for the lifetime of the process (string literal).
+export fn zigmark_version() [*:0]const u8 {
+    return version.ptr[0..version.len :0];
+}
+
+test "enhanced parse and render" {
+    const allocator = std.testing.allocator;
 
     const input =
         \\# Heading
@@ -181,9 +269,10 @@ pub const TestResult = struct {
     skipped: usize = 0,
     time_ns: i128 = 0,
 
-    /// Return the total number of test cases that were processed.
+    /// Return the total number of test cases that were executed
+    /// (excludes skipped tests).
     pub fn total(self: TestResult) usize {
-        return self.passed + self.failed + self.errors + self.skipped;
+        return self.passed + self.failed + self.errors;
     }
 
     /// Implements `std.fmt.format` so a `TestResult` can be printed directly.
@@ -191,6 +280,74 @@ pub const TestResult = struct {
         try writer.print("{d} passed, {d} failed, {d} errors, {d} skipped", .{ self.passed, self.failed, self.errors, self.skipped });
     }
 };
+
+/// Canonical section headings from the CommonMark 0.31.2 spec.
+/// Used by both the spec-runner executable (benchmarking) and
+/// the library test (CI validation) to avoid duplication.
+pub const spec_sections = [_][]const u8{
+    "Tabs",
+    "Backslash escapes",
+    "Entity and numeric character references",
+    "Precedence",
+    "Thematic breaks",
+    "ATX headings",
+    "Setext headings",
+    "Indented code blocks",
+    "Fenced code blocks",
+    "HTML blocks",
+    "Link reference definitions",
+    "Paragraphs",
+    "Blank lines",
+    "Block quotes",
+    "List items",
+    "Lists",
+    "Code spans",
+    "Emphasis and strong emphasis",
+    "Links",
+    "Images",
+    "Autolinks",
+    "Raw HTML",
+    "Hard line breaks",
+    "Soft line breaks",
+    "Textual content",
+};
+
+/// Per-section result produced by `runSpecSummary`.
+pub const SectionResult = struct {
+    section: []const u8,
+    result: TestResult,
+};
+
+/// Aggregate result from running every spec section.
+pub const SpecSummary = struct {
+    sections: [spec_sections.len]SectionResult,
+    all: TestResult,
+    total_time_ns: i128,
+};
+
+/// Run the CommonMark spec suite once per section and once unfiltered,
+/// returning a `SpecSummary` with per-section and aggregate results.
+pub fn runSpecSummary(allocator: std.mem.Allocator, spec_path: []const u8) !SpecSummary {
+    var summary: SpecSummary = undefined;
+    summary.total_time_ns = 0;
+
+    for (spec_sections, 0..) |section, idx| {
+        const r = try runCommonMarkSpecTests(allocator, spec_path, .{
+            .pattern = section,
+            .normalize = true,
+            .verbose = false,
+        });
+        summary.sections[idx] = .{ .section = section, .result = r };
+        summary.total_time_ns += r.time_ns;
+    }
+
+    summary.all = try runCommonMarkSpecTests(allocator, spec_path, .{
+        .normalize = true,
+        .verbose = false,
+    });
+
+    return summary;
+}
 
 /// HTML normalization for test comparison (simplified version)
 /// Based on the CommonMark normalize.py approach
@@ -267,9 +424,11 @@ pub fn parseSpecTests(allocator: std.mem.Allocator, spec_content: []const u8) !s
         line_number += 1;
         const trimmed = std.mem.trim(u8, line, " \t\r");
 
-        // Detect section headers (only when not inside an example block)
-        if (state == 0 and std.mem.startsWith(u8, trimmed, "#")) {
-            current_section = std.mem.trim(u8, trimmed, "# \t");
+        // Detect section headers (## Title) only when not inside an example block.
+        // Use the raw line (not trimmed) so indented content like "#1--5" is
+        // not mistaken for a heading.
+        if (state == 0 and std.mem.startsWith(u8, line, "## ")) {
+            current_section = std.mem.trim(u8, line["## ".len..], " \t\r");
             continue;
         }
 
@@ -514,11 +673,7 @@ const embedded_spec_tests =
 
 // Enhanced test with dot notation functionality
 test "enhanced parse and render with dot notation" {
-    const a = std.testing.allocator;
-    var arena = std.heap.ArenaAllocator.init(a);
-    defer arena.deinit();
-
-    const allocator = arena.allocator();
+    const allocator = std.testing.allocator;
 
     const input =
         \\# Heading
@@ -582,54 +737,45 @@ test "enhanced parse and render with dot notation" {
 
 // CommonMark specification compliance test
 test "CommonMark spec compliance" {
+    // The spec runner exercises 655 test cases; use an arena here for
+    // throughput.  Individual leak-freedom is validated by the unit tests
+    // in test.zig, html.zig, ast_renderer.zig, and query_test.zig which
+    // all run against std.testing.allocator directly.
     var arena = std.heap.ArenaAllocator.init(tst.allocator);
     defer arena.deinit();
 
     const allocator = arena.allocator();
+    const summary = try runSpecSummary(allocator, "./src/markdown/spec.txt");
 
-    // Per-section breakdown
-    const sections = [_][]const u8{
-        "ATX",      "Setext",    "Thematic",   "Paragraph", "Blank",
-        "Indented", "Fenced",    "Blockquote", "List",      "Backslash",
-        "Entity",   "Code span", "Emphasis",   "Link",      "Image",
-        "Autolink", "Raw HTML",  "Hard line",  "Soft line", "Textual",
-    };
+    std.debug.print("\n{s:<40} {s:>6} {s:>6} {s:>6}\n", .{ "Section", "Pass", "Fail", "Total" });
+    std.debug.print("{s:-<58}\n", .{""});
 
-    std.debug.print("\n{s:<25} {s:>6} {s:>6} {s:>6}\n", .{ "Section", "Pass", "Fail", "Total" });
-    std.debug.print("{s:-<50}\n", .{""});
-
-    for (sections) |section| {
-        const r = try runCommonMarkSpecTests(allocator, "./src/markdown/spec.txt", .{
-            .pattern = section,
-            .normalize = true,
-            .verbose = false,
-        });
-        const total = r.passed + r.failed + r.errors;
-        if (total > 0) {
-            std.debug.print("{s:<25} {d:>6} {d:>6} {d:>6}\n", .{ section, r.passed, r.failed, total });
+    var section_total: usize = 0;
+    for (summary.sections) |s| {
+        const t = s.result.total();
+        section_total += t;
+        if (t > 0) {
+            std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{ s.section, s.result.passed, s.result.failed, t });
         }
     }
 
-    // Run all
-    const result = try runCommonMarkSpecTests(allocator, "./src/markdown/spec.txt", .{
-        .normalize = true,
-        .verbose = false,
+    std.debug.print("{s:-<58}\n", .{""});
+    std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{
+        "TOTAL", summary.all.passed, summary.all.failed, summary.all.total(),
     });
 
-    std.debug.print("\nCommonMark spec test results: {any}\n", .{result});
-    try testing.expect(result.total() > 0);
+    // Verify the section breakdown covers all tests (no miscategorization).
+    try testing.expectEqual(summary.all.total(), section_total);
 
-    if (result.failed > 0) {
-        std.debug.print("Warning: {d} CommonMark spec tests failed\n", .{result.failed});
-        std.debug.print("This is expected as the parser implementation is still basic\n", .{});
-    }
+    // Hard-fail on unexpected results so regressions are caught.
+    try testing.expectEqual(@as(usize, 0), summary.all.failed);
+    try testing.expectEqual(@as(usize, 655), summary.all.passed);
+    try testing.expectEqual(@as(usize, 0), summary.all.errors);
 }
 
 // CommonMark specification compliance test
 test "Policy render" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = tst.allocator;
 
     const test_policy =
         \\---

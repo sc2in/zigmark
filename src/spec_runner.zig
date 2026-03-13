@@ -3,11 +3,12 @@ const print = std.debug.print;
 
 const zigmark = @import("zigmark");
 
+const spec_path = "./src/markdown/spec.txt";
+
 pub fn main() !void {
     // Use a page allocator — the spec runner is short-lived and
-    // runCommonMarkSpecTests leaks intermediate strings when not
-    // backed by an arena.  We don't care about reclaiming them
-    // because the process exits immediately after.
+    // runs many parse/render cycles.  A page allocator avoids the
+    // overhead of tracking individual allocations.
     const allocator = std.heap.page_allocator;
 
     var args = try std.process.argsWithAllocator(allocator);
@@ -38,14 +39,14 @@ pub fn main() !void {
         return;
     }
 
-    const result = try zigmark.runCommonMarkSpecTests(allocator, "./src/markdown/spec.txt", .{
+    const result = try zigmark.runCommonMarkSpecTests(allocator, spec_path, .{
         .pattern = pattern,
         .normalize = true,
         .verbose = verbose,
         .number = number,
     });
 
-    const total = result.passed + result.failed + result.errors;
+    const total = result.total();
     print("\n", .{});
     if (pattern) |p| {
         print("Section filter: {s}\n", .{p});
@@ -62,44 +63,25 @@ pub fn main() !void {
 }
 
 fn printSummary(allocator: std.mem.Allocator) !void {
-    const sections = [_][]const u8{
-        "ATX",      "Setext",    "Thematic",   "Paragraph", "Blank",
-        "Indented", "Fenced",    "Blockquote", "List",      "Backslash",
-        "Entity",   "Code span", "Emphasis",   "Link",      "Image",
-        "Autolink", "Raw HTML",  "Hard line",  "Soft line", "Textual",
-    };
+    const summary = try zigmark.runSpecSummary(allocator, spec_path);
 
-    print("\n{s:<25} {s:>6} {s:>6} {s:>6} {s:>10}\n", .{ "Section", "Pass", "Fail", "Total", "Time (ms)" });
-    print("{s:-<56}\n", .{""});
+    print("\n{s:<40} {s:>6} {s:>6} {s:>6} {s:>10}\n", .{ "Section", "Pass", "Fail", "Total", "Time (ms)" });
+    print("{s:-<66}\n", .{""});
 
-    var total_passed: usize = 0;
-    var total_failed: usize = 0;
-    var total_errors: usize = 0;
-    var total_time_ns: i128 = 0;
-
-    for (sections) |section| {
-        const r = try zigmark.runCommonMarkSpecTests(allocator, "./src/markdown/spec.txt", .{
-            .pattern = section,
-            .normalize = true,
-            .verbose = false,
-        });
-        const total = r.passed + r.failed + r.errors;
-        const section_ms: f64 = @as(f64, @floatFromInt(r.time_ns)) / @as(f64, @floatFromInt(std.time.ns_per_ms));
-        total_time_ns += r.time_ns;
-        if (total > 0) {
+    for (summary.sections) |s| {
+        const t = s.result.total();
+        if (t > 0) {
+            const ms: f64 = @as(f64, @floatFromInt(s.result.time_ns)) / @as(f64, @floatFromInt(std.time.ns_per_ms));
             print(
-                "{s:<25} {d:>6} {d:>6} {d:>6} {d:>10.2}\n",
-                .{ section, r.passed, r.failed, total, section_ms },
+                "{s:<40} {d:>6} {d:>6} {d:>6} {d:>10.2}\n",
+                .{ s.section, s.result.passed, s.result.failed, t, ms },
             );
         }
-        total_passed += r.passed;
-        total_failed += r.failed;
-        total_errors += r.errors;
     }
 
-    const total_ms: f64 = @as(f64, @floatFromInt(total_time_ns)) / @as(f64, @floatFromInt(std.time.ns_per_ms));
-    print("{s:-<56}\n", .{""});
-    print("{s:<25} {d:>6} {d:>6} {d:>6} {d:>10.2}\n", .{
-        "TOTAL", total_passed, total_failed, total_passed + total_failed + total_errors, total_ms,
+    const total_ms: f64 = @as(f64, @floatFromInt(summary.total_time_ns)) / @as(f64, @floatFromInt(std.time.ns_per_ms));
+    print("{s:-<66}\n", .{""});
+    print("{s:<40} {d:>6} {d:>6} {d:>6} {d:>10.2}\n", .{
+        "TOTAL", summary.all.passed, summary.all.failed, summary.all.total(), total_ms,
     });
 }

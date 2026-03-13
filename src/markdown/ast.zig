@@ -69,12 +69,12 @@ pub const Document = struct {
         }
 
         /// Return every top-level block whose active tag equals `block_type`.
-        pub fn blocks(self: Query, allocator: std.mem.Allocator, block_type: std.meta.Tag(Block)) !std.ArrayList(*const Block) {
-            var results = std.ArrayList(*const Block).init(allocator);
+        pub fn blocks(self: Query, allocator: std.mem.Allocator, block_type: std.meta.Tag(Block)) !std.ArrayList(Block) {
+            var results = std.ArrayList(Block){};
 
             for (self.document.children.items) |block| {
                 if (std.meta.activeTag(block) == block_type) {
-                    try results.append(block);
+                    try results.append(allocator, block);
                 }
             }
 
@@ -84,16 +84,16 @@ pub const Document = struct {
         /// Return all headings, optionally filtered to a single `level` (1–6).
         /// Pass `null` to return headings of every level.
         pub fn headings(self: Query, allocator: std.mem.Allocator, level: ?u8) !std.ArrayList(*const Heading) {
-            var results = std.ArrayList(*const Heading).init(allocator);
+            var results = std.ArrayList(*const Heading){};
 
-            for (self.document.children.items) |block| {
-                if (block == .heading) {
+            for (self.document.children.items) |*block| {
+                if (block.* == .heading) {
                     if (level) |target_level| {
                         if (block.heading.level == target_level) {
-                            try results.append(&block.heading);
+                            try results.append(allocator, &block.heading);
                         }
                     } else {
-                        try results.append(&block.heading);
+                        try results.append(allocator, &block.heading);
                     }
                 }
             }
@@ -103,13 +103,13 @@ pub const Document = struct {
 
         /// Return every paragraph that contains at least one inline of `inline_type`.
         pub fn paragraphsWithInlines(self: Query, allocator: std.mem.Allocator, inline_type: std.meta.Tag(Inline)) !std.ArrayList(*const Paragraph) {
-            var results = std.ArrayList(*const Paragraph).init(allocator);
+            var results = std.ArrayList(*const Paragraph){};
 
             for (self.document.children.items) |*block| {
                 if (block.* == .paragraph) {
                     for (block.paragraph.children.items) |*inline_elem| {
                         if (std.meta.activeTag(inline_elem.*) == inline_type) {
-                            try results.append(&block.paragraph);
+                            try results.append(allocator, &block.paragraph);
                             break;
                         }
                     }
@@ -122,7 +122,7 @@ pub const Document = struct {
         /// Collect every `Link` inline across all blocks (paragraphs, headings,
         /// blockquotes, and list items) in document order.
         pub fn links(self: Query, allocator: std.mem.Allocator) !std.ArrayList(*const Link) {
-            var results = std.ArrayList(*const Link).init(allocator);
+            var results = std.ArrayList(*const Link){};
 
             for (self.document.children.items) |*block| {
                 try self.collectLinksFromBlock(allocator, block, &results);
@@ -158,12 +158,14 @@ pub const Document = struct {
             return null;
         }
 
-        /// Count the number of top-level blocks matching `element_type`.
-        pub fn count(self: Query, element_type: anytype) usize {
+        /// Count the number of top-level blocks matching `block_type`.
+        pub fn count(self: Query, block_type: std.meta.Tag(Block)) usize {
             var counter: usize = 0;
 
-            for (self.document.children.items) |*block| {
-                counter += self.countInBlock(block, element_type);
+            for (self.document.children.items) |block| {
+                if (std.meta.activeTag(block) == block_type) {
+                    counter += 1;
+                }
             }
 
             return counter;
@@ -175,14 +177,14 @@ pub const Document = struct {
                 .paragraph => |*p| {
                     for (p.children.items) |*inline_elem| {
                         if (inline_elem.* == .link) {
-                            try results.append(&inline_elem.link);
+                            try results.append(allocator, &inline_elem.link);
                         }
                     }
                 },
                 .heading => |*h| {
                     for (h.children.items) |*inline_elem| {
                         if (inline_elem.* == .link) {
-                            try results.append(&inline_elem.link);
+                            try results.append(allocator, &inline_elem.link);
                         }
                     }
                 },
@@ -200,26 +202,6 @@ pub const Document = struct {
                 },
                 else => {},
             }
-        }
-
-        fn countInBlock(self: Query, block: *const Block, element_type: anytype) usize {
-            _ = self;
-            var counter: usize = 0;
-
-            switch (@TypeOf(element_type)) {
-                Heading => {
-                    if (block.* == .heading) counter += 1;
-                },
-                Paragraph => {
-                    if (block.* == .paragraph) counter += 1;
-                },
-                List => {
-                    if (block.* == .list) counter += 1;
-                },
-                else => {},
-            }
-
-            return counter;
         }
     };
 
@@ -293,6 +275,9 @@ pub const Inline = union(enum) {
 /// as other kinds of blocks (CommonMark §4.8).
 pub const Paragraph = struct {
     children: std.ArrayList(Inline),
+    /// Owned copy of the paragraph source text that inline `Text` nodes
+    /// borrow from.  Freed in `deinit` after all children are released.
+    inline_source: ?[]const u8 = null,
 
     /// Create an empty paragraph with no inline children.
     pub fn init(allocator: std.mem.Allocator) Paragraph {
@@ -307,6 +292,7 @@ pub const Paragraph = struct {
             child.deinit(allocator);
         }
         self.children.deinit(allocator);
+        if (self.inline_source) |src| allocator.free(src);
     }
 };
 
@@ -318,6 +304,9 @@ pub const Paragraph = struct {
 pub const Heading = struct {
     level: u8,
     children: std.ArrayList(Inline),
+    /// Owned copy of the inline source text (used by setext headings whose
+    /// inline nodes borrow from a paragraph's duped content buffer).
+    inline_source: ?[]const u8 = null,
 
     /// Create a heading at the given `level` with no inline children.
     pub fn init(allocator: std.mem.Allocator, level: u8) Heading {
@@ -333,6 +322,7 @@ pub const Heading = struct {
             child.deinit(allocator);
         }
         self.children.deinit(allocator);
+        if (self.inline_source) |src| allocator.free(src);
     }
 };
 
@@ -484,7 +474,9 @@ pub const HtmlBlock = struct {
     pub fn init(content: []const u8) HtmlBlock {
         return HtmlBlock{ .content = content };
     }
-    pub fn deinit(_: HtmlBlock, _: Allocator) void {}
+    pub fn deinit(self: *HtmlBlock, allocator: Allocator) void {
+        if (self.content.len > 0) allocator.free(self.content);
+    }
 };
 
 /// A footnote definition (`[^label]: …`).
@@ -583,6 +575,9 @@ pub const CodeSpan = struct {
     pub fn init(content: []const u8) CodeSpan {
         return CodeSpan{ .content = content };
     }
+    pub fn deinit(self: *CodeSpan, allocator: Allocator) void {
+        if (self.content.len > 0) allocator.free(self.content);
+    }
 };
 
 /// The destination (URL) and optional title of a link or image.
@@ -642,6 +637,8 @@ pub const Link = struct {
             child.deinit(allocator);
         }
         self.children.deinit(allocator);
+        if (self.destination.url.len > 0) allocator.free(self.destination.url);
+        if (self.destination.title) |t| if (t.len > 0) allocator.free(t);
     }
 };
 
@@ -663,6 +660,11 @@ pub const Image = struct {
             .destination = destination,
             .link_type = link_type,
         };
+    }
+    pub fn deinit(self: *Image, allocator: Allocator) void {
+        if (self.alt_text.len > 0) allocator.free(self.alt_text);
+        if (self.destination.url.len > 0) allocator.free(self.destination.url);
+        if (self.destination.title) |t| if (t.len > 0) allocator.free(t);
     }
 };
 
@@ -726,3 +728,7 @@ pub const HtmlInline = struct {
         return HtmlInline{ .content = content };
     }
 };
+
+test {
+    _ = @import("query_test.zig");
+}
