@@ -184,9 +184,10 @@ pub const TestResult = struct {
     skipped: usize = 0,
     time_ns: i128 = 0,
 
-    /// Return the total number of test cases that were processed.
+    /// Return the total number of test cases that were executed
+    /// (excludes skipped tests).
     pub fn total(self: TestResult) usize {
-        return self.passed + self.failed + self.errors + self.skipped;
+        return self.passed + self.failed + self.errors;
     }
 
     /// Implements `std.fmt.format` so a `TestResult` can be printed directly.
@@ -194,6 +195,74 @@ pub const TestResult = struct {
         try writer.print("{d} passed, {d} failed, {d} errors, {d} skipped", .{ self.passed, self.failed, self.errors, self.skipped });
     }
 };
+
+/// Canonical section headings from the CommonMark 0.31.2 spec.
+/// Used by both the spec-runner executable (benchmarking) and
+/// the library test (CI validation) to avoid duplication.
+pub const spec_sections = [_][]const u8{
+    "Tabs",
+    "Backslash escapes",
+    "Entity and numeric character references",
+    "Precedence",
+    "Thematic breaks",
+    "ATX headings",
+    "Setext headings",
+    "Indented code blocks",
+    "Fenced code blocks",
+    "HTML blocks",
+    "Link reference definitions",
+    "Paragraphs",
+    "Blank lines",
+    "Block quotes",
+    "List items",
+    "Lists",
+    "Code spans",
+    "Emphasis and strong emphasis",
+    "Links",
+    "Images",
+    "Autolinks",
+    "Raw HTML",
+    "Hard line breaks",
+    "Soft line breaks",
+    "Textual content",
+};
+
+/// Per-section result produced by `runSpecSummary`.
+pub const SectionResult = struct {
+    section: []const u8,
+    result: TestResult,
+};
+
+/// Aggregate result from running every spec section.
+pub const SpecSummary = struct {
+    sections: [spec_sections.len]SectionResult,
+    all: TestResult,
+    total_time_ns: i128,
+};
+
+/// Run the CommonMark spec suite once per section and once unfiltered,
+/// returning a `SpecSummary` with per-section and aggregate results.
+pub fn runSpecSummary(allocator: std.mem.Allocator, spec_path: []const u8) !SpecSummary {
+    var summary: SpecSummary = undefined;
+    summary.total_time_ns = 0;
+
+    for (spec_sections, 0..) |section, idx| {
+        const r = try runCommonMarkSpecTests(allocator, spec_path, .{
+            .pattern = section,
+            .normalize = true,
+            .verbose = false,
+        });
+        summary.sections[idx] = .{ .section = section, .result = r };
+        summary.total_time_ns += r.time_ns;
+    }
+
+    summary.all = try runCommonMarkSpecTests(allocator, spec_path, .{
+        .normalize = true,
+        .verbose = false,
+    });
+
+    return summary;
+}
 
 /// HTML normalization for test comparison (simplified version)
 /// Based on the CommonMark normalize.py approach
@@ -583,7 +652,7 @@ test "enhanced parse and render with dot notation" {
 
 // CommonMark specification compliance test
 test "CommonMark spec compliance" {
-    // The spec runner exercises 655+ test cases; use an arena here for
+    // The spec runner exercises 655 test cases; use an arena here for
     // throughput.  Individual leak-freedom is validated by the unit tests
     // in test.zig, html.zig, ast_renderer.zig, and query_test.zig which
     // all run against std.testing.allocator directly.
@@ -591,78 +660,32 @@ test "CommonMark spec compliance" {
     defer arena.deinit();
 
     const allocator = arena.allocator();
-
-    // Exact section names from CommonMark spec.txt (## headings).
-    const sections = [_][]const u8{
-        "Tabs",
-        "Backslash escapes",
-        "Entity and numeric character references",
-        "Precedence",
-        "Thematic breaks",
-        "ATX headings",
-        "Setext headings",
-        "Indented code blocks",
-        "Fenced code blocks",
-        "HTML blocks",
-        "Link reference definitions",
-        "Paragraphs",
-        "Blank lines",
-        "Block quotes",
-        "List items",
-        "Lists",
-        "Inlines",
-        "Code spans",
-        "Emphasis and strong emphasis",
-        "Links",
-        "Images",
-        "Autolinks",
-        "Raw HTML",
-        "Hard line breaks",
-        "Soft line breaks",
-        "Textual content",
-    };
-
-    // Known-failing test numbers.  Update this set when fixing spec
-    // compliance bugs so that regressions are caught immediately.
-    const expected_failures = [_]usize{
-        2, 5, 7, 9, 148, 171, 172, 173, 174, 175, 180, 182, 187, 238, 239, 240, 251,
-    };
+    const summary = try runSpecSummary(allocator, "./src/markdown/spec.txt");
 
     std.debug.print("\n{s:<40} {s:>6} {s:>6} {s:>6}\n", .{ "Section", "Pass", "Fail", "Total" });
     std.debug.print("{s:-<58}\n", .{""});
 
     var section_total: usize = 0;
-    for (sections) |section| {
-        const r = try runCommonMarkSpecTests(allocator, "./src/markdown/spec.txt", .{
-            .pattern = section,
-            .normalize = true,
-            .verbose = false,
-        });
-        const total = r.passed + r.failed + r.errors;
-        section_total += total;
-        if (total > 0) {
-            std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{ section, r.passed, r.failed, total });
+    for (summary.sections) |s| {
+        const t = s.result.total();
+        section_total += t;
+        if (t > 0) {
+            std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{ s.section, s.result.passed, s.result.failed, t });
         }
     }
 
-    // Run all
-    const result = try runCommonMarkSpecTests(allocator, "./src/markdown/spec.txt", .{
-        .normalize = true,
-        .verbose = false,
-    });
-
     std.debug.print("{s:-<58}\n", .{""});
     std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{
-        "TOTAL", result.passed, result.failed, result.passed + result.failed + result.errors,
+        "TOTAL", summary.all.passed, summary.all.failed, summary.all.total(),
     });
 
     // Verify the section breakdown covers all tests (no miscategorization).
-    try testing.expectEqual(result.passed + result.failed + result.errors, section_total);
+    try testing.expectEqual(summary.all.total(), section_total);
 
     // Hard-fail on unexpected results so regressions are caught.
-    try testing.expectEqual(@as(usize, expected_failures.len), result.failed);
-    try testing.expectEqual(@as(usize, 655 - expected_failures.len), result.passed);
-    try testing.expectEqual(@as(usize, 0), result.errors);
+    try testing.expectEqual(@as(usize, 0), summary.all.failed);
+    try testing.expectEqual(@as(usize, 655), summary.all.passed);
+    try testing.expectEqual(@as(usize, 0), summary.all.errors);
 }
 
 // CommonMark specification compliance test

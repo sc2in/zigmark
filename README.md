@@ -1,6 +1,6 @@
 # zigmark
 
-A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 564 spec tests** (100%).
+A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 655 spec tests** (100%).
 
 ## Installation
 
@@ -130,25 +130,31 @@ const output = try MyRenderer.render(allocator, doc);
 
 ## Features
 
-### CommonMark Compliance — 564/564 ✅
+### CommonMark Compliance — 655/655 ✅
 
 Every section of the [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) spec passes:
 
 | Section | Tests |
 |---------|-------|
+| Tabs | 11 |
+| Backslash escapes | 13 |
+| Entity and numeric character references | 17 |
+| Precedence | 1 |
+| Thematic breaks | 19 |
 | ATX headings | 18 |
 | Setext headings | 27 |
-| Thematic breaks | 19 |
+| Indented code blocks | 12 |
+| Fenced code blocks | 29 |
+| HTML blocks | 46 |
+| Link reference definitions | 27 |
 | Paragraphs | 8 |
 | Blank lines | 1 |
-| Indented code | 12 |
-| Fenced code | 29 |
-| Lists | 67 |
-| Backslash escapes | 13 |
-| Entities | 17 |
+| Block quotes | 25 |
+| List items | 48 |
+| Lists | 27 |
 | Code spans | 22 |
-| Emphasis | 132 |
-| Links | 117 |
+| Emphasis and strong emphasis | 132 |
+| Links | 90 |
 | Images | 22 |
 | Autolinks | 19 |
 | Raw HTML | 21 |

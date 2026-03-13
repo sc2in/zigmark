@@ -4,7 +4,7 @@ const clap = @import("clap");
 const zigmark = @import("zigmark");
 const AST = zigmark.AST;
 
-const version = "0.1.0";
+const version = "0.1.1";
 
 pub fn main() !void {
     var gpa_impl: std.heap.GeneralPurposeAllocator(.{}) = .{};
