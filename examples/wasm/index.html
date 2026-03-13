@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>zigmark — live Markdown preview</title>
+<style>
+  :root { --bg: #0d1117; --fg: #c9d1d9; --border: #30363d; --accent: #58a6ff; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 15px/1.6 'SF Mono', Menlo, monospace; background: var(--bg); color: var(--fg); }
+  header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 16px; color: var(--accent); }
+  header .stats { font-size: 12px; opacity: 0.6; margin-left: auto; }
+  header .stats b { color: var(--accent); }
+  .container { display: grid; grid-template-columns: 1fr 1fr; height: calc(100vh - 48px); }
+  textarea { background: #161b22; color: var(--fg); border: none; border-right: 1px solid var(--border);
+             padding: 16px; font: inherit; resize: none; outline: none; }
+  .preview { padding: 16px; overflow-y: auto; }
+  .preview h1, .preview h2, .preview h3, .preview h4, .preview h5, .preview h6 { color: var(--fg); margin: 0.8em 0 0.4em; }
+  .preview h1 { font-size: 2em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+  .preview h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+  .preview p { margin: 0.6em 0; }
+  .preview a { color: var(--accent); }
+  .preview code { background: #21262d; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+  .preview pre { background: #161b22; padding: 12px; border-radius: 6px; overflow-x: auto; margin: 0.6em 0; }
+  .preview pre code { background: none; padding: 0; }
+  .preview blockquote { border-left: 3px solid var(--border); padding-left: 12px; color: #8b949e; margin: 0.6em 0; }
+  .preview ul, .preview ol { padding-left: 24px; margin: 0.6em 0; }
+  .preview img { max-width: 100%; }
+  .preview em { color: #d2a8ff; }
+  .preview strong { color: #fff; }
+  .badge { display: inline-block; background: #238636; color: #fff; font-size: 11px; padding: 2px 8px;
+           border-radius: 12px; vertical-align: middle; }
+  .badge.js { background: #9e6a03; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>zigmark</h1>
+  <span class="badge">WASM</span>
+  <span class="stats">
+    zigmark <b id="zig-time">—</b> ms &nbsp;·&nbsp;
+    marked.js <b id="js-time">—</b> ms &nbsp;·&nbsp;
+    speedup <b id="speedup">—</b>×
+  </span>
+</header>
+
+<div class="container">
+  <textarea id="editor" spellcheck="false" placeholder="Type Markdown here…">
+# Hello from zigmark 🚀
+
+A **CommonMark-compliant** Markdown parser compiled to WASM — running in your browser right now.
+
+## Features
+
+- All **655** spec tests passing ✅
+- Three renderers: HTML, AST, AI
+- Zero dependencies at runtime
+- Typically *faster* than pure-JS parsers
+
+## Code
+
+```zig
+const zigmark = @import("zigmark");
+var doc = try parser.parseMarkdown(allocator, input);
+const html = try zigmark.HTMLRenderer.render(allocator, doc);
+```
+
+## Links
+
+Check out the repo: [sc2in/zigmark](https://github.com/sc2in/zigmark)
+
+> "Parse Markdown at the speed of Zig." someone, probably.
+
+---
+
+*Edit this pane and watch the preview update in real-time.*
+</textarea>
+  <div class="preview" id="preview"></div>
+</div>
+
+<!--
+  marked.js is loaded purely for benchmarking comparison.
+  zigmark does all the actual rendering.
+-->
+<script src="https://cdn.jsdelivr.net/npm/marked@15/lib/marked.umd.min.js"></script>
+
+<script type="module">
+// ── Load WASM ────────────────────────────────────────────────────────────────
+const WASM_PATH = 'zigmark.wasm';
+
+let wasm;
+
+async function initWasm() {
+  const resp = await fetch(WASM_PATH);
+  const bytes = await resp.arrayBuffer();
+  const { instance } = await WebAssembly.instantiate(bytes, {
+    env: {
+      // zigmark with page_allocator on wasm32-freestanding needs no imports,
+      // but keep this object here so future additions don't break.
+    },
+  });
+  wasm = instance.exports;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+function zigmarkRender(markdown) {
+  const encoded = encoder.encode(markdown);
+  const len = encoded.byteLength;
+
+  // Allocate space in WASM memory and copy the source in.
+  const ptr = wasm.alloc_buf(len);
+  if (!ptr) return '<!-- alloc failed -->';
+  new Uint8Array(wasm.memory.buffer, ptr, len).set(encoded);
+
+  // Render.
+  const outPtr = wasm.render_html(ptr, len);
+  wasm.free_buf(ptr, len);
+
+  if (!outPtr) return '<!-- render failed -->';
+  const outLen = wasm.result_len();
+  return decoder.decode(new Uint8Array(wasm.memory.buffer, outPtr, outLen));
+}
+
+// ── Benchmark helper ─────────────────────────────────────────────────────────
+function bench(fn, iterations = 50) {
+  // Warm up
+  fn();
+  const t0 = performance.now();
+  for (let i = 0; i < iterations; i++) fn();
+  return (performance.now() - t0) / iterations;
+}
+
+// ── UI ───────────────────────────────────────────────────────────────────────
+const editor  = document.getElementById('editor');
+const preview = document.getElementById('preview');
+const zigTime = document.getElementById('zig-time');
+const jsTime  = document.getElementById('js-time');
+const speedup = document.getElementById('speedup');
+
+let debounce = null;
+
+function update() {
+  const md = editor.value;
+
+  // zigmark (WASM)
+  const zt = bench(() => zigmarkRender(md));
+  preview.innerHTML = zigmarkRender(md);
+
+  // marked.js (JS)
+  const jt = bench(() => marked.parse(md));
+
+  zigTime.textContent = zt.toFixed(2);
+  jsTime.textContent  = jt.toFixed(2);
+  speedup.textContent = (jt / zt).toFixed(1);
+}
+
+editor.addEventListener('input', () => {
+  clearTimeout(debounce);
+  debounce = setTimeout(update, 80);
+});
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+try {
+  await initWasm();
+  update();
+} catch (e) {
+  preview.innerHTML =
+    `<p style="color:#f85149">Failed to load <code>${WASM_PATH}</code>.</p>
+     <p>Build it first:</p>
+     <pre><code>cd examples/wasm && ./build.sh</code></pre>
+     <p style="opacity:0.6;margin-top:8px">${e}</p>`;
+}
+</script>
+
+</body>
+</html>

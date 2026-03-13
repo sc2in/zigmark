@@ -166,4 +166,62 @@ pub fn build(b: *std.Build) void {
         run.addArgs(&.{ "--section", def[1], "--verbose" });
         step.dependOn(&run.step);
     }
+
+    // ── WASM build ───────────────────────────────────────────────────────────
+
+    const wasm_target = b.resolveTargetQuery(.{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+    });
+    const wasm_optimize = .ReleaseSmall;
+
+    const wasm_tomlz = b.dependency("tomlz", .{ .target = wasm_target, .optimize = wasm_optimize });
+    const wasm_yaml = b.dependency("yaml", .{ .target = wasm_target, .optimize = wasm_optimize });
+    const wasm_mvzr = b.dependency("mvzr", .{ .target = wasm_target, .optimize = wasm_optimize });
+    const wasm_mecha = b.dependency("mecha", .{});
+    const wasm_dt = b.dependency("datetime", .{ .target = wasm_target, .optimize = wasm_optimize });
+
+    const zigmark_wasm_mod = b.addModule("zigmark_wasm", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = wasm_target,
+        .optimize = wasm_optimize,
+    });
+    zigmark_wasm_mod.addOptions("config", options);
+    zigmark_wasm_mod.addImport("tomlz", wasm_tomlz.module("tomlz"));
+    zigmark_wasm_mod.addImport("yaml", wasm_yaml.module("yaml"));
+    zigmark_wasm_mod.addImport("mvzr", wasm_mvzr.module("mvzr"));
+    zigmark_wasm_mod.addImport("mecha", wasm_mecha.module("mecha"));
+    zigmark_wasm_mod.addImport("dt", wasm_dt.module("datetime"));
+
+    const wasm_lib = b.addExecutable(.{
+        .name = "zigmark",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/wasm/zigmark-wasm.zig"),
+            .target = wasm_target,
+            .optimize = wasm_optimize,
+            .imports = &.{
+                .{ .name = "zigmark", .module = zigmark_wasm_mod },
+            },
+        }),
+    });
+    wasm_lib.entry = .disabled;
+    wasm_lib.root_module.export_symbol_names = &.{
+        "render_html",
+        "render_ast",
+        "render_ai",
+        "result_len",
+        "alloc_buf",
+        "free_buf",
+        "version_ptr",
+        "version_len",
+    };
+
+    const wasm_step = b.step("wasm", "Build the WASM module (examples/wasm/)");
+    const install_wasm = b.addInstallArtifact(wasm_lib, .{
+        .dest_dir = .{ .override = .{ .custom = "wasm" } },
+    });
+    // Also copy the demo HTML alongside the .wasm
+    const install_html = b.addInstallFile(b.path("examples/wasm/index.html"), "wasm/index.html");
+    wasm_step.dependOn(&install_wasm.step);
+    wasm_step.dependOn(&install_html.step);
 }

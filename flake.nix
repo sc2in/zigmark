@@ -75,8 +75,23 @@
     apps = forAllSystems (
       system: let
         env = zig2nix.outputs.zig-env.${system} {};
+        pkgs = nixpkgs.legacyPackages.${system};
       in {
         default = env.app [] "zig build run -- \"$@\"";
+
+        # Serve the WASM live-preview demo:  nix run .#wasm-demo
+        wasm-demo = {
+          type = "app";
+          program = "${pkgs.writeShellScript "zigmark-wasm-demo" ''
+            set -euo pipefail
+            cd "$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || echo .)"
+            echo "▸ Building WASM module…"
+            zig build wasm
+            PORT="''${1:-8080}"
+            echo "✓ Serving zig-out/wasm/ on http://localhost:$PORT"
+            ${pkgs.python3}/bin/python3 -m http.server "$PORT" -d zig-out/wasm
+          ''}";
+        };
       }
     );
   };
