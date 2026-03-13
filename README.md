@@ -253,7 +253,49 @@ zig-out/
 ├── bin/zigmark           # CLI executable
 ├── lib/libzigmark.so     # C-callable shared library
 ├── include/zigmark.h     # C header
-└── docs/                 # Generated documentation
+├── docs/                 # Generated documentation
+└── wasm/                 # WebAssembly module (zig build wasm)
+    ├── zigmark.wasm
+    └── index.html        # Live preview demo
+```
+
+### WASM
+
+Build the WebAssembly module (~81 KiB):
+
+```bash
+zig build wasm
+```
+
+Serve the live preview demo locally:
+
+```bash
+# With Python
+python3 -m http.server 8080 -d zig-out/wasm
+
+# With Nix
+nix run .#wasm-demo
+```
+
+Open `http://localhost:8080` — the demo renders Markdown in real-time using the
+WASM module and includes a side-by-side benchmark against [marked.js](https://marked.js.org/).
+
+See `examples/wasm/` for the WASM entry point and demo source.
+
+### Nix
+
+```bash
+# Build
+nix build
+
+# Run
+nix run . -- README.md
+
+# Dev shell (includes zls, benchmark tool, auto-updates zon2json-lock)
+nix develop
+
+# WASM live preview demo
+nix run .#wasm-demo
 ```
 
 Requires **Zig 0.15.2** or later.
@@ -279,3 +321,33 @@ Requires **Zig 0.15.2** or later.
 ## License
 
 AGPL-3.0-or-later © 2025 Star City Security Consulting, LLC (SC2)
+
+## Contributing
+
+Contributions are welcome. By submitting a pull request you agree that your
+contribution is licensed under the same AGPL-3.0-or-later terms as the rest of
+this project.
+
+### Security
+
+**Do not open a public issue for security vulnerabilities.**
+
+If you discover a security issue, please report it responsibly by emailing
+**security@sc2.in** with a description of the vulnerability, steps to
+reproduce, and any relevant details. You will receive acknowledgement within 72
+hours and we will work with you on a fix before any public disclosure.
+
+### Guidelines
+
+- **Tests must pass.** Run `zig build test` (unit) and `zig build spec` (all
+  655 CommonMark spec tests) before opening a PR.
+- **One concern per PR.** Keep pull requests focused — a bug fix, a new
+  feature, or a refactor, not all three at once.
+- **No spec regressions.** The 655/655 CommonMark 0.31.2 pass rate is the
+  baseline. PRs that cause spec failures will not be merged.
+- **Follow existing style.** The codebase uses `zig fmt`-standard formatting
+  and descriptive naming. When in doubt, match what's already there.
+- **Document public API changes.** If you add or change an exported function,
+  update the README and/or `include/zigmark.h` accordingly.
+- **Sign your commits.** Use `git commit -s` to add a `Signed-off-by` line
+  ([DCO](https://developercertificate.org/)).

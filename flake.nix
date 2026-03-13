@@ -18,14 +18,39 @@
   in {
     packages = forAllSystems (
       system: let
-        env = zig2nix.outputs.zig-env.${system} {};
+        # Use the pre-built Zig from nixpkgs (on the public binary cache)
+        # instead of letting zig2nix build its own.
+        env = zig2nix.outputs.zig-env.${system} {zig = nixpkgs.legacyPackages.${system}.zig;};
+        pkgs = nixpkgs.legacyPackages.${system};
+        lib = pkgs.lib;
         # Read name and version directly from build.zig.zon
         zon = env.fromZON ./build.zig.zon;
+
+        # Only include files that affect the build output so that changes to
+        # README, flake.nix, examples/, docs/ etc. don't bust the Nix cache.
+        buildSrc = lib.fileset.toSource {
+          root = ./.;
+          fileset = lib.fileset.unions [
+            ./build.zig
+            ./build.zig.zon
+            ./build.zig.zon2json-lock
+            ./src
+            ./include
+          ];
+        };
+        # Version comes from the git tag at build time (inside build.zig),
+        # so we only need a label here for the Nix derivation.  Using the
+        # short rev means the *source hash* doesn't change on tag-only bumps.
+        version = self.shortRev or self.dirtyShortRev or "dev";
       in rec {
         default = env.package {
           pname = zon.name;
-          version = zon.version;
-          src = ./.;
+          inherit version;
+          src = buildSrc;
+
+          zigBuildFlags = [
+            "-Dversion=${version}"
+          ];
 
           # If your project has zig dependencies listed in build.zig.zon,
           # generate the lock file first:
@@ -38,8 +63,8 @@
 
     devShells = forAllSystems (
       system: let
-        env = zig2nix.outputs.zig-env.${system} {};
         pkgs = nixpkgs.legacyPackages.${system};
+        env = zig2nix.outputs.zig-env.${system} {zig = pkgs.zig;};
         benchmark = pkgs.writeShellApplication {
           name = "benchmark";
           runtimeInputs = with pkgs; [
@@ -74,8 +99,8 @@
     # Convenience: `nix run .` executes the built binary
     apps = forAllSystems (
       system: let
-        env = zig2nix.outputs.zig-env.${system} {};
         pkgs = nixpkgs.legacyPackages.${system};
+        env = zig2nix.outputs.zig-env.${system} {zig = pkgs.zig;};
       in {
         default = env.app [] "zig build run -- \"$@\"";
 

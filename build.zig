@@ -29,7 +29,19 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     const options = b.addOptions();
-    options.addOption([]const u8, "version", zon.version);
+    // Version priority: -Dversion flag > git describe > build.zig.zon
+    // The flag lets Nix (and other sandboxed builds) inject the version
+    // without requiring git to be present in the build environment.
+    const version = b.option([]const u8, "version", "Override version string") orelse blk: {
+        var exit_code: u8 = undefined;
+        const git_describe = b.runAllowFail(
+            &.{ "git", "describe", "--tags", "--always" },
+            &exit_code,
+            .Ignore,
+        ) catch "";
+        break :blk if (git_describe.len > 0) trimLeadingV(git_describe) else zon.version;
+    };
+    options.addOption([]const u8, "version", version);
 
     const zigmark = b.addModule("zigmark", .{
         .root_source_file = b.path("src/root.zig"),
@@ -89,7 +101,6 @@ pub fn build(b: *std.Build) void {
         .install_subdir = "docs",
     });
     docs_step.dependOn(&docs.step);
-    b.getInstallStep().dependOn(docs_step);
 
     const run_step = b.step("run", "Run the app");
     const run_cmd = b.addRunArtifact(exe);
@@ -224,4 +235,11 @@ pub fn build(b: *std.Build) void {
     const install_html = b.addInstallFile(b.path("examples/wasm/index.html"), "wasm/index.html");
     wasm_step.dependOn(&install_wasm.step);
     wasm_step.dependOn(&install_html.step);
+}
+
+/// Strip a leading "v" and trailing whitespace from a git describe string,
+/// e.g. "v0.2.0\n" → "0.2.0", "v0.2.0-3-gabcdef\n" → "0.2.0-3-gabcdef".
+fn trimLeadingV(s: []const u8) []const u8 {
+    const trimmed = std.mem.trim(u8, s, " \t\r\n");
+    return if (trimmed.len > 0 and trimmed[0] == 'v') trimmed[1..] else trimmed;
 }
