@@ -12,9 +12,7 @@ fn parse(allocator: std.mem.Allocator, input: []const u8) !AST.Document {
 }
 
 test "query: count headings" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\# Heading 1
@@ -35,9 +33,7 @@ test "query: count headings" {
 }
 
 test "query: count on empty document" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc, "");
     defer doc.deinit(alloc);
@@ -48,9 +44,7 @@ test "query: count on empty document" {
 }
 
 test "query: headings returns all levels" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\# First
@@ -70,9 +64,7 @@ test "query: headings returns all levels" {
 }
 
 test "query: headings filtered by level" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\# H1 A
@@ -107,9 +99,7 @@ test "query: headings filtered by level" {
 }
 
 test "query: heading level values" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\# Title
@@ -129,9 +119,7 @@ test "query: heading level values" {
 }
 
 test "query: links across paragraphs" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\[a](https://a.com)
@@ -150,9 +138,7 @@ test "query: links across paragraphs" {
 }
 
 test "query: links in headings" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\# [Title Link](https://title.com)
@@ -167,9 +153,7 @@ test "query: links in headings" {
 }
 
 test "query: links in blockquotes" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\> [quoted link](https://quoted.com)
@@ -184,9 +168,7 @@ test "query: links in blockquotes" {
 }
 
 test "query: links in list items" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\- [item1](https://one.com)
@@ -201,9 +183,7 @@ test "query: links in list items" {
 }
 
 test "query: no links returns empty" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\Just plain text.
@@ -217,9 +197,7 @@ test "query: no links returns empty" {
 }
 
 test "query: blocks filtered by type" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\# Heading
@@ -244,9 +222,7 @@ test "query: blocks filtered by type" {
 }
 
 test "query: textAt heading[0]" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\# My Title
@@ -262,9 +238,7 @@ test "query: textAt heading[0]" {
 }
 
 test "query: textAt non-heading index" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\Paragraph first.
@@ -284,9 +258,7 @@ test "query: textAt non-heading index" {
 }
 
 test "query: textAt invalid path" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc, "# Hello");
     defer doc.deinit(alloc);
@@ -298,9 +270,7 @@ test "query: textAt invalid path" {
 }
 
 test "query: paragraphsWithInlines emphasis" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\Plain paragraph.
@@ -318,9 +288,7 @@ test "query: paragraphsWithInlines emphasis" {
 }
 
 test "query: paragraphsWithInlines code_span" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\Use `code` here.
@@ -338,9 +306,7 @@ test "query: paragraphsWithInlines code_span" {
 }
 
 test "query: count mixed document" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    const alloc = tst.allocator;
 
     var doc = try parse(alloc,
         \\# Heading

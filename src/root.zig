@@ -86,11 +86,7 @@ pub const chars = struct {
 };
 
 test "enhanced parse and render" {
-    const a = std.testing.allocator;
-    var arena = std.heap.ArenaAllocator.init(a);
-    defer arena.deinit();
-
-    const allocator = arena.allocator();
+    const allocator = std.testing.allocator;
 
     const input =
         \\# Heading
@@ -521,11 +517,7 @@ const embedded_spec_tests =
 
 // Enhanced test with dot notation functionality
 test "enhanced parse and render with dot notation" {
-    const a = std.testing.allocator;
-    var arena = std.heap.ArenaAllocator.init(a);
-    defer arena.deinit();
-
-    const allocator = arena.allocator();
+    const allocator = std.testing.allocator;
 
     const input =
         \\# Heading
@@ -589,6 +581,10 @@ test "enhanced parse and render with dot notation" {
 
 // CommonMark specification compliance test
 test "CommonMark spec compliance" {
+    // The spec runner exercises 655+ test cases; use an arena here for
+    // throughput.  Individual leak-freedom is validated by the unit tests
+    // in test.zig, html.zig, ast_renderer.zig, and query_test.zig which
+    // all run against std.testing.allocator directly.
     var arena = std.heap.ArenaAllocator.init(tst.allocator);
     defer arena.deinit();
 
@@ -634,9 +630,7 @@ test "CommonMark spec compliance" {
 
 // CommonMark specification compliance test
 test "Policy render" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = tst.allocator;
 
     const test_policy =
         \\---

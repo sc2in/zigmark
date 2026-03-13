@@ -11,8 +11,9 @@
 //!     spans, autolinks, etc.
 //!
 //! The public entry point is `parseMarkdown`.  All slice references in
-//! the returned AST point into `input` or into buffers allocated with
-//! the supplied allocator (ideally an `ArenaAllocator`).
+//! the returned AST point into `input` or into owned buffers allocated
+//! with the supplied allocator.  Calling `doc.deinit(allocator)` frees
+//! every allocation the parser made.
 //!
 //! Block-level recognition is driven by the combinators and convenience
 //! wrappers in the public `parsers` namespace.  Inline-level parsing uses
@@ -1214,7 +1215,10 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
                 const alt = try flattenInlineText(allocator, r.text, ref_map);
                 try inlines.append(allocator, .{ .image = .{
                     .alt_text = alt,
-                    .destination = .{ .url = r.url, .title = r.title },
+                    .destination = .{
+                        .url = try allocator.dupe(u8, r.url),
+                        .title = if (r.title) |t| try allocator.dupe(u8, t) else null,
+                    },
                     .link_type = .in_line,
                 } });
                 pos = r.end;
@@ -1243,12 +1247,16 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
             if (tryParseLink(input, pos)) |r| {
                 var nested = try parseInlineElements(allocator, r.text, ref_map);
                 if (containsLink(nested.items)) {
+                    for (nested.items) |*item| item.deinit(allocator);
                     nested.deinit(allocator);
                     try inlines.append(allocator, .{ .text = .{ .content = "[" } });
                     pos += 1;
                     continue;
                 }
-                var link = AST.Link.init(allocator, .{ .url = r.url, .title = r.title }, .in_line);
+                var link = AST.Link.init(allocator, .{
+                    .url = try allocator.dupe(u8, r.url),
+                    .title = if (r.title) |t| try allocator.dupe(u8, t) else null,
+                }, .in_line);
                 defer nested.deinit(allocator);
                 for (nested.items) |item| try link.children.append(allocator, item);
                 try inlines.append(allocator, .{ .link = link });
@@ -1361,7 +1369,10 @@ fn tryParseCodeSpan(allocator: Allocator, input: []const u8, pos: usize) ?struct
 
 fn flattenInlineText(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap) Allocator.Error![]const u8 {
     var inlines = try parseInlineElements(allocator, input, ref_map);
-    defer inlines.deinit(allocator);
+    defer {
+        for (inlines.items) |*item| item.deinit(allocator);
+        inlines.deinit(allocator);
+    }
     var buf = std.ArrayList(u8){};
     for (inlines.items) |item| try flattenInline(allocator, &buf, item);
     return buf.toOwnedSlice(allocator);
@@ -1552,9 +1563,16 @@ fn buildRefLink(
 ) ?InlineParseResult {
     var link = AST.Link.init(allocator, .{ .url = ref.url, .title = ref.title }, link_type);
     var nested = parseInlineElements(allocator, text, rm) catch return null;
-    defer nested.deinit(allocator);
-    if (containsLink(nested.items)) return null;
+    if (containsLink(nested.items)) {
+        // Can't nest links — free the ref-owned url/title and nested inlines.
+        for (nested.items) |*item| item.deinit(allocator);
+        nested.deinit(allocator);
+        allocator.free(ref.url);
+        if (ref.title) |t| allocator.free(t);
+        return null;
+    }
     for (nested.items) |item| link.children.append(allocator, item) catch return null;
+    nested.deinit(allocator);
     return .{ .inline_node = .{ .link = link }, .end = end };
 }
 
@@ -1925,10 +1943,13 @@ fn parseList(
 
         var item = AST.ListItem.init(allocator);
         const content = try item_buf.toOwnedSlice(allocator);
+        defer allocator.free(content);
         if (trimLine(content).len > 0) {
             var inner = init();
             var inner_doc = try inner.parseMarkdownWithRefs(allocator, content, ref_map);
             for (inner_doc.children.items) |block| try item.children.append(allocator, block);
+            // Free the ArrayList backing memory without deiniting moved children.
+            inner_doc.children.deinit(allocator);
             inner_doc.children = std.ArrayList(AST.Block){};
         }
 
@@ -2141,7 +2162,9 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
         // ATX heading
         if (parsers.tryAtxHeading(allocator, raw)) |h| {
             var heading = AST.Heading.init(allocator, h.level);
-            try appendInlines(allocator, &heading.children, h.content, ref_map);
+            const owned_content = try allocator.dupe(u8, h.content);
+            heading.inline_source = owned_content;
+            try appendInlines(allocator, &heading.children, owned_content, ref_map);
             try doc.children.append(allocator, .{ .heading = heading });
             i += 1;
             continue;
@@ -2229,11 +2252,13 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
                 } else break;
             }
             const bq_str = try bq_buf.toOwnedSlice(allocator);
+            defer allocator.free(bq_str);
             var inner = init();
             inner.has_lazy_setext = has_lazy_setext_line;
             var inner_doc = try inner.parseMarkdownWithRefs(allocator, bq_str, ref_map);
             var bq = AST.Blockquote.init(allocator);
             for (inner_doc.children.items) |block| try bq.children.append(allocator, block);
+            inner_doc.children.deinit(allocator);
             inner_doc.children = std.ArrayList(AST.Block){};
             try doc.children.append(allocator, .{ .blockquote = bq });
             continue;
@@ -2280,7 +2305,9 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
         if (parsers.tryFootnoteDef(allocator, t)) |fd| {
             var fn_def = AST.FootnoteDefinition.init(allocator, fd.label);
             var para = AST.Paragraph.init(allocator);
-            try appendInlines(allocator, &para.children, fd.content, ref_map);
+            const fn_pc = try allocator.dupe(u8, fd.content);
+            para.inline_source = fn_pc;
+            try appendInlines(allocator, &para.children, fn_pc, ref_map);
             try fn_def.children.append(allocator, .{ .paragraph = para });
             try doc.children.append(allocator, .{ .footnote_definition = fn_def });
             i += 1;
@@ -2321,6 +2348,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
                 const pc = try allocator.dupe(u8, content);
                 para_buf.deinit(allocator);
                 try appendInlines(allocator, &para.children, pc, ref_map);
+                para.inline_source = pc;
             }
             if (is_setext and para.children.items.len > 0) {
                 const st = trimLine(lines[i]);
@@ -2328,6 +2356,11 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
                 var heading = AST.Heading.init(allocator, level);
                 for (para.children.items) |item| try heading.children.append(allocator, item);
                 para.children.clearRetainingCapacity();
+                // Transfer inline_source ownership: heading text nodes borrow
+                // from pc, so store it in the first child for the heading to
+                // keep alive.  We use heading_source on Heading for this.
+                heading.inline_source = para.inline_source;
+                para.inline_source = null;
                 para.deinit(allocator);
                 try doc.children.append(allocator, .{ .heading = heading });
                 i += 1;

@@ -5,9 +5,8 @@ const zigmark = @import("zigmark");
 
 pub fn main() !void {
     // Use a page allocator — the spec runner is short-lived and
-    // runCommonMarkSpecTests leaks intermediate strings when not
-    // backed by an arena.  We don't care about reclaiming them
-    // because the process exits immediately after.
+    // runs many parse/render cycles.  A page allocator avoids the
+    // overhead of tracking individual allocations.
     const allocator = std.heap.page_allocator;
 
     var args = try std.process.argsWithAllocator(allocator);

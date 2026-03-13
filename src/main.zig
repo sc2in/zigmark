@@ -11,11 +11,9 @@ pub fn main() !void {
     defer _ = gpa_impl.deinit();
     const gpa = gpa_impl.allocator();
 
-    // Use an arena for parsing since the parser leaks some internal
-    // allocations that doc.deinit does not cover.
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-    const alloc = arena.allocator();
+    // All allocations are tracked by the GPA; doc.deinit() frees
+    // everything the parser and renderers allocate.
+    const alloc = gpa;
 
     // ── CLI definition ───────────────────────────────────────────────────────
     const params = comptime clap.parseParamsComptime(
@@ -87,16 +85,18 @@ pub fn main() !void {
             };
         }
     };
+    defer alloc.free(input);
 
     // ── Resolve format ───────────────────────────────────────────────────────
     const format: []const u8 = if (res.args.format) |f| f else "html";
 
     // ── Parse ────────────────────────────────────────────────────────────────
     var parser = zigmark.Parser.init();
-    const doc = parser.parseMarkdown(alloc, input) catch |err| {
+    var doc = parser.parseMarkdown(alloc, input) catch |err| {
         std.debug.print("error: failed to parse markdown: {}\n", .{err});
         return err;
     };
+    defer doc.deinit(alloc);
 
     // ── Output ───────────────────────────────────────────────────────────────
     const out_file = getOutputFile(res.args.output);
@@ -109,6 +109,7 @@ pub fn main() !void {
             std.debug.print("error: failed to render AST: {}\n", .{err});
             return err;
         };
+        defer alloc.free(ast_output);
         writer.interface.writeAll(ast_output) catch {};
         writer.interface.flush() catch {};
     } else if (std.mem.eql(u8, format, "html")) {
@@ -116,6 +117,7 @@ pub fn main() !void {
             std.debug.print("error: failed to render HTML: {}\n", .{err});
             return err;
         };
+        defer alloc.free(html);
         writer.interface.writeAll(html) catch {};
         writer.interface.flush() catch {};
     } else {

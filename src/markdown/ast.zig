@@ -275,6 +275,9 @@ pub const Inline = union(enum) {
 /// as other kinds of blocks (CommonMark §4.8).
 pub const Paragraph = struct {
     children: std.ArrayList(Inline),
+    /// Owned copy of the paragraph source text that inline `Text` nodes
+    /// borrow from.  Freed in `deinit` after all children are released.
+    inline_source: ?[]const u8 = null,
 
     /// Create an empty paragraph with no inline children.
     pub fn init(allocator: std.mem.Allocator) Paragraph {
@@ -289,6 +292,7 @@ pub const Paragraph = struct {
             child.deinit(allocator);
         }
         self.children.deinit(allocator);
+        if (self.inline_source) |src| allocator.free(src);
     }
 };
 
@@ -300,6 +304,9 @@ pub const Paragraph = struct {
 pub const Heading = struct {
     level: u8,
     children: std.ArrayList(Inline),
+    /// Owned copy of the inline source text (used by setext headings whose
+    /// inline nodes borrow from a paragraph's duped content buffer).
+    inline_source: ?[]const u8 = null,
 
     /// Create a heading at the given `level` with no inline children.
     pub fn init(allocator: std.mem.Allocator, level: u8) Heading {
@@ -315,6 +322,7 @@ pub const Heading = struct {
             child.deinit(allocator);
         }
         self.children.deinit(allocator);
+        if (self.inline_source) |src| allocator.free(src);
     }
 };
 
@@ -466,7 +474,9 @@ pub const HtmlBlock = struct {
     pub fn init(content: []const u8) HtmlBlock {
         return HtmlBlock{ .content = content };
     }
-    pub fn deinit(_: HtmlBlock, _: Allocator) void {}
+    pub fn deinit(self: *HtmlBlock, allocator: Allocator) void {
+        if (self.content.len > 0) allocator.free(self.content);
+    }
 };
 
 /// A footnote definition (`[^label]: …`).
@@ -565,6 +575,9 @@ pub const CodeSpan = struct {
     pub fn init(content: []const u8) CodeSpan {
         return CodeSpan{ .content = content };
     }
+    pub fn deinit(self: *CodeSpan, allocator: Allocator) void {
+        if (self.content.len > 0) allocator.free(self.content);
+    }
 };
 
 /// The destination (URL) and optional title of a link or image.
@@ -624,6 +637,8 @@ pub const Link = struct {
             child.deinit(allocator);
         }
         self.children.deinit(allocator);
+        if (self.destination.url.len > 0) allocator.free(self.destination.url);
+        if (self.destination.title) |t| if (t.len > 0) allocator.free(t);
     }
 };
 
@@ -645,6 +660,11 @@ pub const Image = struct {
             .destination = destination,
             .link_type = link_type,
         };
+    }
+    pub fn deinit(self: *Image, allocator: Allocator) void {
+        if (self.alt_text.len > 0) allocator.free(self.alt_text);
+        if (self.destination.url.len > 0) allocator.free(self.destination.url);
+        if (self.destination.title) |t| if (t.len > 0) allocator.free(t);
     }
 };
 

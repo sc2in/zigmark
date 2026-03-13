@@ -782,11 +782,9 @@ const EntryMap = [_]Entry{
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 fn ok(s: []const u8, expected: []const u8) !void {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+    const allocator = tst.allocator;
     var parser = Parser.init();
-    defer parser.deinit(tst.allocator);
+    defer parser.deinit(allocator);
     var res = try parser.parseMarkdown(allocator, s);
     defer res.deinit(allocator);
     const out = try render(allocator, res);
