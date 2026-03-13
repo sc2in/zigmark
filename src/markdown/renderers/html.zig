@@ -114,6 +114,44 @@ fn isAsciiPunctuation(c: u8) bool {
         (c >= '[' and c <= '`') or (c >= '{' and c <= '~');
 }
 
+/// Write a URL literally (no backslash escape processing), with percent-encoding
+/// for characters that need it. Used for autolinks where backslash is NOT an
+/// escape character.
+fn writeUrlEncodedLiteral(writer: anytype, s: []const u8) !void {
+    var i: usize = 0;
+    while (i < s.len) {
+        const c = s[i];
+        if (c == '&') {
+            try writer.writeAll("&amp;");
+        } else if (c == '"') {
+            try writer.writeAll("%22");
+        } else if (c == '\'') {
+            try writer.writeAll("%27");
+        } else if (c == ' ') {
+            try writer.writeAll("%20");
+        } else if (c == '[') {
+            try writer.writeAll("%5B");
+        } else if (c == ']') {
+            try writer.writeAll("%5D");
+        } else if (c == '\\') {
+            try writer.writeAll("%5C");
+        } else if (c == '`') {
+            try writer.writeAll("%60");
+        } else if (c == '%' and i + 2 < s.len and isHexDigit(s[i + 1]) and isHexDigit(s[i + 2])) {
+            try writer.writeByte('%');
+            try writer.writeByte(s[i + 1]);
+            try writer.writeByte(s[i + 2]);
+            i += 3;
+            continue;
+        } else if (c >= 0x80) {
+            try writer.print("%{X:0>2}", .{c});
+        } else {
+            try writer.writeByte(c);
+        }
+        i += 1;
+    }
+}
+
 /// Write text with backslash escape processing + HTML escaping.
 /// Backslash-escaped ASCII punctuation chars have the backslash removed.
 fn writeEscapedWithBackslash(writer: anytype, s: []const u8) !void {
@@ -371,7 +409,7 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
     switch (item) {
         .text => |t| try writeEscapedWithEntities(writer, t.content),
         .soft_break => try writer.writeByte('\n'),
-        .hard_break => try writer.writeAll("<br />"),
+        .hard_break => try writer.writeAll("<br />\n"),
         .code_span => |cs| {
             try writer.writeAll("<code>");
             try writeEscaped(writer, cs.content);
@@ -416,13 +454,13 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
         .autolink => |al| {
             if (al.is_email) {
                 try writer.writeAll("<a href=\"mailto:");
-                try writeUrlEncoded(writer, al.url);
+                try writeUrlEncodedLiteral(writer, al.url);
                 try writer.writeAll("\">");
                 try writeEscaped(writer, al.url);
                 try writer.writeAll("</a>");
             } else {
                 try writer.writeAll("<a href=\"");
-                try writeUrlEncoded(writer, al.url);
+                try writeUrlEncodedLiteral(writer, al.url);
                 try writer.writeAll("\">");
                 try writeEscaped(writer, al.url);
                 try writer.writeAll("</a>");
@@ -458,13 +496,16 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
         .fenced_code_block => |fcb| {
             if (fcb.language) |lang| {
                 try writer.writeAll("<pre><code class=\"language-");
-                try writeEscapedWithEntities(writer, lang);
+                try writeEscapedTitleWithEntities(writer, lang);
                 try writer.writeAll("\">");
             } else {
                 try writer.writeAll("<pre><code>");
             }
-            try writeEscaped(writer, fcb.content);
-            try writer.writeAll("\n</code></pre>\n");
+            if (fcb.content.len > 0) {
+                try writeEscaped(writer, fcb.content);
+                try writer.writeAll("\n");
+            }
+            try writer.writeAll("</code></pre>\n");
         },
         .blockquote => |bq| {
             try writer.writeAll("<blockquote>\n");

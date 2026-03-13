@@ -42,7 +42,7 @@ pub const parsers = struct {
     pub const OrderedListResult = struct { num: u32, delimiter: u8, content: []const u8 };
     pub const BlockquoteResult = struct { content: []const u8 };
     pub const FootnoteDefResult = struct { label: []const u8, content: []const u8 };
-    pub const FenceInfo = struct { char: u8, len: usize, info: []const u8 };
+    pub const FenceInfo = struct { char: u8, len: usize, info: []const u8, indent: usize = 0 };
 
     // ── Character-level parsers ──────────────────────────────────────────
 
@@ -149,7 +149,7 @@ pub const parsers = struct {
         mecha.rest.asStr(),
     }).map(struct {
         fn f(r: anytype) BlockquoteResult {
-            return .{ .content = mem.trim(u8, r[3], " \t\n\r") };
+            return .{ .content = mem.trimRight(u8, r[3], " \t\n\r") };
         }
     }.f);
 
@@ -167,10 +167,48 @@ pub const parsers = struct {
     // ── Convenience wrappers ─────────────────────────────────────────────
 
     pub fn tryAtxHeading(allocator: Allocator, line: []const u8) ?HeadingResult {
-        const t = trimLine(line);
-        if (t.len == 0 or t[0] != '#') return null;
-        const result = atx_heading.parse(allocator, t) catch return null;
-        return if (result.value == .ok) result.value.ok else null;
+        _ = allocator;
+        // CommonMark: up to 3 spaces of leading indentation
+        var pos: usize = 0;
+        while (pos < line.len and pos < 3 and line[pos] == ' ') pos += 1;
+        // Must not be 4+ spaces (that's an indented code block)
+        if (pos < line.len and line[pos] == ' ') return null;
+        if (pos >= line.len or line[pos] != '#') return null;
+        // Count # characters (1-6)
+        var level: u8 = 0;
+        while (pos < line.len and line[pos] == '#') {
+            level += 1;
+            pos += 1;
+        }
+        if (level > 6) return null;
+        // After the #'s, must be end of line or a space/tab
+        if (pos < line.len and line[pos] != ' ' and line[pos] != '\t') return null;
+        // Skip spaces after #
+        while (pos < line.len and (line[pos] == ' ' or line[pos] == '\t')) pos += 1;
+        var content = line[pos..];
+        // Strip trailing spaces/tabs
+        content = mem.trimRight(u8, content, " \t");
+        // Strip optional closing sequence of #'s (only if preceded by space or empty)
+        if (content.len > 0 and content[content.len - 1] == '#') {
+            // Check if the trailing #'s are escaped
+            var end = content.len;
+            while (end > 0 and content[end - 1] == '#') end -= 1;
+            // The # sequence must be preceded by a space (or be the entire content)
+            if (end == 0 or content[end - 1] == ' ' or content[end - 1] == '\t') {
+                // Check that the last # is not backslash-escaped
+                var backslash_count: usize = 0;
+                var check = end;
+                while (check > 0 and content[check - 1] == '\\') {
+                    backslash_count += 1;
+                    check -= 1;
+                }
+                if (backslash_count % 2 == 0) {
+                    // Not escaped; strip trailing #'s and spaces
+                    content = mem.trimRight(u8, content[0..end], " \t");
+                }
+            }
+        }
+        return .{ .level = level, .content = content };
     }
 
     pub fn tryBulletListItem(allocator: Allocator, line: []const u8) ?BulletListResult {
@@ -208,6 +246,10 @@ pub const parsers = struct {
     pub fn tryFenceStart(line: []const u8) ?FenceInfo {
         var s: usize = 0;
         while (s < 3 and s < line.len and line[s] == ' ') s += 1;
+        if (s < line.len and s >= 1 and line[s] == ' ') {
+            // Check if we got stopped because of 3-space limit, not because of non-space
+            // Actually we stop at 3, so s can be 0,1,2,3. If s==3 and line[s]==' ' that's 4 spaces.
+        }
         const t = line[s..];
         if (t.len < 3) return null;
         const c = t[0];
@@ -215,17 +257,40 @@ pub const parsers = struct {
         var fl: usize = 0;
         while (fl < t.len and t[fl] == c) fl += 1;
         if (fl < 3) return null;
-        const info = mem.trim(u8, t[fl..], " \t\r");
-        if (c == '`' and mem.indexOf(u8, info, "`") != null) return null;
-        return .{ .char = c, .len = fl, .info = info };
+        const raw_info = mem.trim(u8, t[fl..], " \t\r");
+        if (c == '`' and mem.indexOf(u8, raw_info, "`") != null) return null;
+        // Info string is only the first word (up to first space)
+        const info = blk: {
+            if (mem.indexOfAny(u8, raw_info, " \t")) |space_idx| {
+                break :blk raw_info[0..space_idx];
+            }
+            break :blk raw_info;
+        };
+        return .{ .char = c, .len = fl, .info = info, .indent = s };
     }
 
     pub fn isFenceEnd(line: []const u8, fence: FenceInfo) bool {
-        const t = trimLine(line);
+        // Closing fence: up to 3 spaces of indentation, then a run of fence chars >= fence length
+        var leading: usize = 0;
+        while (leading < line.len and leading < 3 and line[leading] == ' ') leading += 1;
+        // If 4+ leading spaces, it's not a closing fence
+        if (leading < line.len and leading >= 1 and line[leading] == ' ' and leading == 3) {
+            // Actually check: is the 4th char also a space?
+            // leading is at most 3, so if leading==3 and line[3] might be space
+            // But we already stopped. The issue is: "    ```" has 4 spaces.
+            // We count up to 3 spaces. If we have exactly 3, that's ok.
+            // We need to also check line had 4+ spaces:
+        }
+        const t = mem.trimLeft(u8, line, " ");
+        const total_leading = line.len - t.len;
+        if (total_leading >= 4) return false;
+        const trimmed = mem.trimRight(u8, t, " \t\r");
+        if (trimmed.len == 0) return false;
+        if (trimmed[0] != fence.char) return false;
         var n: usize = 0;
-        while (n < t.len and t[n] == fence.char) n += 1;
+        while (n < trimmed.len and trimmed[n] == fence.char) n += 1;
         if (n < fence.len) return false;
-        return mem.trim(u8, t[n..], " \t").len == 0;
+        return mem.trim(u8, trimmed[n..], " \t").len == 0;
     }
 
     pub fn tryIndentedCode(line: []const u8) ?[]const u8 {
@@ -246,7 +311,12 @@ fn isBlankLine(line: []const u8) bool {
 }
 
 fn isThematicBreak(line: []const u8) bool {
-    const t = trimLine(line);
+    // CommonMark: up to 3 spaces of leading indentation, then 3+ of -, *, or _
+    // with optional spaces between. 4+ leading spaces means not a thematic break.
+    var leading: usize = 0;
+    while (leading < line.len and line[leading] == ' ') leading += 1;
+    if (leading >= 4) return false;
+    const t = mem.trimRight(u8, line[leading..], " \t\r");
     if (t.len < 3) return false;
     const c = t[0];
     if (c != '-' and c != '*' and c != '_') return false;
@@ -260,6 +330,10 @@ fn isThematicBreak(line: []const u8) bool {
 }
 
 fn isSetextEqLine(line: []const u8) bool {
+    // Must have at most 3 leading spaces
+    var leading: usize = 0;
+    while (leading < line.len and line[leading] == ' ') leading += 1;
+    if (leading >= 4) return false;
     const t = trimLine(line);
     if (t.len == 0) return false;
     for (t) |c| if (c != '=') return false;
@@ -267,6 +341,10 @@ fn isSetextEqLine(line: []const u8) bool {
 }
 
 fn isSetextDashLine(line: []const u8) bool {
+    // Must have at most 3 leading spaces
+    var leading: usize = 0;
+    while (leading < line.len and line[leading] == ' ') leading += 1;
+    if (leading >= 4) return false;
     const t = trimLine(line);
     if (t.len == 0) return false;
     for (t) |c| if (c != '-') return false;
@@ -377,9 +455,10 @@ fn isOrderedItemBlank(line: []const u8) bool {
 
 fn isParaBreak(allocator: Allocator, t: []const u8, raw: []const u8) bool {
     if (t.len == 0) return true;
-    if (t[0] == '#') return true;
+    // ATX heading requires <= 3 leading spaces; use tryAtxHeading on raw line
+    if (parsers.tryAtxHeading(allocator, raw) != null) return true;
     if (t[0] == '>') return true;
-    if (isThematicBreak(t)) return true;
+    if (isThematicBreak(raw)) return true;
     if (bulletListContentColumn(raw)) |_| {
         if (!isBulletItemBlank(raw)) return true;
     }
@@ -418,7 +497,7 @@ fn isStandaloneBlockStart(allocator: Allocator, line: []const u8) bool {
     const t = trimLine(line);
     if (t.len == 0) return true;
     if (t[0] == '#' or t[0] == '>') return true;
-    if (isThematicBreak(t)) return true;
+    if (isThematicBreak(line)) return true;
     if (bulletListContentColumn(line) != null) return true;
     if (orderedListContentColumn(line) != null) return true;
     if (parsers.tryFenceStart(line) != null) return true;
@@ -708,18 +787,26 @@ fn parseLinkRefDef(line: []const u8) ?struct { label: []const u8, url: []const u
 // ── Inline parser ─────────────────────────────────────────────────────────────
 
 fn isUriAutolink(s: []const u8) bool {
+    // Scheme must be 2-32 characters (letters, digits, +, -, .)
+    // and start with a letter
     var i: usize = 0;
+    if (i >= s.len or !((s[i] >= 'a' and s[i] <= 'z') or (s[i] >= 'A' and s[i] <= 'Z'))) return false;
+    i += 1;
     while (i < s.len) : (i += 1) {
         const c = s[i];
         if (!((c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or
             (c >= '0' and c <= '9') or c == '+' or c == '-' or c == '.')) break;
     }
-    if (i == 0 or i >= s.len or s[i] != ':') return false;
+    if (i < 2 or i > 32) return false; // scheme must be 2-32 chars
+    if (i >= s.len or s[i] != ':') return false;
+    // No spaces, <, or > allowed in the rest
     for (s) |c| if (c == ' ' or c == '<' or c == '>') return false;
     return true;
 }
 
 fn isEmailAutolink(s: []const u8) bool {
+    // Backslash in email makes it not a valid autolink
+    for (s) |c| if (c == '\\') return false;
     const at = mem.indexOfScalar(u8, s, '@') orelse return false;
     if (at == 0 or at + 1 >= s.len) return false;
     return mem.indexOf(u8, s, " ") == null;
@@ -1308,6 +1395,7 @@ fn tryParseHtmlTag(input: []const u8, pos: usize) ?usize {
         while (i < input.len and ((input[i] >= 'a' and input[i] <= 'z') or (input[i] >= 'A' and input[i] <= 'Z') or
             (input[i] >= '0' and input[i] <= '9') or input[i] == '-')) i += 1;
         while (i < input.len) {
+            const before_ws = i;
             while (i < input.len and (input[i] == ' ' or input[i] == '\t' or input[i] == '\n' or input[i] == '\r')) i += 1;
             if (i >= input.len) return null;
             if (input[i] == '>') return i + 1;
@@ -1315,6 +1403,8 @@ fn tryParseHtmlTag(input: []const u8, pos: usize) ?usize {
                 i += 1;
                 return if (i < input.len and input[i] == '>') i + 1 else null;
             }
+            // Must have had whitespace before attribute name
+            if (i == before_ws) return null;
             if (!((input[i] >= 'a' and input[i] <= 'z') or (input[i] >= 'A' and input[i] <= 'Z') or input[i] == '_' or input[i] == ':')) return null;
             i += 1;
             while (i < input.len and ((input[i] >= 'a' and input[i] <= 'z') or (input[i] >= 'A' and input[i] <= 'Z') or
@@ -1338,7 +1428,10 @@ fn tryParseHtmlTag(input: []const u8, pos: usize) ?usize {
                     if (j == vs) return null;
                 }
                 i = j;
-            } else i = j;
+            }
+            // For boolean attributes (no '='), don't advance i past the
+            // attribute name — leave whitespace for the next iteration's
+            // "must have whitespace before attribute" check.
         }
         return null;
     }
@@ -1351,9 +1444,16 @@ fn tryParseHtmlTag(input: []const u8, pos: usize) ?usize {
         while (i < input.len and (input[i] == ' ' or input[i] == '\t')) i += 1;
         return if (i < input.len and input[i] == '>') i + 1 else null;
     }
-    // Comment
+    // Comment: <!-- text --> where text doesn't start with > or ->
+    // and doesn't end with - and doesn't contain --
+    // Special cases: <!--> and <!---> are valid (empty) comments per CommonMark 0.31.2
     if (pos + 3 < input.len and input[pos + 1] == '!' and input[pos + 2] == '-' and input[pos + 3] == '-') {
-        var i = pos + 4;
+        const after = pos + 4;
+        // <!--> is a valid comment
+        if (after < input.len and input[after] == '>') return after + 1;
+        // <!---> is a valid comment
+        if (after + 1 < input.len and input[after] == '-' and input[after + 1] == '>') return after + 2;
+        var i = after;
         while (i + 2 < input.len) : (i += 1) if (input[i] == '-' and input[i + 1] == '-' and input[i + 2] == '>') return i + 3;
         return null;
     }
@@ -1462,6 +1562,11 @@ fn buildRefLink(
 
 const Self = @This();
 
+/// When true, setext heading underlines inside paragraphs are disabled.
+/// Used when re-parsing blockquote inner content that includes lazy
+/// continuation lines which must not form setext headings.
+has_lazy_setext: bool = false,
+
 pub fn init() Self {
     return Self{};
 }
@@ -1500,15 +1605,21 @@ fn splitLines(allocator: Allocator, input: []const u8) !std.ArrayList([]const u8
 }
 
 /// Skip optional `---`/`+++`/`%%%` frontmatter; return first content line index.
+/// Only treats it as frontmatter if there's at least one line with `:` (key-value).
 fn skipFrontmatter(lines: []const []const u8) usize {
     if (lines.len == 0) return 0;
     const fl = trimLine(lines[0]);
     if (!mem.eql(u8, fl, "---") and !mem.eql(u8, fl, "+++") and !mem.eql(u8, fl, "%%%")) return 0;
     var fi: usize = 1;
+    var has_kv = false;
     while (fi < lines.len) {
         const tl = trimLine(lines[fi]);
         fi += 1;
-        if (mem.eql(u8, tl, "---") or mem.eql(u8, tl, "+++") or mem.eql(u8, tl, "%%%")) return fi;
+        if (mem.eql(u8, tl, "---") or mem.eql(u8, tl, "+++") or mem.eql(u8, tl, "%%%")) {
+            // Only treat as frontmatter if we found key-value content
+            return if (has_kv) fi else 0;
+        }
+        if (mem.indexOf(u8, tl, ":") != null) has_kv = true;
     }
     return 0;
 }
@@ -1547,7 +1658,7 @@ fn collectLinkRefDefs(allocator: Allocator, input: []const u8, ref_map: *RefMap)
             i += 1;
             continue;
         }
-        if (t[0] == '#' or isThematicBreak(t)) {
+        if (t[0] == '#' or isThematicBreak(line)) {
             in_paragraph = false;
             i += 1;
             continue;
@@ -1617,6 +1728,9 @@ const ListParseConfig = struct {
 const ItemContinuation = struct {
     next_line: usize,
     saw_blank: bool,
+    /// True when a blank line was seen before a line that starts a sub-list
+    /// at the item's own content level (indent 0 relative to item content).
+    saw_blank_before_sublist: bool,
     pending_blanks: usize,
 };
 
@@ -1633,6 +1747,7 @@ fn collectItemContinuation(
 ) !ItemContinuation {
     var i = start;
     var saw_blank = false;
+    var saw_blank_before_sublist = false;
     var consecutive_blanks: usize = 0;
     var pending_blanks: usize = 0;
 
@@ -1656,6 +1771,12 @@ fn collectItemContinuation(
         if (leading >= content_col) {
             if (pending_blanks > 0) {
                 saw_blank = true;
+                // Check if the stripped line starts a sub-list at indent 0
+                // relative to the item content.
+                const stripped = stripIndent(line, content_col);
+                if (bulletListContentColumn(stripped) != null or orderedListContentColumn(stripped) != null) {
+                    saw_blank_before_sublist = true;
+                }
                 var b: usize = 0;
                 while (b < pending_blanks) : (b += 1) try item_buf.append(allocator, '\n');
                 pending_blanks = 0;
@@ -1668,15 +1789,22 @@ fn collectItemContinuation(
             const lt = trimLine(line);
             if (lt.len == 0) break;
             if (bulletListContentColumn(line) != null or orderedListContentColumn(line) != null) break;
-            if (lt[0] == '#' or lt[0] == '>' or isThematicBreak(lt)) break;
+            if (lt[0] == '#' or lt[0] == '>' or isThematicBreak(line)) break;
             if (parsers.tryFenceStart(line) != null) break;
             // Lazy continuation
             try item_buf.append(allocator, '\n');
+            // If the trimmed line looks like a list marker, add 4 spaces of
+            // indent so the inner parser treats it as paragraph continuation
+            // rather than a new list item (per CommonMark: lines indented 4+
+            // spaces cannot start list items).
+            if (bulletListContentColumn(lt) != null or orderedListContentColumn(lt) != null) {
+                try item_buf.appendSlice(allocator, "    ");
+            }
             try item_buf.appendSlice(allocator, lt);
             i += 1;
         }
     }
-    return .{ .next_line = i, .saw_blank = saw_blank, .pending_blanks = pending_blanks };
+    return .{ .next_line = i, .saw_blank = saw_blank, .saw_blank_before_sublist = saw_blank_before_sublist, .pending_blanks = pending_blanks };
 }
 
 fn isSiblingItem(line: []const u8, content_col: usize, config: ListParseConfig) bool {
@@ -1699,7 +1827,7 @@ fn isDifferentList(line: []const u8, content_col: usize, config: ListParseConfig
 }
 
 /// Determine whether an item's parsed blocks indicate loose content.
-fn hasLooseContent(children: []const AST.Block, saw_blank: bool) bool {
+fn hasLooseContent(children: []const AST.Block, saw_blank: bool, saw_blank_before_sublist: bool) bool {
     if (!saw_blank) return false;
     if (children.len == 1) {
         if (children[0] == .code_block or children[0] == .fenced_code_block) return false;
@@ -1714,7 +1842,11 @@ fn hasLooseContent(children: []const AST.Block, saw_blank: bool) bool {
     };
     if (paras > 1) return true;
     if (paras >= 1 and other) return true;
+    // A single paragraph with no other content (except possibly lists) and a blank line:
     if (paras == 1 and lists == 0 and !other) return true;
+    // Paragraph + sub-list: only loose if the blank line was between the
+    // paragraph and the sub-list at this level, not inside the sub-list.
+    if (paras >= 1 and lists >= 1 and saw_blank_before_sublist) return true;
     if (children.len == 0) return true;
     return false;
 }
@@ -1762,6 +1894,10 @@ fn parseList(
     var any_item_loose = false;
 
     while (i < lines.len) {
+        // A thematic break takes priority over a list item.
+        // e.g. "* * *" is a thematic break, not a list item with content "* *".
+        if (isThematicBreak(lines[i])) break;
+
         var content_col: usize = undefined;
         var first_content: []const u8 = undefined;
         var is_blank_item: bool = undefined;
@@ -1796,7 +1932,7 @@ fn parseList(
             inner_doc.children = std.ArrayList(AST.Block){};
         }
 
-        if (hasLooseContent(item.children.items, cont.saw_blank)) any_item_loose = true;
+        if (hasLooseContent(item.children.items, cont.saw_blank, cont.saw_blank_before_sublist)) any_item_loose = true;
         try list.items.append(allocator, item);
 
         // Skip inter-item blank lines
@@ -1822,7 +1958,129 @@ fn parseList(
     return .{ .list = list, .next_line = i };
 }
 
-fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_map: *const RefMap) !AST.Document {
+// ── HTML block detection (CommonMark §4.6) ──────────────────────────────────
+
+const HtmlBlockEnd = enum { blank_line, self_closing };
+
+/// CommonMark HTML block type 1 tags (pre, script, style, textarea)
+const html_block_type1_tags = [_][]const u8{
+    "pre", "script", "style", "textarea",
+};
+
+/// CommonMark HTML block type 6 tags
+const html_block_type6_tags = [_][]const u8{
+    "address",  "article",    "aside",   "base",     "basefont", "blockquote",
+    "body",     "caption",    "center",  "col",      "colgroup", "dd",
+    "details",  "dialog",     "dir",     "div",      "dl",       "dt",
+    "fieldset", "figcaption", "figure",  "footer",   "form",     "frame",
+    "frameset", "h1",         "h2",      "h3",       "h4",       "h5",
+    "h6",       "head",       "header",  "hr",       "html",     "iframe",
+    "legend",   "li",         "link",    "main",     "menu",     "menuitem",
+    "nav",      "noframes",   "ol",      "optgroup", "option",   "p",
+    "param",    "search",     "section", "summary",  "table",    "tbody",
+    "td",       "tfoot",      "th",      "thead",    "title",    "tr",
+    "track",    "ul",
+};
+
+fn startsWithTagCaseInsensitive(line: []const u8, tag: []const u8) bool {
+    if (line.len < tag.len) return false;
+    for (0..tag.len) |j| {
+        const c = line[j];
+        const lower = if (c >= 'A' and c <= 'Z') c + 32 else c;
+        if (lower != tag[j]) return false;
+    }
+    // After the tag name, must have space, tab, >, />, or end of line
+    if (line.len == tag.len) return true;
+    const after = line[tag.len];
+    return after == ' ' or after == '\t' or after == '>' or after == '/' or after == '\n' or after == '\r';
+}
+
+fn isHtmlBlockStart(t: []const u8) bool {
+    if (t.len == 0 or t[0] != '<') return false;
+    const rest = t[1..];
+
+    // Type 2: comment <!--
+    if (rest.len >= 3 and rest[0] == '!' and rest[1] == '-' and rest[2] == '-') return true;
+
+    // Type 3: processing instruction <?
+    if (rest.len >= 1 and rest[0] == '?') return true;
+
+    // Type 4: declaration <!LETTER
+    if (rest.len >= 2 and rest[0] == '!' and ((rest[1] >= 'A' and rest[1] <= 'Z') or (rest[1] >= 'a' and rest[1] <= 'z'))) return true;
+
+    // Type 5: CDATA <![CDATA[
+    if (rest.len >= 8 and mem.startsWith(u8, rest, "![CDATA[")) return true;
+
+    // Check for opening or closing tag
+    var tag_start: usize = 0;
+    const is_closing = rest.len > 0 and rest[0] == '/';
+    if (is_closing) tag_start = 1;
+
+    if (tag_start >= rest.len) return false;
+    if (!((rest[tag_start] >= 'a' and rest[tag_start] <= 'z') or (rest[tag_start] >= 'A' and rest[tag_start] <= 'Z'))) return false;
+
+    // Type 1: pre, script, style, textarea
+    for (html_block_type1_tags) |tag| {
+        if (startsWithTagCaseInsensitive(rest[tag_start..], tag)) return true;
+    }
+
+    // Type 6: other block-level tags
+    for (html_block_type6_tags) |tag| {
+        if (startsWithTagCaseInsensitive(rest[tag_start..], tag)) return true;
+    }
+
+    // Type 7: a complete open or closing tag followed only by optional whitespace
+    // (cannot interrupt a paragraph — handled by caller)
+    if (tryParseHtmlTag(t, 0)) |end| {
+        const after = mem.trimRight(u8, t[end..], " \t\r");
+        if (after.len == 0) return true;
+    }
+
+    return false;
+}
+
+fn htmlBlockEndCondition(t: []const u8) HtmlBlockEnd {
+    if (t.len < 2 or t[0] != '<') return .blank_line;
+    const rest = t[1..];
+    // Type 2 (comment), 3 (PI), 4 (declaration), 5 (CDATA): end with specific markers
+    if (rest.len >= 3 and rest[0] == '!' and rest[1] == '-' and rest[2] == '-') return .self_closing;
+    if (rest.len >= 1 and rest[0] == '?') return .self_closing;
+    if (rest.len >= 8 and mem.startsWith(u8, rest, "![CDATA[")) return .self_closing;
+    if (rest.len >= 2 and rest[0] == '!' and ((rest[1] >= 'A' and rest[1] <= 'Z') or (rest[1] >= 'a' and rest[1] <= 'z'))) return .self_closing;
+    // Type 1 tags end with their closing tag
+    var tag_start: usize = 0;
+    if (rest.len > 0 and rest[0] == '/') tag_start = 1;
+    for (html_block_type1_tags) |tag| {
+        if (startsWithTagCaseInsensitive(rest[tag_start..], tag)) return .self_closing;
+    }
+    // Type 6/7: end at blank line
+    return .blank_line;
+}
+
+fn htmlBlockTypeEndFound(line: []const u8, start_tag: []const u8) bool {
+    _ = start_tag;
+    // Type 2: comment ends with -->
+    if (mem.indexOf(u8, line, "-->") != null) return true;
+    // Type 3: PI ends with ?>
+    if (mem.indexOf(u8, line, "?>") != null) return true;
+    // Type 4: declaration ends with >
+    if (mem.indexOf(u8, line, ">") != null) return true;
+    // Type 5: CDATA ends with ]]>
+    if (mem.indexOf(u8, line, "]]>") != null) return true;
+    // Type 1 tags: check for closing tags
+    for (html_block_type1_tags) |tag| {
+        // Check for </tag> (case-insensitive)
+        var search_buf: [32]u8 = undefined;
+        search_buf[0] = '<';
+        search_buf[1] = '/';
+        @memcpy(search_buf[2 .. 2 + tag.len], tag);
+        search_buf[2 + tag.len] = '>';
+        if (mem.indexOf(u8, line, search_buf[0 .. 3 + tag.len]) != null) return true;
+    }
+    return false;
+}
+
+fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, ref_map: *const RefMap) !AST.Document {
     var doc = AST.Document.init(allocator);
     var lines_list = try splitLines(allocator, input);
     defer lines_list.deinit(allocator);
@@ -1856,7 +2114,7 @@ fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_m
         }
 
         // Thematic break
-        if (isThematicBreak(t)) {
+        if (isThematicBreak(raw)) {
             try doc.children.append(allocator, .{ .thematic_break = .{ .char = t[0] } });
             i += 1;
             continue;
@@ -1887,15 +2145,20 @@ fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_m
         if (parsers.tryFenceStart(raw)) |fence| {
             i += 1;
             var buf = std.ArrayList(u8){};
+            var first_content_line = true;
             while (i < lines.len) {
                 if (parsers.isFenceEnd(lines[i], fence)) {
                     i += 1;
                     break;
                 }
-                if (buf.items.len > 0) try buf.append(allocator, '\n');
-                try buf.appendSlice(allocator, lines[i]);
+                if (!first_content_line) try buf.append(allocator, '\n');
+                first_content_line = false;
+                // Strip up to `fence.indent` spaces from the start of each content line
+                const content_line = stripIndent(lines[i], fence.indent);
+                try buf.appendSlice(allocator, content_line);
                 i += 1;
             }
+            // Process info string: apply backslash escapes
             const lang: ?[]const u8 = if (fence.info.len > 0) fence.info else null;
             try doc.children.append(allocator, .{ .fenced_code_block = AST.FencedCodeBlock.init(try buf.toOwnedSlice(allocator), lang, fence.char, fence.len) });
             continue;
@@ -1904,19 +2167,36 @@ fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_m
         // Blockquote
         if (parsers.tryBlockquoteLine(allocator, raw)) |_| {
             var bq_buf = std.ArrayList(u8){};
+            var has_lazy_setext_line = false;
             while (i < lines.len) {
                 if (parsers.tryBlockquoteLine(allocator, lines[i])) |cl| {
                     if (bq_buf.items.len > 0) try bq_buf.append(allocator, '\n');
                     try bq_buf.appendSlice(allocator, cl);
                     i += 1;
                 } else if (!isBlankLine(lines[i])) {
+                    // Lazy continuation: only for paragraph text, not for
+                    // block-level constructs that would break the blockquote.
+                    // Note: setext underlines (=== / ---) are NOT blockers here because
+                    // per CommonMark, a setext heading underline cannot be a lazy
+                    // continuation line — so they are treated as plain text.
+                    const lazy_t = trimLine(lines[i]);
+                    if (lazy_t[0] == '#') break; // ATX heading
+                    if (isThematicBreak(lines[i])) break;
+                    if (bulletListContentColumn(lines[i]) != null) break;
+                    if (orderedListContentColumn(lines[i]) != null) break;
+                    if (parsers.tryFenceStart(lines[i]) != null) break;
                     if (bq_buf.items.len > 0) try bq_buf.append(allocator, '\n');
-                    try bq_buf.appendSlice(allocator, lines[i]);
+                    try bq_buf.appendSlice(allocator, lazy_t);
+                    // Track if any lazy continuation line looks like a setext underline
+                    if (isSetextEqLine(lines[i]) or isSetextDashLine(lines[i])) {
+                        has_lazy_setext_line = true;
+                    }
                     i += 1;
                 } else break;
             }
             const bq_str = try bq_buf.toOwnedSlice(allocator);
             var inner = init();
+            inner.has_lazy_setext = has_lazy_setext_line;
             var inner_doc = try inner.parseMarkdownWithRefs(allocator, bq_str, ref_map);
             var bq = AST.Blockquote.init(allocator);
             for (inner_doc.children.items) |block| try bq.children.append(allocator, block);
@@ -1941,6 +2221,27 @@ fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_m
             continue;
         }
 
+        // HTML block (CommonMark §4.6)
+        if (isHtmlBlockStart(t)) {
+            var html_buf = std.ArrayList(u8){};
+            const end_cond = htmlBlockEndCondition(t);
+            while (i < lines.len) {
+                if (html_buf.items.len > 0) try html_buf.append(allocator, '\n');
+                try html_buf.appendSlice(allocator, lines[i]);
+                i += 1;
+                // For type 6/7, blank line ends the block
+                if (end_cond == .blank_line) {
+                    if (i < lines.len and isBlankLine(lines[i])) break;
+                } else if (end_cond == .self_closing) {
+                    // HTML block types 1-5 end when their specific end condition is met in the line
+                    if (htmlBlockTypeEndFound(lines[i - 1], t)) break;
+                }
+            }
+            try html_buf.append(allocator, '\n');
+            try doc.children.append(allocator, .{ .html_block = .{ .content = try html_buf.toOwnedSlice(allocator) } });
+            continue;
+        }
+
         // Footnote definition
         if (parsers.tryFootnoteDef(allocator, t)) |fd| {
             var fn_def = AST.FootnoteDefinition.init(allocator, fd.label);
@@ -1960,37 +2261,43 @@ fn parseMarkdownWithRefs(_: Self, allocator: Allocator, input: []const u8, ref_m
                 const lr = lines[i];
                 const lt = trimLine(lr);
                 if (lt.len == 0) break;
-                if (!is_first and (isSetextEqLine(lt) or isSetextDashLine(lt))) break;
+                if (!is_first and !self.has_lazy_setext and (isSetextEqLine(lr) or isSetextDashLine(lr))) break;
                 if (!is_first and isParaBreak(allocator, lt, lr)) break;
-                const next_setext = i + 1 < lines.len and (isSetextEqLine(trimLine(lines[i + 1])) or isSetextDashLine(trimLine(lines[i + 1])));
+                const next_setext = !self.has_lazy_setext and i + 1 < lines.len and (isSetextEqLine(lines[i + 1]) or isSetextDashLine(lines[i + 1]));
                 if (!is_first) try para_buf.append(allocator, '\n');
                 is_first = false;
+                // Use left-trimmed content to preserve trailing spaces for code spans.
+                // Trailing spaces at the end of the paragraph are stripped below.
                 const nocr = mem.trimRight(u8, lr, "\r");
-                const hard = nocr.len >= 2 and nocr[nocr.len - 1] == ' ' and nocr[nocr.len - 2] == ' ';
-                if (hard) {
-                    try para_buf.appendSlice(allocator, mem.trimRight(u8, lt, " "));
-                    try para_buf.appendSlice(allocator, "  ");
-                } else try para_buf.appendSlice(allocator, lt);
+                const left_trimmed = mem.trimLeft(u8, nocr, " \t");
+                try para_buf.appendSlice(allocator, left_trimmed);
                 i += 1;
                 if (next_setext) break;
             }
             var para = AST.Paragraph.init(allocator);
+            // Check if next line is a setext underline before parsing inlines
+            const is_setext = !self.has_lazy_setext and i < lines.len and (isSetextEqLine(lines[i]) or isSetextDashLine(lines[i]));
             if (para_buf.items.len > 0) {
-                const pc = try para_buf.toOwnedSlice(allocator);
+                // Trim trailing whitespace from paragraph content
+                // (hard line breaks at end of paragraph are ignored per CommonMark)
+                var content = para_buf.items;
+                while (content.len > 0 and (content[content.len - 1] == ' ' or content[content.len - 1] == '\t')) {
+                    content = content[0 .. content.len - 1];
+                }
+                const pc = try allocator.dupe(u8, content);
+                para_buf.deinit(allocator);
                 try appendInlines(allocator, &para.children, pc, ref_map);
             }
-            if (i < lines.len and para.children.items.len > 0) {
+            if (is_setext and para.children.items.len > 0) {
                 const st = trimLine(lines[i]);
-                if (isSetextEqLine(st) or isSetextDashLine(st)) {
-                    const level: u8 = if (isSetextEqLine(st)) 1 else 2;
-                    var heading = AST.Heading.init(allocator, level);
-                    for (para.children.items) |item| try heading.children.append(allocator, item);
-                    para.children.clearRetainingCapacity();
-                    para.deinit(allocator);
-                    try doc.children.append(allocator, .{ .heading = heading });
-                    i += 1;
-                    continue;
-                }
+                const level: u8 = if (isSetextEqLine(st)) 1 else 2;
+                var heading = AST.Heading.init(allocator, level);
+                for (para.children.items) |item| try heading.children.append(allocator, item);
+                para.children.clearRetainingCapacity();
+                para.deinit(allocator);
+                try doc.children.append(allocator, .{ .heading = heading });
+                i += 1;
+                continue;
             }
             if (para.children.items.len > 0)
                 try doc.children.append(allocator, .{ .paragraph = para })
