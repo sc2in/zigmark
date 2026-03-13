@@ -4,6 +4,8 @@ const clap = @import("clap");
 const zigmark = @import("zigmark");
 const AST = zigmark.AST;
 
+const version = "0.1.0";
+
 pub fn main() !void {
     var gpa_impl: std.heap.GeneralPurposeAllocator(.{}) = .{};
     defer _ = gpa_impl.deinit();
@@ -17,9 +19,11 @@ pub fn main() !void {
 
     // ── CLI definition ───────────────────────────────────────────────────────
     const params = comptime clap.parseParamsComptime(
-        \\-h, --help          Display this help and exit.
-        \\-f, --format <str>  Output format: "html" (default) or "ast".
-        \\<str>               Input markdown file (reads stdin if omitted).
+        \\-h, --help               Display this help and exit.
+        \\-v, --version            Print version and exit.
+        \\-f, --format <str>       Output format: "html" (default) or "ast".
+        \\-o, --output <str>       Write output to FILE instead of stdout.
+        \\<str>                    Input markdown file (reads stdin if omitted).
         \\
     );
 
@@ -47,7 +51,19 @@ pub fn main() !void {
         var buf: [4096]u8 = undefined;
         var help_writer = std.Io.Writer.fixed(&buf);
         clap.help(&help_writer, clap.Help, &params, .{}) catch {};
-        std.debug.print("Usage: zigmark [OPTIONS] [FILE]\n\n{s}", .{help_writer.buffered()});
+        std.debug.print(
+            \\zigmark {s} — CommonMark-compliant Markdown parser
+            \\
+            \\Usage: zigmark [OPTIONS] [FILE]
+            \\
+            \\{s}
+        , .{ version, help_writer.buffered() });
+        return;
+    }
+
+    // ── Version ──────────────────────────────────────────────────────────────
+    if (res.args.version != 0) {
+        std.debug.print("zigmark {s}\n", .{version});
         return;
     }
 
@@ -72,6 +88,9 @@ pub fn main() !void {
         }
     };
 
+    // ── Resolve format ───────────────────────────────────────────────────────
+    const format: []const u8 = if (res.args.format) |f| f else "html";
+
     // ── Parse ────────────────────────────────────────────────────────────────
     var parser = zigmark.Parser.init();
     const doc = parser.parseMarkdown(alloc, input) catch |err| {
@@ -80,27 +99,46 @@ pub fn main() !void {
     };
 
     // ── Output ───────────────────────────────────────────────────────────────
-    const format: []const u8 = if (res.args.format) |f| f else "html";
-
-    var stdout_buf: [8192]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
+    const out_file = getOutputFile(res.args.output);
+    defer closeOutput(res.args.output, out_file);
+    var out_buf: [8192]u8 = undefined;
+    var writer = out_file.writer(&out_buf);
 
     if (std.mem.eql(u8, format, "ast")) {
-        printAstTree(&stdout_writer.interface, doc) catch |err| {
+        printAstTree(&writer.interface, doc) catch |err| {
             std.debug.print("error: failed to write AST: {}\n", .{err});
             return err;
         };
-        stdout_writer.interface.flush() catch {};
+        writer.interface.flush() catch {};
     } else if (std.mem.eql(u8, format, "html")) {
         const html = zigmark.HTMLRenderer.render(alloc, doc) catch |err| {
             std.debug.print("error: failed to render HTML: {}\n", .{err});
             return err;
         };
-        stdout_writer.interface.writeAll(html) catch {};
-        stdout_writer.interface.flush() catch {};
+        writer.interface.writeAll(html) catch {};
+        writer.interface.flush() catch {};
     } else {
         std.debug.print("error: unknown format '{s}'. Use 'html' or 'ast'.\n", .{format});
         return error.InvalidArgument;
+    }
+}
+
+// ── Output helpers ───────────────────────────────────────────────────────────
+
+fn getOutputFile(output_path: ?[]const u8) std.fs.File {
+    if (output_path) |path| {
+        return std.fs.cwd().createFile(path, .{}) catch |err| {
+            std.debug.print("error: cannot create '{s}': {}\n", .{ path, err });
+            std.process.exit(1);
+        };
+    } else {
+        return std.fs.File.stdout();
+    }
+}
+
+fn closeOutput(output_path: ?[]const u8, file: std.fs.File) void {
+    if (output_path != null) {
+        file.close();
     }
 }
 
