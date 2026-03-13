@@ -3,8 +3,7 @@ const std = @import("std");
 const clap = @import("clap");
 const zigmark = @import("zigmark");
 const AST = zigmark.AST;
-
-const version = "0.1.1";
+const version = zigmark.version;
 
 pub fn main() !void {
     var gpa_impl: std.heap.GeneralPurposeAllocator(.{}) = .{};
@@ -19,7 +18,7 @@ pub fn main() !void {
     const params = comptime clap.parseParamsComptime(
         \\-h, --help               Display this help and exit.
         \\-v, --version            Print version and exit.
-        \\-f, --format <str>       Output format: "html" (default) or "ast".
+        \\-f, --format <str>       Output format: "html" (default), "ast", or "ai".
         \\-o, --output <str>       Write output to FILE instead of stdout.
         \\<str>                    Input markdown file (reads stdin if omitted).
         \\
@@ -119,6 +118,14 @@ pub fn main() !void {
         };
         defer alloc.free(html);
         writer.interface.writeAll(html) catch {};
+        writer.interface.flush() catch {};
+    } else if (std.mem.eql(u8, format, "ai")) {
+        const a = zigmark.AIRenderer.render(alloc, doc) catch |err| {
+            std.debug.print("error: failed to render AI AST: {}\n", .{err});
+            return err;
+        };
+        defer alloc.free(a);
+        writer.interface.writeAll(a) catch {};
         writer.interface.flush() catch {};
     } else {
         std.debug.print("error: unknown format '{s}'. Use 'html' or 'ast'.\n", .{format});

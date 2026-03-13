@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const zon = @import("build.zig.zon");
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -26,12 +28,15 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const options = b.addOptions();
+    options.addOption([]const u8, "version", zon.version);
 
     const zigmark = b.addModule("zigmark", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    zigmark.addOptions("config", options);
     zigmark.addImport("tomlz", tomlz.module("tomlz"));
     zigmark.addImport("yaml", yaml.module("yaml"));
     zigmark.addImport("mvzr", mvzr.module("mvzr"));

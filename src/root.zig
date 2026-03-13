@@ -10,12 +10,14 @@ const tst = std.testing;
 const math = std.math;
 
 const mecha = @import("mecha");
+pub const version = @import("config").version;
 
 /// Abstract syntax tree types for the parsed Markdown document.
 pub const AST = @import("markdown/ast.zig");
 pub const Frontmatter = @import("markdown/frontmatter.zig");
 /// Markdown parser that transforms raw text into an `AST.Document`.
 pub const Parser = @import("markdown/parser.zig");
+const ai = @import("markdown/renderers/ai.zig");
 /// Renderers
 const ast_mod = @import("markdown/renderers/ast_renderer.zig");
 const html = @import("markdown/renderers/html.zig");
@@ -26,6 +28,9 @@ pub const HTMLRenderer = Renderer.create(html);
 /// Pre-built renderer that serialises an `AST.Document` to a human-readable
 /// tree diagram with box-drawing characters.
 pub const ASTRenderer = Renderer.create(ast_mod);
+
+/// Pre-built renderer that serialises an `AST.Document` to token-efficient AST representation.
+pub const AIRenderer = Renderer.create(ai);
 
 /// A type-erased rendering back-end.
 ///
