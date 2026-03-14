@@ -18,7 +18,7 @@ pub fn main() !void {
     const params = comptime clap.parseParamsComptime(
         \\-h, --help               Display this help and exit.
         \\-v, --version            Print version and exit.
-        \\-f, --format <str>       Output format: "html" (default), "ast", or "ai".
+        \\-f, --format <str>       Output format: "html" (default), "ast", "ai", or "terminal".
         \\-o, --output <str>       Write output to FILE instead of stdout.
         \\<str>                    Input markdown file (reads stdin if omitted).
         \\
@@ -127,8 +127,16 @@ pub fn main() !void {
         defer alloc.free(a);
         writer.interface.writeAll(a) catch {};
         writer.interface.flush() catch {};
+    } else if (std.mem.eql(u8, format, "terminal")) {
+        const term = zigmark.TerminalRenderer.render(alloc, doc) catch |err| {
+            std.debug.print("error: failed to render terminal output: {}\n", .{err});
+            return err;
+        };
+        defer alloc.free(term);
+        writer.interface.writeAll(term) catch {};
+        writer.interface.flush() catch {};
     } else {
-        std.debug.print("error: unknown format '{s}'. Use 'html' or 'ast'.\n", .{format});
+        std.debug.print("error: unknown format '{s}'. Use 'html', 'ast', 'ai', or 'terminal'.\n", .{format});
         return error.InvalidArgument;
     }
 }

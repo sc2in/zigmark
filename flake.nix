@@ -78,11 +78,23 @@
         default = env.mkShell {
           nativeBuildInputs = [
             pkgs.zls
+            pkgs.bash
+            (pkgs.writeShellScriptBin "update-zon" ''
+              set -euo pipefail
+              if ! command -v zig &>/dev/null; then
+                echo "zig is not installed or not in PATH" >&2
+                exit 1
+              fi
+              echo "Updating build.zig.zon dependencies..."
+              zig fetch --save .
+              echo "build.zig.zon updated."
+            '')
             benchmark
           ];
 
           shellHook = ''
             export ZIG_GLOBAL_CACHE_DIR=.zig-cache
+            echo "To update Zig dependencies, run: update-zon"
             # Auto-generate/update zon2json-lock when entering the dev shell.
             # This requires network access, which the dev shell has but nix build does not.
             if [ -f build.zig.zon ]; then

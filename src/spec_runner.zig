@@ -3,7 +3,7 @@ const print = std.debug.print;
 
 const zigmark = @import("zigmark");
 
-const spec_path = "./src/markdown/spec.txt";
+const default_spec_path = "./src/markdown/spec.txt";
 
 pub fn main() !void {
     // Use a page allocator — the spec runner is short-lived and
@@ -19,6 +19,7 @@ pub fn main() !void {
     var verbose = false;
     var number: ?usize = null;
     var summary_only = false;
+    var spec_path: ?[]const u8 = null;
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--verbose") or std.mem.eql(u8, arg, "-v")) {
@@ -31,15 +32,19 @@ pub fn main() !void {
             if (args.next()) |n| {
                 number = std.fmt.parseInt(usize, n, 10) catch null;
             }
+        } else if (std.mem.eql(u8, arg, "--spec")) {
+            spec_path = args.next();
         }
     }
 
+    const use_spec_path = spec_path orelse default_spec_path;
+
     if (summary_only) {
-        try printSummary(allocator);
+        try printSummary(allocator, use_spec_path);
         return;
     }
 
-    const result = try zigmark.runCommonMarkSpecTests(allocator, spec_path, .{
+    const result = try zigmark.runCommonMarkSpecTests(allocator, use_spec_path, .{
         .pattern = pattern,
         .normalize = true,
         .verbose = verbose,
@@ -62,7 +67,7 @@ pub fn main() !void {
     }
 }
 
-fn printSummary(allocator: std.mem.Allocator) !void {
+fn printSummary(allocator: std.mem.Allocator, spec_path: []const u8) !void {
     const summary = try zigmark.runSpecSummary(allocator, spec_path);
 
     print("\n{s:<40} {s:>6} {s:>6} {s:>6} {s:>10}\n", .{ "Section", "Pass", "Fail", "Total", "Time (ms)" });

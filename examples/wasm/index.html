@@ -48,18 +48,66 @@
 
 <div class="container">
   <textarea id="editor" spellcheck="false" placeholder="Type Markdown here…">
-# Hello from zigmark 🚀
+# zigmark: Markdown at the Speed of Zig 🚀
 
-A **CommonMark-compliant** Markdown parser compiled to WASM — running in your browser right now.
+> **A CommonMark-compliant Markdown parser, written in Zig, compiled to WebAssembly.**
+>
+> - 655/655 spec tests passing ✅
+> - Three renderers: HTML, AST, AI
+> - Zero runtime dependencies
+> - Blazing fast — often faster than JS!
+>
+> _Edit this pane and watch the preview update in real-time. Switch renderers on the right!_
 
-## Features
+---
 
-- All **655** spec tests passing ✅
-- Three renderers: HTML, AST, AI
-- Zero dependencies at runtime
-- Typically *faster* than pure-JS parsers
+## Headings
 
-## Code
+# H1 Heading
+## H2 Heading
+### H3 Heading
+#### H4 Heading
+##### H5 Heading
+###### H6 Heading
+
+---
+
+## Lists
+
+- Unordered item 1
+- Unordered item 2
+  - Nested item
+    - Deeply nested
+
+1. Ordered item 1
+2. Ordered item 2
+   1. Sub-item
+   2. Sub-item
+
+---
+
+## Emphasis & Inline
+
+*Italic* _Italic_ **Bold** __Bold__ ***Bold Italic***
+`Inline code`
+
+---
+
+## Links & Images
+
+[zigmark on GitHub](https://github.com/sc2in/zigmark)
+![Zig logo](https://ziglang.org/img/zig-logo-dark.svg)
+
+---
+
+## Blockquotes
+
+> This is a blockquote.
+> > Nested blockquote!
+
+---
+
+## Code Blocks
 
 ```zig
 const zigmark = @import("zigmark");
@@ -67,17 +115,77 @@ var doc = try parser.parseMarkdown(allocator, input);
 const html = try zigmark.HTMLRenderer.render(allocator, doc);
 ```
 
-## Links
+---
 
-Check out the repo: [sc2in/zigmark](https://github.com/sc2in/zigmark)
+## Frontmatter (YAML & TOML)
 
-> "Parse Markdown at the speed of Zig." someone, probably.
+```yaml
+title: Zigmark Demo
+author: Your Name
+```
+
+```toml
+tags = ["zig", "markdown", "wasm"]
+```
 
 ---
 
-*Edit this pane and watch the preview update in real-time.*
-</textarea>
-  <div class="preview" id="preview"></div>
+## Footnotes
+
+```markdown
+Here is a footnote reference[^1].
+
+[^1]: This is the footnote content.
+```
+
+
+## GFM Extensions (coming soon)
+
+- [ ] Task list item
+- [x] Completed item
+~~Strikethrough~~
+
+---
+
+## Raw HTML
+
+```html
+<div style="padding:8px;border:1px solid #58a6ff;border-radius:6px;">
+  Raw HTML block! <b>Bold</b> <i>Italic</i>
+</div>
+```
+
+
+## Spec Compliance
+
+All <b>655/655</b> CommonMark tests pass. 
+See the <a href="https://github.com/sc2in/zigmark">README</a> for a full breakdown.
+
+---
+
+## About
+
+zigmark is a Markdown parser and renderer written in Zig, designed for speed, correctness, 
+and embeddability. It supports HTML, AST, and AI-friendly output modes. 
+
+Try switching renderers!
+
+---
+
+*Edit this pane and watch the preview update in real-time. Use the dropdown to switch output renderers!*
+  </textarea>
+  <div style="display:flex;flex-direction:column;height:100%">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <label for="renderer-select" style="font-size:13px;opacity:0.7">Renderer:</label>
+      <select id="renderer-select" style="font-size:13px;padding:2px 8px;border-radius:4px;background:#161b22;color:var(--fg);border:1px solid var(--border);">
+        <option value="html">HTML</option>
+        <option value="ast">AST</option>
+        <option value="ai">AI</option>
+      </select>
+      <button id="copy-output" style="margin-left:auto;font-size:12px;padding:2px 10px;border-radius:4px;background:var(--accent);color:#fff;border:none;cursor:pointer;">Copy Output</button>
+    </div>
+    <div class="preview" id="preview" style="flex:1 1 auto;"></div>
+  </div>
 </div>
 
 <!--
@@ -108,7 +216,7 @@ async function initWasm() {
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-function zigmarkRender(markdown) {
+function zigmarkRender(markdown, renderer) {
   const encoded = encoder.encode(markdown);
   const len = encoded.byteLength;
 
@@ -117,8 +225,17 @@ function zigmarkRender(markdown) {
   if (!ptr) return '<!-- alloc failed -->';
   new Uint8Array(wasm.memory.buffer, ptr, len).set(encoded);
 
-  // Render.
-  const outPtr = wasm.render_html(ptr, len);
+  // Render using the selected renderer.
+  let outPtr;
+  if (renderer === 'html') {
+    outPtr = wasm.render_html(ptr, len);
+  } else if (renderer === 'ast') {
+    outPtr = wasm.render_ast(ptr, len);
+  } else if (renderer === 'ai') {
+    outPtr = wasm.render_ai(ptr, len);
+  } else {
+    outPtr = wasm.render_html(ptr, len);
+  }
   wasm.free_buf(ptr, len);
 
   if (!outPtr) return '<!-- render failed -->';
@@ -141,17 +258,29 @@ const preview = document.getElementById('preview');
 const zigTime = document.getElementById('zig-time');
 const jsTime  = document.getElementById('js-time');
 const speedup = document.getElementById('speedup');
+const rendererSelect = document.getElementById('renderer-select');
+const copyOutputBtn = document.getElementById('copy-output');
 
 let debounce = null;
 
 function update() {
   const md = editor.value;
+  const renderer = rendererSelect.value;
 
   // zigmark (WASM)
-  const zt = bench(() => zigmarkRender(md));
-  preview.innerHTML = zigmarkRender(md);
+  const zt = bench(() => zigmarkRender(md, renderer));
+  const output = zigmarkRender(md, renderer);
+  if (renderer === 'html') {
+    preview.innerHTML = output;
+  } else {
+    preview.innerHTML = `<pre style="margin:0;">${escapeHtml(output)}</pre>`;
+  }
 
-  // marked.js (JS)
+  function escapeHtml(str) {
+    return str.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  }
+
+  // marked.js (JS, only for HTML)
   const jt = bench(() => marked.parse(md));
 
   zigTime.textContent = zt.toFixed(2);
@@ -162,6 +291,15 @@ function update() {
 editor.addEventListener('input', () => {
   clearTimeout(debounce);
   debounce = setTimeout(update, 80);
+});
+rendererSelect.addEventListener('change', update);
+copyOutputBtn.addEventListener('click', () => {
+  const renderer = rendererSelect.value;
+  const md = editor.value;
+  const output = zigmarkRender(md, renderer);
+  navigator.clipboard.writeText(output);
+  copyOutputBtn.textContent = 'Copied!';
+  setTimeout(() => { copyOutputBtn.textContent = 'Copy Output'; }, 1200);
 });
 
 // ── Init ─────────────────────────────────────────────────────────────────────

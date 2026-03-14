@@ -5,6 +5,10 @@ const zon = @import("build.zig.zon");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    // CommonMark spec dependency for spec.txt
+    const commonmark_spec = b.dependency("commonmark_spec", .{});
+    const spec_txt_path = commonmark_spec.path("spec.txt");
+
     const tomlz = b.dependency("tomlz", .{
         .target = target,
         .optimize = optimize,
@@ -138,13 +142,13 @@ pub fn build(b: *std.Build) void {
     // zig build spec -- summary table of all sections
     const spec_step = b.step("spec", "Run CommonMark spec tests (summary table)");
     const spec_summary = b.addRunArtifact(spec_exe);
-    spec_summary.addArgs(&.{"--summary"});
+    spec_summary.addArgs(&.{ "--summary", "--spec", spec_txt_path.getPath(b) });
     spec_step.dependOn(&spec_summary.step);
 
     // zig build spec-verbose -- all tests with failure details
     const spec_verbose_step = b.step("spec-verbose", "Run all CommonMark spec tests with failure details");
     const spec_verbose = b.addRunArtifact(spec_exe);
-    spec_verbose.addArgs(&.{"--verbose"});
+    spec_verbose.addArgs(&.{ "--verbose", "--spec", spec_txt_path.getPath(b) });
     spec_verbose_step.dependOn(&spec_verbose.step);
 
     // Per-section steps: zig build spec-emphasis, spec-links, etc.
@@ -174,7 +178,7 @@ pub fn build(b: *std.Build) void {
     inline for (section_defs) |def| {
         const step = b.step(def[0], def[2]);
         const run = b.addRunArtifact(spec_exe);
-        run.addArgs(&.{ "--section", def[1], "--verbose" });
+        run.addArgs(&.{ "--section", def[1], "--verbose", "--spec", spec_txt_path.getPath(b) });
         step.dependOn(&run.step);
     }
 

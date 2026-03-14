@@ -11,6 +11,12 @@
     "hash": "sha256-RsnjkmsAZAuwO75S9Zy2dW117E6APOgHRKC2ReMAkik=",
     "rev": "17a44b46cfe48ef46818d51bdf1161783dfe66e1"
   },
+  "N-V-__8AAONuBAD-PVybaAwpHC3ymgRfmKlnrH5tdJtUE0Cu": {
+    "name": "commonmark_spec",
+    "url": "git+https://github.com/commonmark/commonmark-spec.git#9103e341a973013013bb1a80e13567007c5cef6f",
+    "hash": "sha256-pl3/2wY7RyfwY912eVj/XKVne2rQ3MK1Vq3izfYRNr4=",
+    "rev": "9103e341a973013013bb1a80e13567007c5cef6f"
+  },
   "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e": {
     "name": "clap",
     "url": "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.11.0.tar.gz",

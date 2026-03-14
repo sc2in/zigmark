@@ -21,6 +21,7 @@ const ai = @import("markdown/renderers/ai.zig");
 /// Renderers
 const ast_mod = @import("markdown/renderers/ast_renderer.zig");
 const html = @import("markdown/renderers/html.zig");
+const terminal = @import("markdown/renderers/terminal.zig");
 
 /// Pre-built renderer that serialises an `AST.Document` to CommonMark-compliant HTML.
 pub const HTMLRenderer = Renderer.create(html);
@@ -31,6 +32,9 @@ pub const ASTRenderer = Renderer.create(ast_mod);
 
 /// Pre-built renderer that serialises an `AST.Document` to token-efficient AST representation.
 pub const AIRenderer = Renderer.create(ai);
+
+/// Pre-built renderer that serialises an `AST.Document` with ANSI terminal styling.
+pub const TerminalRenderer = Renderer.create(terminal);
 
 /// A type-erased rendering back-end.
 ///
@@ -56,6 +60,10 @@ pub const Renderer = struct {
         return try self.vtable.render(alloc, doc);
     }
 };
+
+// Path to the CommonMark spec.txt used for compliance tests.
+// This should match the path passed by the build system (zig build spec --spec ...).
+pub const default_spec_path = "./zig-cache/deps/commonmark_spec/spec.txt";
 /// Character classification helpers used by the parser to implement
 /// CommonMark's definitions of Unicode whitespace, punctuation, etc.
 pub const chars = struct {
@@ -745,7 +753,7 @@ test "CommonMark spec compliance" {
     defer arena.deinit();
 
     const allocator = arena.allocator();
-    const summary = try runSpecSummary(allocator, "./src/markdown/spec.txt");
+    const summary = try runSpecSummary(allocator, default_spec_path);
 
     std.debug.print("\n{s:<40} {s:>6} {s:>6} {s:>6}\n", .{ "Section", "Pass", "Fail", "Total" });
     std.debug.print("{s:-<58}\n", .{""});
