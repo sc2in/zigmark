@@ -60,6 +60,10 @@ pub const Renderer = struct {
         return try self.vtable.render(alloc, doc);
     }
 };
+
+// Path to the CommonMark spec.txt used for compliance tests.
+// This should match the path passed by the build system (zig build spec --spec ...).
+pub const default_spec_path = "./zig-cache/deps/commonmark_spec/spec.txt";
 /// Character classification helpers used by the parser to implement
 /// CommonMark's definitions of Unicode whitespace, punctuation, etc.
 pub const chars = struct {
@@ -749,7 +753,7 @@ test "CommonMark spec compliance" {
     defer arena.deinit();
 
     const allocator = arena.allocator();
-    const summary = try runSpecSummary(allocator, "./src/markdown/spec.txt");
+    const summary = try runSpecSummary(allocator, default_spec_path);
 
     std.debug.print("\n{s:<40} {s:>6} {s:>6} {s:>6}\n", .{ "Section", "Pass", "Fail", "Total" });
     std.debug.print("{s:-<58}\n", .{""});

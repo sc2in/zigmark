@@ -41,6 +41,11 @@
             .hash = "mvzr-0.3.7-ZSOky5FtAQB2VrFQPNbXHQCFJxWTMAYEK7ljYEaMR6jt",
         },
 
+        .commonmark_spec = .{
+            .url = "git+https://github.com/commonmark/commonmark-spec.git#9103e341a973013013bb1a80e13567007c5cef6f",
+            .hash = "N-V-__8AAONuBAD-PVybaAwpHC3ymgRfmKlnrH5tdJtUE0Cu",
+        },
+
         .clap = .{
             .url = "https://github.com/Hejsil/zig-clap/archive/refs/tags/0.11.0.tar.gz",
             .hash = "clap-0.11.0-oBajB-HnAQDPCKYzwF7rO3qDFwRcD39Q0DALlTSz5H7e",
