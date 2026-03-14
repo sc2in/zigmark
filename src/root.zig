@@ -21,6 +21,7 @@ const ai = @import("markdown/renderers/ai.zig");
 /// Renderers
 const ast_mod = @import("markdown/renderers/ast_renderer.zig");
 const html = @import("markdown/renderers/html.zig");
+const terminal = @import("markdown/renderers/terminal.zig");
 
 /// Pre-built renderer that serialises an `AST.Document` to CommonMark-compliant HTML.
 pub const HTMLRenderer = Renderer.create(html);
@@ -31,6 +32,9 @@ pub const ASTRenderer = Renderer.create(ast_mod);
 
 /// Pre-built renderer that serialises an `AST.Document` to token-efficient AST representation.
 pub const AIRenderer = Renderer.create(ai);
+
+/// Pre-built renderer that serialises an `AST.Document` with ANSI terminal styling.
+pub const TerminalRenderer = Renderer.create(terminal);
 
 /// A type-erased rendering back-end.
 ///
