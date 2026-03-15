@@ -403,6 +403,8 @@ fn renderInline(w: anytype, inl: AST.Inline, allocator: Allocator) !void {
 
 fn renderBlock(w: anytype, block: AST.Block, indent: usize, bq_depth: usize, allocator: Allocator) !void {
     switch (block) {
+        .table => {},
+
         .heading => |h| {
             const idx: usize = if (h.level >= 1 and h.level <= 6) h.level - 1 else 5;
             const style = heading_styles[idx];

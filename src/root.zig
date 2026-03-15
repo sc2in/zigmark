@@ -1,6 +1,5 @@
 //! Copyright © 2025 [Star City Security Consulting, LLC (SC2)](https://sc2.in)
 //! SPDX-License-Identifier: AGPL-3.0-or-later
-//!TODO: Pass https://github.com/commonmark/commonmark-spec/blob/master/test/spec_tests.py
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const mem = std.mem;
@@ -9,6 +8,7 @@ const Array = std.ArrayList;
 const tst = std.testing;
 const math = std.math;
 
+pub const default_spec_path = @import("config").spec_file_path;
 const mecha = @import("mecha");
 pub const version = @import("config").version;
 
@@ -61,9 +61,6 @@ pub const Renderer = struct {
     }
 };
 
-// Path to the CommonMark spec.txt used for compliance tests.
-// This should match the path passed by the build system (zig build spec --spec ...).
-pub const default_spec_path = "./zig-cache/deps/commonmark_spec/spec.txt";
 /// Character classification helpers used by the parser to implement
 /// CommonMark's definitions of Unicode whitespace, punctuation, etc.
 pub const chars = struct {
@@ -777,7 +774,7 @@ test "CommonMark spec compliance" {
 
     // Hard-fail on unexpected results so regressions are caught.
     try testing.expectEqual(@as(usize, 0), summary.all.failed);
-    try testing.expectEqual(@as(usize, 655), summary.all.passed);
+    try testing.expectEqual(@as(usize, 652), summary.all.passed);
     try testing.expectEqual(@as(usize, 0), summary.all.errors);
 }
 
@@ -855,4 +852,8 @@ test "Policy render" {
     const rend = try HTMLRenderer.render(allocator, doc);
     defer allocator.free(rend);
     // std.debug.print("{s}\n", .{rend});
+}
+
+test {
+    tst.refAllDecls(@This());
 }

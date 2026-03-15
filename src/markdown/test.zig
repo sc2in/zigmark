@@ -4,6 +4,8 @@ const Allocator = std.mem.Allocator;
 const tst = std.testing;
 const math = std.math;
 
+const build_options = @import("config");
+
 const AST = @import("ast.zig");
 const Parser = @import("parser.zig");
 const parsers = Parser.parsers;
@@ -220,4 +222,15 @@ test "image" {
     const para = doc.children.items[0].paragraph;
     try tst.expect(para.children.items[0] == .image);
     try tst.expectEqualStrings("alt text", para.children.items[0].image.alt_text);
+}
+
+test "CommonMark spec compliance" {
+    const root = @import("../root.zig");
+    const allocator = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const spec_path = build_options.spec_file_path;
+    const result = try root.runCommonMarkSpecTests(alloc, spec_path, .{});
+    try std.testing.expect(result.failed == 0 and result.errors == 0);
 }

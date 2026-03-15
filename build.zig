@@ -46,6 +46,8 @@ pub fn build(b: *std.Build) void {
         break :blk if (git_describe.len > 0) trimLeadingV(git_describe) else zon.version;
     };
     options.addOption([]const u8, "version", version);
+    // Add the spec file path as a build option
+    options.addOption([]const u8, "spec_file_path", spec_txt_path.getPath(b));
 
     const zigmark = b.addModule("zigmark", .{
         .root_source_file = b.path("src/root.zig"),
@@ -116,6 +118,7 @@ pub fn build(b: *std.Build) void {
     const mod_tests = b.addTest(.{
         .root_module = zigmark,
     });
+    // Pass the spec file path as a test argument so tests can use the same spec input as the spec runner
     const run_mod_tests = b.addRunArtifact(mod_tests);
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,

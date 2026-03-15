@@ -28,6 +28,7 @@ fn renderBlock(writer: anytype, block: AST.Block, prefix: []const u8, is_last: b
     try writer.writeAll(conn);
 
     switch (block) {
+        .table => {},
         .paragraph => |para| {
             try writer.writeAll("Paragraph\n");
             const new_prefix = try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, child_ext });

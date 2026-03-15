@@ -132,6 +132,8 @@ fn collectTextRun(items: []const AST.Inline, allocator: Allocator) !struct { tex
 
 fn renderBlock(w: anytype, block: AST.Block, depth: usize, allocator: Allocator) !void {
     switch (block) {
+        .table => {},
+
         .heading => |h| {
             try writeIndent(w, depth);
             try w.print("H{d}", .{h.level});

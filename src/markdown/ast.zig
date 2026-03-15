@@ -228,6 +228,7 @@ pub const Block = union(enum) {
     thematic_break: ThematicBreak,
     html_block: HtmlBlock,
     footnote_definition: FootnoteDefinition,
+    table: Table,
 
     /// Recursively free this block and all children it owns.
     pub fn deinit(self: *Block, allocator: std.mem.Allocator) void {
@@ -726,6 +727,100 @@ pub const HtmlInline = struct {
     /// Wrap raw inline HTML `content` in a node.
     pub fn init(content: []const u8) HtmlInline {
         return HtmlInline{ .content = content };
+    }
+};
+
+/// Column alignment for GitHub Flavored Markdown tables.
+///
+/// Derived from the position of `:` in the table delimiter row.
+/// For example:
+/// `:---`  -> left
+/// `:---:` -> center
+/// `---:`  -> right
+pub const TableAlignment = enum {
+    none,
+    left,
+    center,
+    right,
+};
+
+/// A single cell in a table row.
+///
+/// Each cell contains inline content parsed using the existing
+/// inline parser, as well as an optional owned source slice
+/// that the inlines may borrow from (mirroring Paragraph/Heading).
+pub const TableCell = struct {
+    children: std.ArrayList(Inline),
+    inline_source: ?[]const u8 = null,
+
+    pub fn init(allocator: std.mem.Allocator) TableCell {
+        _ = allocator; // autofix
+        return TableCell{
+            .children = std.ArrayList(Inline){},
+        };
+    }
+
+    pub fn deinit(self: *TableCell, allocator: std.mem.Allocator) void {
+        for (self.children.items) |*child| {
+            child.deinit(allocator);
+        }
+        self.children.deinit(allocator);
+        if (self.inline_source) |src| allocator.free(src);
+    }
+};
+
+/// A row within a table header or body.
+///
+/// `cells` holds one `TableCell` per column.  For a malformed table
+/// line that does not provide enough cells, the parser will create
+/// empty cells to match the column count.
+pub const TableRow = struct {
+    cells: std.ArrayList(TableCell),
+
+    pub fn init(allocator: std.mem.Allocator) TableRow {
+        _ = allocator; // autofix
+        return TableRow{
+            .cells = std.ArrayList(TableCell){},
+        };
+    }
+
+    pub fn deinit(self: *TableRow, allocator: std.mem.Allocator) void {
+        for (self.cells.items) |*cell| {
+            cell.deinit(allocator);
+        }
+        self.cells.deinit(allocator);
+    }
+};
+
+/// A GitHub Flavored Markdown table block.
+///
+/// The first row is treated as the header row.  `alignments.len`
+/// defines the number of columns and the text alignment for each.
+/// Every header and body row must have at most `alignments.len` cells;
+/// missing cells are treated as empty, and extra cells are ignored
+/// by the parser.
+pub const Table = struct {
+    alignments: std.ArrayList(TableAlignment),
+    header: TableRow,
+    body: std.ArrayList(TableRow),
+
+    pub fn init(allocator: std.mem.Allocator) Table {
+        return Table{
+            .alignments = std.ArrayList(TableAlignment){},
+            .header = TableRow.init(allocator),
+            .body = std.ArrayList(TableRow){},
+        };
+    }
+
+    pub fn deinit(self: *Table, allocator: std.mem.Allocator) void {
+        self.header.deinit(allocator);
+
+        for (self.body.items) |*row| {
+            row.deinit(allocator);
+        }
+        self.body.deinit(allocator);
+
+        self.alignments.deinit(allocator);
     }
 };
 

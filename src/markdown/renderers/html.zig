@@ -502,6 +502,36 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
 
 fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
     switch (block) {
+        .table => |tbl| {
+            try writer.writeAll("<table>\n");
+
+            // header
+            try writer.writeAll("<thead>\n<tr>");
+            for (tbl.header.cells.items) |cell| {
+                try writer.writeAll("<th>");
+                for (cell.children.items) |inl| try renderInline(writer, inl);
+                try writer.writeAll("</th>");
+            }
+            try writer.writeAll("</tr>\n</thead>\n");
+
+            // body
+            if (tbl.body.items.len > 0) {
+                try writer.writeAll("<tbody>\n");
+                for (tbl.body.items) |row| {
+                    try writer.writeAll("<tr>");
+                    for (row.cells.items) |cell| {
+                        try writer.writeAll("<td>");
+                        for (cell.children.items) |inl| try renderInline(writer, inl);
+                        try writer.writeAll("</td>");
+                    }
+                    try writer.writeAll("</tr>\n");
+                }
+                try writer.writeAll("</tbody>\n");
+            }
+
+            try writer.writeAll("</table>\n");
+        },
+
         .heading => |h| {
             try writer.print("<h{d}>", .{h.level});
             for (h.children.items) |item| try renderInline(writer, item);
@@ -905,4 +935,20 @@ test "link with title styles" {
 
 test "link rejects space in bare url" {
     try ok("[link](/my uri)", "<p>[link](/my uri)</p>\n");
+}
+
+test "gfm table basic" {
+    try ok(
+        "a | b\n" ++
+            "---|---\n" ++
+            "1 | 2",
+        "<table>\n" ++
+            "<thead>\n" ++
+            "<tr><th>a</th><th>b</th></tr>\n" ++
+            "</thead>\n" ++
+            "<tbody>\n" ++
+            "<tr><td>1</td><td>2</td></tr>\n" ++
+            "</tbody>\n" ++
+            "</table>\n",
+    );
 }
