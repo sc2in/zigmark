@@ -209,7 +209,14 @@ pub fn yamlNodeToJson(allocator: std.mem.Allocator, node: Yaml.Value) !JsonValue
             return list;
         },
         .scalar => |s| {
-            return JsonValue{ .string = s };
+            const value = blk: {
+                break :blk JsonValue{ .float = std.fmt.parseFloat(f32, s) catch {
+                    break :blk JsonValue{ .integer = std.fmt.parseInt(u32, s, 10) catch {
+                        break :blk JsonValue{ .string = s };
+                    } };
+                } };
+            };
+            return value;
         },
 
         .boolean => |b| {
@@ -306,6 +313,7 @@ pub fn get(self: FrontMatter, path: []const u8) ?std.json.Value {
 /// Looks up a value in a std.json.Value tree using a dot-separated key path.
 /// Returns the found value, or null if any part of the path is missing.
 pub fn jsonFindByPath(root: std.json.Value, path: []const u8) ?std.json.Value {
+    if (path.len == 0) return null;
     var it = std.mem.tokenizeScalar(u8, path, '.');
     var current = root;
     while (it.next()) |segment| {
