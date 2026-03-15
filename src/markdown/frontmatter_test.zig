@@ -70,34 +70,14 @@ test "frontmatter: YAML integer and negative values" {
     defer fm.deinit();
 
     const count = fm.get("count");
-    tst.expect(count != null) catch |e| {
-        std.debug.print("count missing: {any}\n", .{count});
-        return e;
-    };
-    std.debug.print("count type: {s}\n", .{@tagName(count.?)});
-    if (count.? == .float) {
-        try tst.expectApproxEqAbs(@as(f64, 42), count.?.float, 0.001);
-    } else if (count.? == .integer) {
-        try tst.expectEqual(@as(i64, 42), count.?.integer);
-    } else {
-        std.debug.print("count value: {any}\n", .{count});
-        return error.UnexpectedType;
-    }
+    try tst.expect(count != null);
+    try tst.expect(count.? == .float);
+    try tst.expectApproxEqAbs(@as(f64, 42), count.?.float, 0.001);
 
     const neg = fm.get("negative");
-    tst.expect(neg != null) catch |e| {
-        std.debug.print("negative missing: {any}\n", .{neg});
-        return e;
-    };
-    std.debug.print("negative type: {s}\n", .{@tagName(neg.?)});
-    if (neg.? == .float) {
-        try tst.expectApproxEqAbs(@as(f64, -7), neg.?.float, 0.001);
-    } else if (neg.? == .integer) {
-        try tst.expectEqual(@as(i64, -7), neg.?.integer);
-    } else {
-        std.debug.print("negative value: {any}\n", .{neg});
-        return error.UnexpectedType;
-    }
+    try tst.expect(neg != null);
+    try tst.expect(neg.? == .float);
+    try tst.expectApproxEqAbs(@as(f64, -7), neg.?.float, 0.001);
 }
 
 test "frontmatter: YAML boolean values" {
@@ -110,34 +90,14 @@ test "frontmatter: YAML boolean values" {
     defer fm.deinit();
 
     const draft = fm.get("draft");
-    tst.expect(draft != null) catch |e| {
-        std.debug.print("draft missing: {any}\n", .{draft});
-        return e;
-    };
-    std.debug.print("draft type: {s}\n", .{@tagName(draft.?)});
-    if (draft.? == .bool) {
-        try tst.expect(draft.?.bool == true);
-    } else if (draft.? == .string) {
-        try tst.expectEqualStrings("true", draft.?.string);
-    } else {
-        std.debug.print("draft value: {any}\n", .{draft});
-        return error.UnexpectedType;
-    }
+    try tst.expect(draft != null);
+    try tst.expect(draft.? == .string);
+    try tst.expectEqualStrings("true", draft.?.string);
 
     const published = fm.get("published");
-    tst.expect(published != null) catch |e| {
-        std.debug.print("published missing: {any}\n", .{published});
-        return e;
-    };
-    std.debug.print("published type: {s}\n", .{@tagName(published.?)});
-    if (published.? == .bool) {
-        try tst.expect(published.?.bool == false);
-    } else if (published.? == .string) {
-        try tst.expectEqualStrings("false", published.?.string);
-    } else {
-        std.debug.print("published value: {any}\n", .{published});
-        return error.UnexpectedType;
-    }
+    try tst.expect(published != null);
+    try tst.expect(published.? == .string);
+    try tst.expectEqualStrings("false", published.?.string);
 }
 
 test "frontmatter: TOML basic parsing" {
@@ -318,7 +278,6 @@ test "frontmatter: YAML float values" {
         std.debug.print("version missing: {any}\n", .{version});
         return e;
     };
-    std.debug.print("version type: {s}\n", .{@tagName(version.?)});
     if (version.? == .float) {
         try tst.expectApproxEqAbs(@as(f64, 1.5), version.?.float, 0.001);
     } else if (version.? == .integer) {
@@ -373,6 +332,9 @@ test "frontmatter: jsonFindByPath single key" {
     defer parsed.deinit();
 
     const found = FrontMatter.jsonFindByPath(parsed.value, "key");
+    if (found == null) {
+        std.debug.print("jsonFindByPath returned null for key\n", .{});
+    }
     try tst.expect(found != null);
     try tst.expectEqualStrings("value", found.?.string);
 }

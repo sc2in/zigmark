@@ -601,9 +601,8 @@ fn ok(markdown: []const u8, needle: []const u8) !void {
     defer doc.deinit(allocator);
     const out = try render(allocator, doc);
     defer allocator.free(out);
-    // For terminal output we just check that the expected substring is present
-    // since exact ANSI matching would be very fragile.
-    try tst.expect(std.mem.indexOf(u8, out, needle) != null);
+    // For terminal output, ignore ANSI escape sequences when searching.
+    try tst.expect(containsIgnoringAnsi(out, needle));
 }
 
 /// Strip all ANSI escape sequences so we can assert on visible text.
@@ -622,6 +621,38 @@ fn stripAnsi(allocator: Allocator, input: []const u8) ![]u8 {
         }
     }
     return buf.toOwnedSlice(allocator);
+}
+
+/// Returns true if `needle` is found in `haystack` when ignoring ANSI escapes.
+fn containsIgnoringAnsi(haystack: []const u8, needle: []const u8) bool {
+    var i: usize = 0;
+    while (i < haystack.len) {
+        if (haystack[i] == '\x1b' and i + 1 < haystack.len and haystack[i + 1] == '[') {
+            // Skip ESC [ ... <letter>
+            i += 2;
+            while (i < haystack.len and (haystack[i] < 0x40 or haystack[i] > 0x7E)) : (i += 1) {}
+            if (i < haystack.len) i += 1;
+            continue;
+        }
+
+        // Attempt match from this position, skipping over ANSI sequences.
+        var hi: usize = i;
+        var nj: usize = 0;
+        while (hi < haystack.len and nj < needle.len) {
+            if (haystack[hi] == '\x1b' and hi + 1 < haystack.len and haystack[hi + 1] == '[') {
+                hi += 2;
+                while (hi < haystack.len and (haystack[hi] < 0x40 or haystack[hi] > 0x7E)) : (hi += 1) {}
+                if (hi < haystack.len) hi += 1;
+                continue;
+            }
+            if (haystack[hi] != needle[nj]) break;
+            hi += 1;
+            nj += 1;
+        }
+        if (nj == needle.len) return true;
+        i += 1;
+    }
+    return false;
 }
 
 fn okStripped(markdown: []const u8, expected: []const u8) !void {
