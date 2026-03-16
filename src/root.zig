@@ -330,6 +330,53 @@ pub const SpecSummary = struct {
     total_time_ns: i128,
 };
 
+/// GFM extension section headings (the sections added by GitHub Flavored Markdown
+/// on top of CommonMark).  These names match the `## …` headings in the GFM spec.
+pub const gfm_sections = [_][]const u8{
+    "Tables (extension)",
+    "Task list items (extension)",
+    "Strikethrough (extension)",
+    "Autolinks (extension)",
+    "Disallowed Raw HTML (extension)",
+};
+
+/// Aggregate result from running every GFM extension section.
+pub const GfmSummary = struct {
+    sections: [gfm_sections.len]SectionResult,
+    all: TestResult,
+    total_time_ns: i128,
+};
+
+/// Run the GFM extension spec suite once per section and once for all
+/// extension sections combined, returning a `GfmSummary`.
+pub fn runGfmSpecSummary(allocator: std.mem.Allocator, spec_path: []const u8) !GfmSummary {
+    var summary: GfmSummary = undefined;
+    summary.total_time_ns = 0;
+
+    for (gfm_sections, 0..) |section, idx| {
+        const r = try runCommonMarkSpecTests(allocator, spec_path, .{
+            .pattern = section,
+            .normalize = true,
+            .verbose = false,
+        });
+        summary.sections[idx] = .{ .section = section, .result = r };
+        summary.total_time_ns += r.time_ns;
+    }
+
+    // Aggregate across all GFM extension sections by running each and summing.
+    var all = TestResult{};
+    for (summary.sections) |s| {
+        all.passed += s.result.passed;
+        all.failed += s.result.failed;
+        all.errors += s.result.errors;
+        all.skipped += s.result.skipped;
+        all.time_ns += s.result.time_ns;
+    }
+    summary.all = all;
+
+    return summary;
+}
+
 /// Run the CommonMark spec suite once per section and once unfiltered,
 /// returning a `SpecSummary` with per-section and aggregate results.
 pub fn runSpecSummary(allocator: std.mem.Allocator, spec_path: []const u8) !SpecSummary {

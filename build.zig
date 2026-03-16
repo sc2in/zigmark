@@ -8,6 +8,9 @@ pub fn build(b: *std.Build) void {
     // CommonMark spec dependency for spec.txt
     const commonmark_spec = b.dependency("commonmark_spec", .{});
     const spec_txt_path = commonmark_spec.path("spec.txt");
+    // GFM spec dependency (cmark-gfm); spec lives at test/spec.txt inside the repo
+    const gfm_spec = b.dependency("gfm_spec", .{});
+    const gfm_spec_txt_path = gfm_spec.path("test/spec.txt");
 
     const tomlz = b.dependency("tomlz", .{
         .target = target,
@@ -46,8 +49,9 @@ pub fn build(b: *std.Build) void {
         break :blk if (git_describe.len > 0) trimLeadingV(git_describe) else zon.version;
     };
     options.addOption([]const u8, "version", version);
-    // Add the spec file path as a build option
+    // Add the spec file paths as build options
     options.addOption([]const u8, "spec_file_path", spec_txt_path.getPath(b));
+    options.addOption([]const u8, "gfm_spec_file_path", gfm_spec_txt_path.getPath(b));
 
     const zigmark = b.addModule("zigmark", .{
         .root_source_file = b.path("src/root.zig"),
@@ -182,6 +186,36 @@ pub fn build(b: *std.Build) void {
         const step = b.step(def[0], def[2]);
         const run = b.addRunArtifact(spec_exe);
         run.addArgs(&.{ "--section", def[1], "--verbose", "--spec", spec_txt_path.getPath(b) });
+        step.dependOn(&run.step);
+    }
+
+    // ── GFM extension spec runner ─────────────────────────────────────────────
+
+    // zig build gfm -- summary table of GFM extension sections
+    const gfm_step = b.step("gfm", "Run GFM extension spec tests (summary table)");
+    const gfm_summary = b.addRunArtifact(spec_exe);
+    gfm_summary.addArgs(&.{ "--summary", "--gfm", "--spec", gfm_spec_txt_path.getPath(b) });
+    gfm_step.dependOn(&gfm_summary.step);
+
+    // zig build gfm-verbose -- all GFM extension tests with failure details
+    const gfm_verbose_step = b.step("gfm-verbose", "Run all GFM extension spec tests with failure details");
+    const gfm_verbose = b.addRunArtifact(spec_exe);
+    gfm_verbose.addArgs(&.{ "--verbose", "--gfm", "--spec", gfm_spec_txt_path.getPath(b) });
+    gfm_verbose_step.dependOn(&gfm_verbose.step);
+
+    // Per-extension steps: zig build gfm-tables, gfm-strikethrough, etc.
+    const gfm_section_defs = .{
+        .{ "gfm-tables", "Tables (extension)", "Run GFM tables spec tests" },
+        .{ "gfm-tasklist", "Task list items (extension)", "Run GFM task list items spec tests" },
+        .{ "gfm-strikethrough", "Strikethrough (extension)", "Run GFM strikethrough spec tests" },
+        .{ "gfm-autolinks", "Autolinks (extension)", "Run GFM autolinks spec tests" },
+        .{ "gfm-rawhtml", "Disallowed Raw HTML (extension)", "Run GFM disallowed raw HTML spec tests" },
+    };
+
+    inline for (gfm_section_defs) |def| {
+        const step = b.step(def[0], def[2]);
+        const run = b.addRunArtifact(spec_exe);
+        run.addArgs(&.{ "--section", def[1], "--verbose", "--spec", gfm_spec_txt_path.getPath(b) });
         step.dependOn(&run.step);
     }
 
