@@ -38,5 +38,11 @@
     "url": "git+https://github.com/Hejsil/mecha#4ee15ea13107bc504a5c17291a7de1d3bf909a32",
     "hash": "sha256-YVGk0Us6M/JpewmTB9RhTL1hj2RC4qBrFukbhXHdX84=",
     "rev": "4ee15ea13107bc504a5c17291a7de1d3bf909a32"
+  },
+  "N-V-__8AACaGFwDmjLKFjd0jlhijuVlTuOCGoRVvp406CsLD": {
+    "name": "gfm_spec",
+    "url": "git+https://github.com/github/cmark-gfm.git#587a12bb54d95ac37241377e6ddc93ea0e45439b",
+    "hash": "sha256-HiSGtRsSbW03R6aKoMVVFOLrwP5aXtpeXUC/bE5M/qo=",
+    "rev": "587a12bb54d95ac37241377e6ddc93ea0e45439b"
   }
 }
