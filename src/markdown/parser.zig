@@ -1,4 +1,4 @@
-//! Markdown parser.
+//! Markdown parser — CommonMark 0.31.2 + GFM extensions.
 //!
 //! Transforms a UTF-8 Markdown string into an `AST.Document`.  The parser
 //! operates in two passes:
@@ -10,6 +10,13 @@
 //!     block, resolving emphasis, links (inline and reference), code
 //!     spans, autolinks, etc.
 //!
+//! **GFM extensions** supported (all 24/24 spec tests passing):
+//!   - Tables (pipe-delimited, column alignment)
+//!   - Task list items (`- [ ]` / `- [x]`)
+//!   - Strikethrough (`~~text~~` → `<del>`)
+//!   - Extended autolinks (bare `www.`, `http(s)://`, `ftp://`, email)
+//!   - Disallowed raw HTML (dangerous tags have `<` escaped to `&lt;`)
+//!
 //! The public entry point is `parseMarkdown`.  All slice references in
 //! the returned AST point into `input` or into owned buffers allocated
 //! with the supplied allocator.  Calling `doc.deinit(allocator)` frees
@@ -17,8 +24,9 @@
 //!
 //! Block-level recognition is driven by the combinators and convenience
 //! wrappers in the public `parsers` namespace.  Inline-level parsing uses
-//! a hand-written state machine (CommonMark delimiter algorithm) because
-//! emphasis nesting cannot be expressed as a pure combinator.
+//! a hand-written state machine (CommonMark delimiter algorithm, extended
+//! for `~~` strikethrough) because emphasis nesting cannot be expressed
+//! as a pure combinator.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const tst = std.testing;

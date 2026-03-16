@@ -1,9 +1,16 @@
-//! HTML renderer for the Markdown AST.
+//! HTML renderer for the Markdown AST — CommonMark + GFM.
 //!
 //! Serialises an `AST.Document` into CommonMark-compliant HTML.  The
 //! output follows the same conventions as the CommonMark reference
 //! implementation (`cmark`): UTF-8, self-closing tags for void elements
 //! (e.g. `<br />`, `<hr />`), and minimal attribute quoting.
+//!
+//! GFM extensions rendered:
+//!   - Tables → `<table>`/`<thead>`/`<tbody>`/`<tr>`/`<th>`/`<td>` with `align` attributes
+//!   - Task list items → `<input disabled="" type="checkbox">` inside `<li>`
+//!   - Strikethrough → `<del>…</del>`
+//!   - Extended autolinks → `<a href="…">` (www links get an `http://` href prefix)
+//!   - Disallowed raw HTML → `<` of dangerous tags escaped to `&lt;`
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const tst = std.testing;
