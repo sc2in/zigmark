@@ -43,11 +43,11 @@ pub fn main() !void {
     const use_spec_path = spec_path orelse default_spec_path;
 
     if (summary_only) {
-        if (gfm_mode) {
-            try printGfmSummary(allocator, use_spec_path);
-        } else {
+        const failed: usize = if (gfm_mode)
+            try printGfmSummary(allocator, use_spec_path)
+        else
             try printSummary(allocator, use_spec_path);
-        }
+        if (failed > 0) std.process.exit(1);
         return;
     }
 
@@ -100,7 +100,7 @@ pub fn main() !void {
     }
 }
 
-fn printGfmSummary(allocator: std.mem.Allocator, spec_path: []const u8) !void {
+fn printGfmSummary(allocator: std.mem.Allocator, spec_path: []const u8) !usize {
     const summary = try zigmark.runGfmSpecSummary(allocator, spec_path);
 
     print("\n{s:<50} {s:>6} {s:>6} {s:>6} {s:>10}\n", .{ "GFM Extension", "Pass", "Fail", "Total", "Time (ms)" });
@@ -122,9 +122,10 @@ fn printGfmSummary(allocator: std.mem.Allocator, spec_path: []const u8) !void {
     print("{s:<50} {d:>6} {d:>6} {d:>6} {d:>10.2}\n", .{
         "TOTAL", summary.all.passed, summary.all.failed, summary.all.total(), total_ms,
     });
+    return summary.all.failed;
 }
 
-fn printSummary(allocator: std.mem.Allocator, spec_path: []const u8) !void {
+fn printSummary(allocator: std.mem.Allocator, spec_path: []const u8) !usize {
     const summary = try zigmark.runSpecSummary(allocator, spec_path);
 
     print("\n{s:<40} {s:>6} {s:>6} {s:>6} {s:>10}\n", .{ "Section", "Pass", "Fail", "Total", "Time (ms)" });
@@ -146,4 +147,5 @@ fn printSummary(allocator: std.mem.Allocator, spec_path: []const u8) !void {
     print("{s:<40} {d:>6} {d:>6} {d:>6} {d:>10.2}\n", .{
         "TOTAL", summary.all.passed, summary.all.failed, summary.all.total(), total_ms,
     });
+    return summary.all.failed;
 }
