@@ -485,7 +485,7 @@ pub fn parseSpecTests(allocator: std.mem.Allocator, spec_content: []const u8) !s
         }
 
         // State machine for parsing example blocks
-        if (std.mem.eql(u8, trimmed, "```````````````````````````````` example")) {
+        if (std.mem.startsWith(u8, trimmed, "```````````````````````````````` example")) {
             state = 1;
             start_line = line_number;
             markdown_lines.clearRetainingCapacity();

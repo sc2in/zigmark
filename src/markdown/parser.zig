@@ -485,11 +485,6 @@ fn isParaBreak(allocator: Allocator, t: []const u8, raw: []const u8) bool {
     }
     if (parsers.tryFenceStart(raw) != null) return true;
     if (parsers.tryFootnoteDef(allocator, t) != null) return true;
-    if (mem.indexOfScalar(u8, raw, '|')) |start| {
-        if (start + 1 < raw.len)
-            return true; // optional: more precise integration if you want
-        // HTML block types 1-6 can interrupt a paragraph (type 7 cannot)
-    }
     if (isHtmlBlockStart(t)) {
         const block_type = htmlBlockEndCondition(t);
         if (block_type != .type7) return true;
@@ -2471,6 +2466,8 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
                 if (lt.len == 0) break;
                 if (!is_first and !self.has_lazy_setext and (isSetextEqLine(lr) or isSetextDashLine(lr))) break;
                 if (!is_first and isParaBreak(allocator, lt, lr)) break;
+                // A valid table start (header + matching delimiter) interrupts a paragraph.
+                if (!is_first and isTableStart(lines, i)) break;
                 const next_setext = !self.has_lazy_setext and i + 1 < lines.len and (isSetextEqLine(lines[i + 1]) or isSetextDashLine(lines[i + 1]));
                 if (!is_first) try para_buf.append(allocator, '\n');
                 is_first = false;
@@ -2522,46 +2519,82 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
     return doc;
 }
 
-fn parseTableDelimiter(line: []const u8, col_count: usize) ?[]AST.TableAlignment {
-    var aligns: [64]AST.TableAlignment = undefined; // hard upper bound; GFM tables are usually small
-    if (col_count > aligns.len) return null;
+/// Returns true if lines[start] is a valid table header and lines[start+1] is a
+/// matching delimiter row (same column count).  No allocation is performed.
+fn isTableStart(lines: []const []const u8, start: usize) bool {
+    if (start + 1 >= lines.len) return false;
+    const header_line = lines[start];
+    const delim_line = lines[start + 1];
+    if (mem.indexOfScalar(u8, header_line, '|') == null) return false;
+
+    // Count header columns (escape-aware)
+    var header_cols: usize = 0;
+    {
+        const t = trimLine(header_line);
+        var i: usize = 0;
+        while (i < t.len and (t[i] == ' ' or t[i] == '\t')) i += 1;
+        if (i < t.len and t[i] == '|') i += 1;
+        while (i < t.len) {
+            header_cols += 1;
+            while (i < t.len) {
+                if (t[i] == '\\' and i + 1 < t.len and t[i + 1] == '|') {
+                    i += 2;
+                } else if (t[i] == '|') {
+                    break;
+                } else {
+                    i += 1;
+                }
+            }
+            if (i < t.len and t[i] == '|') i += 1 else break;
+        }
+    }
+    if (header_cols == 0) return false;
+
+    const delim = parseTableDelimiter(delim_line) orelse return false;
+    return delim.count == header_cols;
+}
+
+const TableDelimResult = struct {
+    alignments: [64]AST.TableAlignment,
+    count: usize,
+};
+
+/// Parse a GFM table delimiter row (e.g. `| :-- | ---: |`).
+/// Returns the alignment for each column and the column count.
+/// Returns null if the line is not a valid delimiter row.
+fn parseTableDelimiter(line: []const u8) ?TableDelimResult {
+    var result = TableDelimResult{ .alignments = undefined, .count = 0 };
 
     var i: usize = 0;
-    var col: usize = 0;
-
     const t = trimLine(line);
     if (t.len == 0) return null;
 
-    while (i < t.len and col < col_count) {
-        // Skip leading spaces and optional leading '|'
-        while (i < t.len and (t[i] == ' ' or t[i] == '\t')) i += 1;
-        if (i < t.len and t[i] == '|') i += 1;
+    // Consume optional leading '|'
+    while (i < t.len and (t[i] == ' ' or t[i] == '\t')) i += 1;
+    if (i < t.len and t[i] == '|') i += 1;
+
+    while (i < t.len) {
+        // Skip spaces before the cell
         while (i < t.len and (t[i] == ' ' or t[i] == '\t')) i += 1;
         if (i >= t.len) break;
+
+        // A bare '|' here means a trailing pipe with nothing after — stop.
+        if (t[i] == '|') break;
 
         // Parse one delimiter cell: optional ':', 1+ '-', optional ':'
         var left_colon = false;
         var right_colon = false;
 
-        if (t[i] == ':') {
-            left_colon = true;
-            i += 1;
-        }
+        if (t[i] == ':') { left_colon = true; i += 1; }
 
         var dash_count: usize = 0;
         while (i < t.len and t[i] == '-') : (i += 1) dash_count += 1;
         if (dash_count < 1) return null;
 
-        if (i < t.len and t[i] == ':') {
-            right_colon = true;
-            i += 1;
-        }
+        if (i < t.len and t[i] == ':') { right_colon = true; i += 1; }
 
-        // Consume trailing spaces up to next '|' or end
-        while (i < t.len and t[i] != '|' and t[i] != '\n' and t[i] != '\r') i += 1;
-        if (i < t.len and t[i] == '|') i += 1;
-
-        const tab_align: AST.TableAlignment = if (left_colon and right_colon)
+        if (result.count >= result.alignments.len) return null;
+        result.alignments[result.count] = if (left_colon and right_colon)
             .center
         else if (left_colon)
             .left
@@ -2569,17 +2602,16 @@ fn parseTableDelimiter(line: []const u8, col_count: usize) ?[]AST.TableAlignment
             .right
         else
             .none;
+        result.count += 1;
 
-        aligns[col] = tab_align;
-        col += 1;
+        // Skip trailing spaces then consume the '|' separator (or stop at end)
+        while (i < t.len and (t[i] == ' ' or t[i] == '\t')) i += 1;
+        if (i >= t.len) break;
+        if (t[i] == '|') i += 1 else return null; // invalid char after cell
     }
 
-    if (col == 0) return null;
-
-    // Fill missing columns with .none if fewer delimiters than header cells
-    while (col < col_count) : (col += 1) aligns[col] = .none;
-
-    return &aligns;
+    if (result.count == 0) return null;
+    return result;
 }
 
 fn splitTableRow(line: []const u8, col_count: usize) []const []const u8 {
@@ -2594,7 +2626,16 @@ fn splitTableRow(line: []const u8, col_count: usize) []const []const u8 {
 
     while (cells.items.len < col_count and i <= t.len) {
         const start = i;
-        while (i < t.len and t[i] != '|') i += 1;
+        // Advance past cell content, treating '\|' as an escaped pipe (not a separator).
+        while (i < t.len) {
+            if (t[i] == '\\' and i + 1 < t.len and t[i + 1] == '|') {
+                i += 2;
+            } else if (t[i] == '|') {
+                break;
+            } else {
+                i += 1;
+            }
+        }
         const cell = mem.trim(u8, t[start..i], " \t");
         cells.append(std.heap.page_allocator, cell) catch break; // temp alloc, caller will dupe
 
@@ -2613,6 +2654,24 @@ const TableParseResult = struct {
     next_line: usize,
 };
 
+/// Replace every `\|` in `src` with `|` (GFM table pipe escaping applies
+/// at the cell level, before inline parsing — including inside code spans).
+fn unescapeTablePipes(allocator: Allocator, src: []const u8) ![]const u8 {
+    if (mem.indexOf(u8, src, "\\|") == null) return allocator.dupe(u8, src);
+    var buf = std.ArrayList(u8){};
+    var i: usize = 0;
+    while (i < src.len) {
+        if (src[i] == '\\' and i + 1 < src.len and src[i + 1] == '|') {
+            try buf.append(allocator, '|');
+            i += 2;
+        } else {
+            try buf.append(allocator, src[i]);
+            i += 1;
+        }
+    }
+    return buf.toOwnedSlice(allocator);
+}
+
 fn parseTableRow(
     allocator: Allocator,
     ref_map: ?*const RefMap,
@@ -2625,7 +2684,7 @@ fn parseTableRow(
 
     for (raw_cells, 0..) |cell_src, idx| {
         var cell = AST.TableCell.init(allocator);
-        const dup = try allocator.dupe(u8, cell_src);
+        const dup = try unescapeTablePipes(allocator, cell_src);
         cell.inline_source = dup;
         try appendInlines(allocator, &cell.children, dup, ref_map);
         try table_row.cells.append(allocator, cell);
@@ -2647,28 +2706,38 @@ fn tryTableStart(
     // Header must contain at least one '|'
     if (mem.indexOfScalar(u8, header_line, '|') == null) return null;
 
-    // Count header columns by splitting on '|'
+    // Count header columns, treating '\|' as an escaped pipe (not a separator).
     var header_cols: usize = 0;
     {
         const t = trimLine(header_line);
         var i: usize = 0;
+        // Skip leading spaces and optional leading '|'
+        while (i < t.len and (t[i] == ' ' or t[i] == '\t')) i += 1;
         if (i < t.len and t[i] == '|') i += 1;
-        while (i <= t.len) {
+        while (i < t.len) {
             header_cols += 1;
-            while (i < t.len and t[i] != '|') i += 1;
+            while (i < t.len) {
+                if (t[i] == '\\' and i + 1 < t.len and t[i + 1] == '|') {
+                    i += 2;
+                } else if (t[i] == '|') {
+                    break;
+                } else {
+                    i += 1;
+                }
+            }
             if (i < t.len and t[i] == '|') i += 1 else break;
         }
     }
 
     if (header_cols == 0) return null;
 
+    // Parse delimiter and require exact column-count match (GFM spec §4.1).
+    const delim = parseTableDelimiter(delim_line) orelse return null;
+    if (delim.count != header_cols) return null;
+
     const align_buf = try allocator.alloc(AST.TableAlignment, header_cols);
     defer allocator.free(align_buf);
-
-    if (parseTableDelimiter(delim_line, header_cols)) |tmp| {
-        // copy alignments into owned buffer
-        for (align_buf, 0..) |*dst, i| dst.* = tmp[i];
-    } else return null;
+    for (align_buf, 0..header_cols) |*dst, i| dst.* = delim.alignments[i];
 
     var table = AST.Table.init(allocator);
     // install alignments

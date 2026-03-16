@@ -506,11 +506,16 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
             try writer.writeAll("<table>\n");
 
             // header
-            try writer.writeAll("<thead>\n<tr>");
-            for (tbl.header.cells.items) |cell| {
-                try writer.writeAll("<th>");
+            try writer.writeAll("<thead>\n<tr>\n");
+            for (tbl.header.cells.items, tbl.alignments.items) |cell, col_align| {
+                switch (col_align) {
+                    .none => try writer.writeAll("<th>"),
+                    .left => try writer.writeAll("<th align=\"left\">"),
+                    .center => try writer.writeAll("<th align=\"center\">"),
+                    .right => try writer.writeAll("<th align=\"right\">"),
+                }
                 for (cell.children.items) |inl| try renderInline(writer, inl);
-                try writer.writeAll("</th>");
+                try writer.writeAll("</th>\n");
             }
             try writer.writeAll("</tr>\n</thead>\n");
 
@@ -518,11 +523,16 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
             if (tbl.body.items.len > 0) {
                 try writer.writeAll("<tbody>\n");
                 for (tbl.body.items) |row| {
-                    try writer.writeAll("<tr>");
-                    for (row.cells.items) |cell| {
-                        try writer.writeAll("<td>");
+                    try writer.writeAll("<tr>\n");
+                    for (row.cells.items, tbl.alignments.items) |cell, col_align| {
+                        switch (col_align) {
+                            .none => try writer.writeAll("<td>"),
+                            .left => try writer.writeAll("<td align=\"left\">"),
+                            .center => try writer.writeAll("<td align=\"center\">"),
+                            .right => try writer.writeAll("<td align=\"right\">"),
+                        }
                         for (cell.children.items) |inl| try renderInline(writer, inl);
-                        try writer.writeAll("</td>");
+                        try writer.writeAll("</td>\n");
                     }
                     try writer.writeAll("</tr>\n");
                 }
@@ -944,10 +954,16 @@ test "gfm table basic" {
             "1 | 2",
         "<table>\n" ++
             "<thead>\n" ++
-            "<tr><th>a</th><th>b</th></tr>\n" ++
+            "<tr>\n" ++
+            "<th>a</th>\n" ++
+            "<th>b</th>\n" ++
+            "</tr>\n" ++
             "</thead>\n" ++
             "<tbody>\n" ++
-            "<tr><td>1</td><td>2</td></tr>\n" ++
+            "<tr>\n" ++
+            "<td>1</td>\n" ++
+            "<td>2</td>\n" ++
+            "</tr>\n" ++
             "</tbody>\n" ++
             "</table>\n",
     );

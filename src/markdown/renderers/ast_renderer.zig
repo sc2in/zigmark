@@ -28,7 +28,63 @@ fn renderBlock(writer: anytype, block: AST.Block, prefix: []const u8, is_last: b
     try writer.writeAll(conn);
 
     switch (block) {
-        .table => {},
+        .table => |tbl| {
+            try writer.print("Table ({d} cols)\n", .{tbl.alignments.items.len});
+            const new_prefix = try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, child_ext });
+            defer allocator.free(new_prefix);
+
+            const total_rows = 1 + tbl.body.items.len;
+
+            // Header row
+            {
+                const last_row = total_rows == 1;
+                const row_conn: []const u8 = if (last_row) connector_last else connector_mid;
+                const row_ext: []const u8 = if (last_row) prefix_last else prefix_mid;
+                try writer.writeAll(new_prefix);
+                try writer.writeAll(row_conn);
+                try writer.writeAll("Header\n");
+                const row_pfx = try std.fmt.allocPrint(allocator, "{s}{s}", .{ new_prefix, row_ext });
+                defer allocator.free(row_pfx);
+                for (tbl.header.cells.items, 0..) |cell, ci| {
+                    const last_cell = ci == tbl.header.cells.items.len - 1;
+                    const cell_conn: []const u8 = if (last_cell) connector_last else connector_mid;
+                    const cell_ext: []const u8 = if (last_cell) prefix_last else prefix_mid;
+                    try writer.writeAll(row_pfx);
+                    try writer.writeAll(cell_conn);
+                    try writer.writeAll("Cell\n");
+                    const cell_pfx = try std.fmt.allocPrint(allocator, "{s}{s}", .{ row_pfx, cell_ext });
+                    defer allocator.free(cell_pfx);
+                    for (cell.children.items, 0..) |inl, j| {
+                        try renderInline(writer, inl, cell_pfx, j == cell.children.items.len - 1, allocator);
+                    }
+                }
+            }
+
+            // Body rows
+            for (tbl.body.items, 0..) |row, ri| {
+                const last_row = ri == tbl.body.items.len - 1;
+                const row_conn: []const u8 = if (last_row) connector_last else connector_mid;
+                const row_ext: []const u8 = if (last_row) prefix_last else prefix_mid;
+                try writer.writeAll(new_prefix);
+                try writer.writeAll(row_conn);
+                try writer.writeAll("Row\n");
+                const row_pfx = try std.fmt.allocPrint(allocator, "{s}{s}", .{ new_prefix, row_ext });
+                defer allocator.free(row_pfx);
+                for (row.cells.items, 0..) |cell, ci| {
+                    const last_cell = ci == row.cells.items.len - 1;
+                    const cell_conn: []const u8 = if (last_cell) connector_last else connector_mid;
+                    const cell_ext: []const u8 = if (last_cell) prefix_last else prefix_mid;
+                    try writer.writeAll(row_pfx);
+                    try writer.writeAll(cell_conn);
+                    try writer.writeAll("Cell\n");
+                    const cell_pfx = try std.fmt.allocPrint(allocator, "{s}{s}", .{ row_pfx, cell_ext });
+                    defer allocator.free(cell_pfx);
+                    for (cell.children.items, 0..) |inl, j| {
+                        try renderInline(writer, inl, cell_pfx, j == cell.children.items.len - 1, allocator);
+                    }
+                }
+            }
+        },
         .paragraph => |para| {
             try writer.writeAll("Paragraph\n");
             const new_prefix = try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, child_ext });
@@ -330,4 +386,22 @@ test "ast: render via Renderer interface" {
     try tst.expect(std.mem.indexOf(u8, output, "Document") != null);
     try tst.expect(std.mem.indexOf(u8, output, "Heading (level=1)") != null);
     try tst.expect(std.mem.indexOf(u8, output, "Text \"Hello\"") != null);
+}
+
+test "ast: table" {
+    try ok("a | b\n---|---\n1 | 2",
+        \\Document
+        \\└── Table (2 cols)
+        \\    ├── Header
+        \\    │   ├── Cell
+        \\    │   │   └── Text "a"
+        \\    │   └── Cell
+        \\    │       └── Text "b"
+        \\    └── Row
+        \\        ├── Cell
+        \\        │   └── Text "1"
+        \\        └── Cell
+        \\            └── Text "2"
+        \\
+    );
 }
