@@ -57,9 +57,10 @@
   <textarea id="editor" spellcheck="false" placeholder="Type Markdown here…">
 # zigmark: Markdown at the Speed of Zig 🚀
 
-> **A CommonMark-compliant Markdown parser, written in Zig, compiled to WebAssembly.**
+> **A CommonMark + GFM-compliant Markdown parser, written in Zig, compiled to WebAssembly.**
 >
 > - 652/652 CommonMark spec tests passing ✅
+> - 24/24 GFM extension tests passing ✅
 > - Three renderers: HTML, AST, AI
 > - Zero runtime dependencies
 > - Blazing fast — often faster than JS!
@@ -96,7 +97,7 @@
 ## Emphasis & Inline
 
 *Italic* _Italic_ **Bold** __Bold__ ***Bold Italic***
-`Inline code`
+~~Strikethrough~~ `Inline code`
 
 ---
 
@@ -146,7 +147,9 @@ Here is a footnote reference[^1].
 ```
 
 
-## GFM Tables
+## GFM Extensions
+
+### Tables
 
 | Name    | Role      | Score |
 | ------- | --------- | ----: |
@@ -161,6 +164,18 @@ Alignment: left (`:---`), center (`:---:`), right (`---:`).
 | apples  | bananas | 1.0000 |
 | oranges |  grapes | 0.5000 |
 
+### Task Lists
+
+- [x] Implement CommonMark parser
+- [x] Add GFM extensions
+- [ ] World domination
+
+### Autolinks
+
+Bare URLs and emails are linked automatically:
+
+Visit www.example.com or https://ziglang.org or email contact@sc2.in
+
 ---
 
 ## Raw HTML
@@ -174,7 +189,7 @@ Alignment: left (`:---`), center (`:---:`), right (`---:`).
 
 ## Spec Compliance
 
-All <b>652/652</b> CommonMark tests pass, plus <b>8/8</b> GFM table extension tests.
+All <b>652/652</b> CommonMark tests pass and all <b>24/24</b> GFM extension tests pass.
 See the <a href="https://github.com/sc2in/zigmark">README</a> for a full breakdown.
 
 ---

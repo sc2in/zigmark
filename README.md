@@ -1,6 +1,6 @@
 # zigmark
 
-A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 652 spec tests** (100%).
+A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 652 CommonMark spec tests** and **all 24 GFM extension tests** (100%).
 
 Builds as both a **CLI tool** and a **C-callable shared library** (`libzigmark.so`).
 
@@ -219,13 +219,19 @@ Every section of the [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) sp
 | Soft line breaks | 2 |
 | Textual content | 3 |
 
-### GFM Extensions — 8/8 ✅
+### GFM Extensions — 24/24 ✅
 
-[GitHub Flavored Markdown](https://github.github.com/gfm/) tables are fully supported, passing all 8 spec tests.
+All [GitHub Flavored Markdown](https://github.github.com/gfm/) extensions pass.
 
-| GFM Extension | Tests  |
-|---------------|--------|
-| Tables        | 8/8 ✅ |
+| GFM Extension          | Tests   |
+|------------------------|---------|
+| Tables                 | 8/8 ✅  |
+| Task list items        | 2/2 ✅  |
+| Strikethrough          | 2/2 ✅  |
+| Autolinks (extended)   | 11/11 ✅ |
+| Disallowed raw HTML    | 1/1 ✅  |
+
+**Tables** — pipe-delimited with column alignment (`---`, `:---`, `---:`, `:---:`):
 
 ```markdown
 | Name    | Role     | Score |
@@ -234,7 +240,27 @@ Every section of the [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) sp
 | Bob     | Designer |    37 |
 ```
 
-Column alignment (`---`, `:---`, `---:`, `:---:`) is respected in the rendered output.
+**Task lists** — checked and unchecked items render as disabled checkboxes:
+
+```markdown
+- [x] Done
+- [ ] Not done
+```
+
+**Strikethrough** — `~~text~~` renders as `<del>text</del>`:
+
+```markdown
+~~deleted text~~
+```
+
+**Extended autolinks** — bare `www.` links, `http://`/`https://`/`ftp://` URLs, and bare email addresses are auto-linked without angle brackets:
+
+```markdown
+Visit www.example.com or https://example.com or email user@example.com
+```
+
+**Disallowed raw HTML** — the tags `<title>`, `<textarea>`, `<style>`, `<xmp>`, `<iframe>`, `<noembed>`, `<noframes>`, `<script>`, and `<plaintext>` have their opening `<` escaped to `&lt;`.
+
 Run the GFM suite with `zig build gfm`.
 
 ### Extensions
@@ -242,6 +268,10 @@ Run the GFM suite with `zig build gfm`.
 - **Frontmatter** — YAML (`---`) and TOML (`+++`) extraction, parsed as JSON
 - **Footnotes** — `[^label]` references and definitions
 - **GFM Tables** — pipe-delimited tables with optional column alignment
+- **GFM Task lists** — `- [x]` / `- [ ]` items rendered as disabled checkboxes
+- **GFM Strikethrough** — `~~text~~` rendered as `<del>text</del>`
+- **GFM Extended autolinks** — bare `www.`, `http(s)://`, `ftp://`, and email autolinks
+- **GFM Disallowed raw HTML** — dangerous tags escaped at render time
 
 ## Building & Testing
 
@@ -338,7 +368,6 @@ Requires **Zig 0.15.2** or later.
 
 ## Future Plans
 
-- GFM extensions (strikethrough, task lists, autolinks)
 - Additional renderers (LaTeX, plain text, Markdown normaliser)
 - Streaming parser for large documents
 - AST modification API
@@ -364,12 +393,13 @@ hours and we will work with you on a fix before any public disclosure.
 
 ### Guidelines
 
-- **Tests must pass.** Run `zig build test` (unit) and `zig build spec` (all
-  652 CommonMark spec tests) before opening a PR.
+- **Tests must pass.** Run `zig build test` (unit), `zig build spec` (all
+  652 CommonMark spec tests), and `zig build gfm` (all 24 GFM extension
+  tests) before opening a PR.
 - **One concern per PR.** Keep pull requests focused — a bug fix, a new
   feature, or a refactor, not all three at once.
-- **No spec regressions.** The 652/652 CommonMark 0.31.2 pass rate is the
-  baseline. PRs that cause spec failures will not be merged.
+- **No spec regressions.** The 652/652 CommonMark 0.31.2 and 24/24 GFM
+  pass rates are the baseline. PRs that cause spec failures will not be merged.
 - **Follow existing style.** The codebase uses `zig fmt`-standard formatting
   and descriptive naming. When in doubt, match what's already there.
 - **Document public API changes.** If you add or change an exported function,

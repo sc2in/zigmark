@@ -122,13 +122,12 @@ pub fn build(b: *std.Build) void {
     const mod_tests = b.addTest(.{
         .root_module = zigmark,
     });
-    // Pass the spec file path as a test argument so tests can use the same spec input as the spec runner
     const run_mod_tests = b.addRunArtifact(mod_tests);
     const exe_tests = b.addTest(.{
         .root_module = exe.root_module,
     });
     const run_exe_tests = b.addRunArtifact(exe_tests);
-    const test_step = b.step("test", "Run tests");
+    const test_step = b.step("test", "Run unit tests + CommonMark spec + GFM spec");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
 
@@ -146,52 +145,61 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    // zig build spec -- summary table of all sections
-    const spec_step = b.step("spec", "Run CommonMark spec tests (summary table)");
-    const spec_summary = b.addRunArtifact(spec_exe);
-    spec_summary.addArgs(&.{ "--summary", "--spec", spec_txt_path.getPath(b) });
-    spec_step.dependOn(&spec_summary.step);
+    // ── zig build spec ────────────────────────────────────────────────────────
+    // Side-by-side CommonMark + GFM summaries; GFM supersedes where they conflict.
+    // GFM summary runs after CommonMark so output is sequential.
+    const spec_step = b.step("spec", "Run CommonMark + GFM spec tests side by side (GFM supersedes)");
+    const spec_cmark_summary = b.addRunArtifact(spec_exe);
+    spec_cmark_summary.addArgs(&.{ "--summary", "--spec", spec_txt_path.getPath(b) });
+    const spec_gfm_summary = b.addRunArtifact(spec_exe);
+    spec_gfm_summary.addArgs(&.{ "--summary", "--gfm", "--spec", gfm_spec_txt_path.getPath(b) });
+    spec_gfm_summary.step.dependOn(&spec_cmark_summary.step);
+    spec_step.dependOn(&spec_gfm_summary.step);
 
-    // zig build spec-verbose -- all tests with failure details
-    const spec_verbose_step = b.step("spec-verbose", "Run all CommonMark spec tests with failure details");
-    const spec_verbose = b.addRunArtifact(spec_exe);
-    spec_verbose.addArgs(&.{ "--verbose", "--spec", spec_txt_path.getPath(b) });
-    spec_verbose_step.dependOn(&spec_verbose.step);
+    // ── zig build cmark ───────────────────────────────────────────────────────
+    const cmark_step = b.step("cmark", "Run CommonMark spec tests (summary table)");
+    const cmark_summary = b.addRunArtifact(spec_exe);
+    cmark_summary.addArgs(&.{ "--summary", "--spec", spec_txt_path.getPath(b) });
+    cmark_step.dependOn(&cmark_summary.step);
 
-    // Per-section steps: zig build spec-emphasis, spec-links, etc.
+    // zig build cmark-verbose -- all CommonMark tests with failure details
+    const cmark_verbose_step = b.step("cmark-verbose", "Run all CommonMark spec tests with failure details");
+    const cmark_verbose = b.addRunArtifact(spec_exe);
+    cmark_verbose.addArgs(&.{ "--verbose", "--spec", spec_txt_path.getPath(b) });
+    cmark_verbose_step.dependOn(&cmark_verbose.step);
+
+    // Per-section steps: zig build cmark-atx, cmark-emphasis, etc.
     const section_defs = .{
-        .{ "spec-atx", "ATX", "Run ATX heading spec tests" },
-        .{ "spec-setext", "Setext", "Run setext heading spec tests" },
-        .{ "spec-thematic", "Thematic", "Run thematic break spec tests" },
-        .{ "spec-paragraph", "Paragraph", "Run paragraph spec tests" },
-        .{ "spec-blank", "Blank", "Run blank line spec tests" },
-        .{ "spec-indented", "Indented", "Run indented code spec tests" },
-        .{ "spec-fenced", "Fenced", "Run fenced code spec tests" },
-        .{ "spec-blockquote", "Blockquote", "Run blockquote spec tests" },
-        .{ "spec-list", "List", "Run list spec tests" },
-        .{ "spec-backslash", "Backslash", "Run backslash escape spec tests" },
-        .{ "spec-entity", "Entity", "Run entity spec tests" },
-        .{ "spec-codespan", "Code span", "Run code span spec tests" },
-        .{ "spec-emphasis", "Emphasis", "Run emphasis spec tests" },
-        .{ "spec-links", "Link", "Run link spec tests" },
-        .{ "spec-image", "Image", "Run image spec tests" },
-        .{ "spec-autolink", "Autolink", "Run autolink spec tests" },
-        .{ "spec-rawhtml", "Raw HTML", "Run raw HTML spec tests" },
-        .{ "spec-hardline", "Hard line", "Run hard line break spec tests" },
-        .{ "spec-softline", "Soft line", "Run soft line break spec tests" },
-        .{ "spec-textual", "Textual", "Run textual content spec tests" },
+        .{ "atx", "ATX", "Run ATX heading spec tests" },
+        .{ "setext", "Setext", "Run setext heading spec tests" },
+        .{ "thematic", "Thematic", "Run thematic break spec tests" },
+        .{ "paragraph", "Paragraph", "Run paragraph spec tests" },
+        .{ "blank", "Blank", "Run blank line spec tests" },
+        .{ "indented", "Indented", "Run indented code spec tests" },
+        .{ "fenced", "Fenced", "Run fenced code spec tests" },
+        .{ "blockquote", "Blockquote", "Run blockquote spec tests" },
+        .{ "list", "List", "Run list spec tests" },
+        .{ "backslash", "Backslash", "Run backslash escape spec tests" },
+        .{ "entity", "Entity", "Run entity spec tests" },
+        .{ "codespan", "Code span", "Run code span spec tests" },
+        .{ "emphasis", "Emphasis", "Run emphasis spec tests" },
+        .{ "links", "Link", "Run link spec tests" },
+        .{ "image", "Image", "Run image spec tests" },
+        .{ "autolink", "Autolink", "Run autolink spec tests" },
+        .{ "html", "Raw HTML", "Run raw HTML spec tests" },
+        .{ "hardline", "Hard line", "Run hard line break spec tests" },
+        .{ "softline", "Soft line", "Run soft line break spec tests" },
+        .{ "textual", "Textual", "Run textual content spec tests" },
     };
 
     inline for (section_defs) |def| {
-        const step = b.step(def[0], def[2]);
+        const step = b.step("cmark-" ++ def[0], def[2]);
         const run = b.addRunArtifact(spec_exe);
         run.addArgs(&.{ "--section", def[1], "--verbose", "--spec", spec_txt_path.getPath(b) });
         step.dependOn(&run.step);
     }
 
-    // ── GFM extension spec runner ─────────────────────────────────────────────
-
-    // zig build gfm -- summary table of GFM extension sections
+    // ── zig build gfm ─────────────────────────────────────────────────────────
     const gfm_step = b.step("gfm", "Run GFM extension spec tests (summary table)");
     const gfm_summary = b.addRunArtifact(spec_exe);
     gfm_summary.addArgs(&.{ "--summary", "--gfm", "--spec", gfm_spec_txt_path.getPath(b) });
@@ -218,6 +226,10 @@ pub fn build(b: *std.Build) void {
         run.addArgs(&.{ "--section", def[1], "--verbose", "--spec", gfm_spec_txt_path.getPath(b) });
         step.dependOn(&run.step);
     }
+
+    // ── spec runs wired into zig build test ───────────────────────────────────
+    // Reuse the same spec_step pathway (summary mode now exits 1 on any failure).
+    test_step.dependOn(spec_step);
 
     // ── WASM build ───────────────────────────────────────────────────────────
 

@@ -1,9 +1,16 @@
-//! HTML renderer for the Markdown AST.
+//! HTML renderer for the Markdown AST — CommonMark + GFM.
 //!
 //! Serialises an `AST.Document` into CommonMark-compliant HTML.  The
 //! output follows the same conventions as the CommonMark reference
 //! implementation (`cmark`): UTF-8, self-closing tags for void elements
 //! (e.g. `<br />`, `<hr />`), and minimal attribute quoting.
+//!
+//! GFM extensions rendered:
+//!   - Tables → `<table>`/`<thead>`/`<tbody>`/`<tr>`/`<th>`/`<td>` with `align` attributes
+//!   - Task list items → `<input disabled="" type="checkbox">` inside `<li>`
+//!   - Strikethrough → `<del>…</del>`
+//!   - Extended autolinks → `<a href="…">` (www links get an `http://` href prefix)
+//!   - Disallowed raw HTML → `<` of dangerous tags escaped to `&lt;`
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const tst = std.testing;
@@ -428,9 +435,55 @@ fn writeEscapedTitleWithEntities(writer: anytype, s: []const u8) !void {
     }
 }
 
+// ── GFM disallowed raw HTML filter ───────────────────────────────────────────
+
+/// GFM tagfilter: these tags must have their '<' escaped to '&lt;'
+const disallowed_html_tags = std.StaticStringMap(void).initComptime(.{
+    .{ "title", {} },    .{ "textarea", {} }, .{ "style", {} },
+    .{ "xmp", {} },      .{ "iframe", {} },   .{ "noembed", {} },
+    .{ "noframes", {} }, .{ "script", {} },   .{ "plaintext", {} },
+});
+
+fn writeHtmlFiltered(writer: anytype, s: []const u8, gfm: bool) !void {
+    if (!gfm) return writer.writeAll(s);
+    var i: usize = 0;
+    while (i < s.len) {
+        if (s[i] == '<' and i + 1 < s.len) {
+            const rest = s[i + 1 ..];
+            // Skip optional '/' for closing tags
+            const tag_offset: usize = if (rest.len > 0 and rest[0] == '/') 1 else 0;
+            // Extract tag name lowercased (max 16 chars)
+            var tag_buf: [16]u8 = undefined;
+            var tag_len: usize = 0;
+            var k = tag_offset;
+            while (k < rest.len and tag_len < 16) {
+                const ch = rest[k];
+                if ((ch >= 'a' and ch <= 'z') or (ch >= 'A' and ch <= 'Z')) {
+                    tag_buf[tag_len] = if (ch >= 'A' and ch <= 'Z') ch + 32 else ch;
+                    tag_len += 1;
+                    k += 1;
+                } else break;
+            }
+            // After tag name must be space, >, /, \t, \n, or end-of-string
+            const after_tag = tag_offset + tag_len;
+            const valid_end = after_tag >= rest.len or
+                rest[after_tag] == ' ' or rest[after_tag] == '>' or
+                rest[after_tag] == '/' or rest[after_tag] == '\t' or rest[after_tag] == '\n';
+            if (tag_len > 0 and valid_end and disallowed_html_tags.has(tag_buf[0..tag_len])) {
+                try writer.writeAll("&lt;");
+            } else {
+                try writer.writeByte('<');
+            }
+        } else {
+            try writer.writeByte(s[i]);
+        }
+        i += 1;
+    }
+}
+
 // ── Inline renderer ───────────────────────────────────────────────────────────
 
-fn renderInline(writer: anytype, item: AST.Inline) !void {
+fn renderInline(writer: anytype, item: AST.Inline, gfm: bool) !void {
     switch (item) {
         .text => |t| try writeEscapedWithEntities(writer, t.content),
         .soft_break => try writer.writeByte('\n'),
@@ -442,13 +495,18 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
         },
         .emphasis => |e| {
             try writer.writeAll("<em>");
-            for (e.children.items) |child| try renderInline(writer, child);
+            for (e.children.items) |child| try renderInline(writer, child, gfm);
             try writer.writeAll("</em>");
         },
         .strong => |s| {
             try writer.writeAll("<strong>");
-            for (s.children.items) |child| try renderInline(writer, child);
+            for (s.children.items) |child| try renderInline(writer, child, gfm);
             try writer.writeAll("</strong>");
+        },
+        .strikethrough => |s| {
+            try writer.writeAll("<del>");
+            for (s.children.items) |child| try renderInline(writer, child, gfm);
+            try writer.writeAll("</del>");
         },
         .link => |l| {
             try writer.writeAll("<a href=\"");
@@ -460,7 +518,7 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
                 try writer.writeByte('"');
             }
             try writer.writeByte('>');
-            for (l.children.items) |child| try renderInline(writer, child);
+            for (l.children.items) |child| try renderInline(writer, child, gfm);
             try writer.writeAll("</a>");
         },
         .image => |img| {
@@ -477,30 +535,24 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
             try writer.writeAll(" />");
         },
         .autolink => |al| {
-            if (al.is_email) {
-                try writer.writeAll("<a href=\"mailto:");
-                try writeUrlEncodedLiteral(writer, al.url);
-                try writer.writeAll("\">");
-                try writeEscaped(writer, al.url);
-                try writer.writeAll("</a>");
-            } else {
-                try writer.writeAll("<a href=\"");
-                try writeUrlEncodedLiteral(writer, al.url);
-                try writer.writeAll("\">");
-                try writeEscaped(writer, al.url);
-                try writer.writeAll("</a>");
-            }
+            try writer.writeAll("<a href=\"");
+            if (al.is_email) try writer.writeAll("mailto:");
+            if (al.is_gfm_www) try writer.writeAll("http://");
+            try writeUrlEncodedLiteral(writer, al.url);
+            try writer.writeAll("\">");
+            try writeEscaped(writer, al.url);
+            try writer.writeAll("</a>");
         },
         .footnote_reference => |fr| {
             try writer.print("<a href=\"#fn:{s}\" class=\"footnote-ref\">{s}</a>", .{ fr.label, fr.label });
         },
-        .html_in_line => |hi| try writer.writeAll(hi.content),
+        .html_in_line => |hi| try writeHtmlFiltered(writer, hi.content, gfm),
     }
 }
 
 // ── Block renderer ────────────────────────────────────────────────────────────
 
-fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
+fn renderBlock(writer: *std.Io.Writer, block: AST.Block, gfm: bool) !void {
     switch (block) {
         .table => |tbl| {
             try writer.writeAll("<table>\n");
@@ -514,7 +566,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                     .center => try writer.writeAll("<th align=\"center\">"),
                     .right => try writer.writeAll("<th align=\"right\">"),
                 }
-                for (cell.children.items) |inl| try renderInline(writer, inl);
+                for (cell.children.items) |inl| try renderInline(writer, inl, gfm);
                 try writer.writeAll("</th>\n");
             }
             try writer.writeAll("</tr>\n</thead>\n");
@@ -531,7 +583,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                             .center => try writer.writeAll("<td align=\"center\">"),
                             .right => try writer.writeAll("<td align=\"right\">"),
                         }
-                        for (cell.children.items) |inl| try renderInline(writer, inl);
+                        for (cell.children.items) |inl| try renderInline(writer, inl, gfm);
                         try writer.writeAll("</td>\n");
                     }
                     try writer.writeAll("</tr>\n");
@@ -544,12 +596,12 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
 
         .heading => |h| {
             try writer.print("<h{d}>", .{h.level});
-            for (h.children.items) |item| try renderInline(writer, item);
+            for (h.children.items) |item| try renderInline(writer, item, gfm);
             try writer.print("</h{d}>\n", .{h.level});
         },
         .paragraph => |p| {
             try writer.writeAll("<p>");
-            for (p.children.items) |item| try renderInline(writer, item);
+            for (p.children.items) |item| try renderInline(writer, item, gfm);
             try writer.writeAll("</p>\n");
         },
         .thematic_break => try writer.writeAll("<hr />\n"),
@@ -574,7 +626,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
         },
         .blockquote => |bq| {
             try writer.writeAll("<blockquote>\n");
-            for (bq.children.items) |child| try renderBlock(writer, child);
+            for (bq.children.items) |child| try renderBlock(writer, child, gfm);
             try writer.writeAll("</blockquote>\n");
         },
         .list => |lst| {
@@ -599,6 +651,13 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                         item.children.items[0] == .paragraph;
                     if (starts_with_para) {
                         try writer.writeAll("<li>");
+                        if (item.task_list_checked) |checked| {
+                            if (checked) {
+                                try writer.writeAll("<input checked=\"\" disabled=\"\" type=\"checkbox\"> ");
+                            } else {
+                                try writer.writeAll("<input disabled=\"\" type=\"checkbox\"> ");
+                            }
+                        }
                     } else {
                         // Item has only block-level children (e.g. code blocks)
                         if (item.children.items.len == 0) {
@@ -612,7 +671,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                     for (item.children.items) |child| {
                         switch (child) {
                             .paragraph => |p| {
-                                for (p.children.items) |inl| try renderInline(writer, inl);
+                                for (p.children.items) |inl| try renderInline(writer, inl, gfm);
                                 wrote_inline = true;
                             },
                             else => {
@@ -621,7 +680,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                                     try writer.writeByte('\n');
                                 }
                                 wrote_inline = false;
-                                try renderBlock(writer, child);
+                                try renderBlock(writer, child, gfm);
                             },
                         }
                     }
@@ -632,7 +691,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                         try writer.writeAll("<li>");
                     } else {
                         try writer.writeAll("<li>\n");
-                        for (item.children.items) |child| try renderBlock(writer, child);
+                        for (item.children.items) |child| try renderBlock(writer, child, gfm);
                     }
                     try writer.writeAll("</li>\n");
                 }
@@ -645,15 +704,15 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                 switch (child) {
                     .paragraph => |p| {
                         try writer.print("<p><b>{s}</b>: ", .{fd.label});
-                        for (p.children.items) |inl| try renderInline(writer, inl);
+                        for (p.children.items) |inl| try renderInline(writer, inl, gfm);
                         try writer.writeAll("</p>\n");
                     },
-                    else => try renderBlock(writer, child),
+                    else => try renderBlock(writer, child, gfm),
                 }
             }
             try writer.writeAll("</div>\n");
         },
-        .html_block => |hb| try writer.writeAll(hb.content),
+        .html_block => |hb| try writeHtmlFiltered(writer, hb.content, gfm),
     }
 }
 
@@ -665,7 +724,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
 pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-    for (doc.children.items) |child| try renderBlock(&aw.writer, child);
+    for (doc.children.items) |child| try renderBlock(&aw.writer, child, doc.gfm);
     return aw.toOwnedSlice();
 }
 

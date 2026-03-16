@@ -1,4 +1,4 @@
-//! Markdown parser.
+//! Markdown parser — CommonMark 0.31.2 + GFM extensions.
 //!
 //! Transforms a UTF-8 Markdown string into an `AST.Document`.  The parser
 //! operates in two passes:
@@ -10,6 +10,13 @@
 //!     block, resolving emphasis, links (inline and reference), code
 //!     spans, autolinks, etc.
 //!
+//! **GFM extensions** supported (all 24/24 spec tests passing):
+//!   - Tables (pipe-delimited, column alignment)
+//!   - Task list items (`- [ ]` / `- [x]`)
+//!   - Strikethrough (`~~text~~` → `<del>`)
+//!   - Extended autolinks (bare `www.`, `http(s)://`, `ftp://`, email)
+//!   - Disallowed raw HTML (dangerous tags have `<` escaped to `&lt;`)
+//!
 //! The public entry point is `parseMarkdown`.  All slice references in
 //! the returned AST point into `input` or into owned buffers allocated
 //! with the supplied allocator.  Calling `doc.deinit(allocator)` frees
@@ -17,8 +24,9 @@
 //!
 //! Block-level recognition is driven by the combinators and convenience
 //! wrappers in the public `parsers` namespace.  Inline-level parsing uses
-//! a hand-written state machine (CommonMark delimiter algorithm) because
-//! emphasis nesting cannot be expressed as a pure combinator.
+//! a hand-written state machine (CommonMark delimiter algorithm, extended
+//! for `~~` strikethrough) because emphasis nesting cannot be expressed
+//! as a pure combinator.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const tst = std.testing;
@@ -1046,13 +1054,13 @@ fn isRightFlanking(input: []const u8, rs: usize, rl: usize) bool {
 
 fn canOpen(input: []const u8, marker: u8, rs: usize, rl: usize) bool {
     const lf = isLeftFlanking(input, rs, rl);
-    if (marker == '*') return lf;
+    if (marker == '*' or marker == '~') return lf;
     return lf and (!isRightFlanking(input, rs, rl) or (rs > 0 and isUnicodePunct(input, rs - 1)));
 }
 
 fn canClose(input: []const u8, marker: u8, rs: usize, rl: usize) bool {
     const rf = isRightFlanking(input, rs, rl);
-    if (marker == '*') return rf;
+    if (marker == '*' or marker == '~') return rf;
     return rf and (!isLeftFlanking(input, rs, rl) or (rs + rl < input.len and isUnicodePunct(input, rs + rl)));
 }
 
@@ -1088,7 +1096,9 @@ fn wrapDelimiters(
     var ci = open_il + 1;
     while (ci < close_il) : (ci += 1) try children.append(allocator, inlines.items[ci]);
 
-    const node: AST.Inline = if (use_count == 2)
+    const node: AST.Inline = if (closer.marker == '~')
+        .{ .strikethrough = .{ .children = children } }
+    else if (use_count == 2)
         .{ .strong = .{ .children = children, .marker = closer.marker } }
     else
         .{ .emphasis = .{ .children = children, .marker = closer.marker } };
@@ -1142,8 +1152,10 @@ fn processEmphasis(allocator: Allocator, inlines: *std.ArrayList(AST.Inline), de
                 (opener.orig_count + closer.orig_count) % 3 == 0 and
                 opener.orig_count % 3 != 0 and closer.orig_count % 3 != 0) continue;
 
+            // Strikethrough (~) requires at least 2 on each side
+            if (closer.marker == '~' and (closer.count < 2 or opener.count < 2)) continue;
             found = true;
-            const uc: usize = if (closer.count >= 2 and opener.count >= 2) 2 else 1;
+            const uc: usize = if (closer.marker == '~') 2 else if (closer.count >= 2 and opener.count >= 2) 2 else 1;
             try wrapDelimiters(allocator, inlines, delimiters, oi, closer_idx, uc);
             closer = &delimiters.items[closer_idx]; // refresh after splice
             if (closer.count == 0) {
@@ -1172,7 +1184,7 @@ fn processEmphasis(allocator: Allocator, inlines: *std.ArrayList(AST.Inline), de
     inlines.items.len = w;
 }
 
-fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap) !std.ArrayList(AST.Inline) {
+fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap, gfm: bool) !std.ArrayList(AST.Inline) {
     var inlines = std.ArrayList(AST.Inline){};
     var delimiters = std.ArrayList(Delimiter){};
     defer delimiters.deinit(allocator);
@@ -1233,7 +1245,7 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
         // Image ![alt](url) or ![alt][ref]
         if (c == '!' and pos + 1 < input.len and input[pos + 1] == '[') {
             if (tryParseLink(input, pos + 1)) |r| {
-                const alt = try flattenInlineText(allocator, r.text, ref_map);
+                const alt = try flattenInlineText(allocator, r.text, ref_map, gfm);
                 try inlines.append(allocator, .{ .image = .{
                     .alt_text = alt,
                     .destination = .{
@@ -1246,7 +1258,7 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
                 continue;
             }
             if (ref_map) |rm| {
-                if (tryParseImageRefLink(allocator, input, pos, rm)) |r| {
+                if (tryParseImageRefLink(allocator, input, pos, rm, gfm)) |r| {
                     try inlines.append(allocator, r.inline_node);
                     pos = r.end;
                     continue;
@@ -1266,7 +1278,7 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
                 }
             }
             if (tryParseLink(input, pos)) |r| {
-                var nested = try parseInlineElements(allocator, r.text, ref_map);
+                var nested = try parseInlineElements(allocator, r.text, ref_map, gfm);
                 if (containsLink(nested.items)) {
                     for (nested.items) |*item| item.deinit(allocator);
                     nested.deinit(allocator);
@@ -1285,7 +1297,7 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
                 continue;
             }
             if (ref_map) |rm| {
-                if (tryParseRefLink(allocator, input, pos, rm)) |r| {
+                if (tryParseRefLink(allocator, input, pos, rm, gfm)) |r| {
                     try inlines.append(allocator, r.inline_node);
                     pos = r.end;
                     continue;
@@ -1316,12 +1328,72 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
             continue;
         }
 
+        // Strikethrough delimiter (GFM: ~~text~~)
+        if (c == '~') {
+            const rs = pos;
+            var rl: usize = 0;
+            while (pos + rl < input.len and input[pos + rl] == '~') rl += 1;
+            if (rl >= 2) {
+                const opens = canOpen(input, '~', rs, rl);
+                const closes = canClose(input, '~', rs, rl);
+                try inlines.append(allocator, .{ .text = .{ .content = input[rs .. rs + rl] } });
+                if (opens or closes)
+                    try delimiters.append(allocator, .{
+                        .inline_idx = inlines.items.len - 1,
+                        .input_pos = rs,
+                        .count = rl,
+                        .orig_count = rl,
+                        .marker = '~',
+                        .can_open = opens,
+                        .can_close = closes,
+                        .active = true,
+                    });
+            } else {
+                try inlines.append(allocator, .{ .text = .{ .content = input[rs .. rs + rl] } });
+            }
+            pos += rl;
+            continue;
+        }
+
+        // GFM email autolink — detect '@' using raw input for full local-part
+        if (gfm and c == '@') {
+            var local_start = pos;
+            while (local_start > 0 and isEmailLocalChar(input[local_start - 1])) local_start -= 1;
+            // Don't fire if local-part starts right after a backslash escape
+            // (e.g. `<foo\+@bar.com>` — the `+` came from `\+`, not a bare local-part).
+            const preceded_by_backslash = local_start > 0 and input[local_start - 1] == '\\';
+            if (local_start < pos and !preceded_by_backslash) {
+                // Scan forward for domain
+                var domain_end = pos + 1;
+                while (domain_end < input.len and isEmailDomainChar(input[domain_end])) domain_end += 1;
+                // Trim trailing dots
+                while (domain_end > pos + 1 and input[domain_end - 1] == '.') domain_end -= 1;
+                const domain = input[pos + 1 .. domain_end];
+                var has_period = false;
+                for (domain) |ch| if (ch == '.') { has_period = true; break; };
+                const last_ok = domain.len > 0 and domain[domain.len - 1] != '-' and domain[domain.len - 1] != '_';
+                if (has_period and last_ok) {
+                    // Strip already-emitted local-part chars from inlines/delimiters
+                    stripLastNCharsFromInlines(&inlines, &delimiters, pos - local_start);
+                    try inlines.append(allocator, .{ .autolink = .{
+                        .url = input[local_start..domain_end],
+                        .is_email = true,
+                    } });
+                    pos = domain_end;
+                    continue;
+                }
+            }
+            try inlines.append(allocator, .{ .text = .{ .content = input[pos .. pos + 1] } });
+            pos += 1;
+            continue;
+        }
+
         // Plain text
         var te = pos;
         while (te < input.len) {
             const ch = input[te];
-            if (ch == '*' or ch == '_' or ch == '[' or ch == '!' or
-                ch == '`' or ch == '<' or ch == '\\' or ch == '\n') break;
+            if (ch == '*' or ch == '_' or ch == '~' or ch == '[' or ch == '!' or
+                ch == '`' or ch == '<' or ch == '\\' or ch == '\n' or (gfm and ch == '@')) break;
             te += 1;
         }
         if (te > pos) {
@@ -1351,8 +1423,265 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
         }
     }
 
+    if (gfm) try expandGfmAutolinks(allocator, &inlines);
     try processEmphasis(allocator, &inlines, &delimiters);
     return inlines;
+}
+
+// ── GFM Extended Autolinks ────────────────────────────────────────────────────
+
+const GfmAutolinkMatch = struct {
+    text_start: usize,
+    text_end: usize,
+    is_www: bool,
+    is_email: bool,
+};
+
+fn isGfmUrlChar(c: u8) bool {
+    return c != ' ' and c != '\t' and c != '\n' and c != '\r' and c != '<';
+}
+
+fn isGfmWordBoundary(text: []const u8, i: usize) bool {
+    if (i == 0) return true;
+    const prev = text[i - 1];
+    return !((prev >= 'a' and prev <= 'z') or (prev >= 'A' and prev <= 'Z') or
+        (prev >= '0' and prev <= '9') or prev == '_');
+}
+
+/// Strip GFM trailing punctuation from a URL slice.
+/// Returns the trimmed slice (a sub-slice of `url`).
+fn trimGfmTrailingPunct(url: []const u8) []const u8 {
+    var end = url.len;
+    var changed = true;
+    while (changed and end > 0) {
+        changed = false;
+        // Strip trailing single punctuation
+        while (end > 0) {
+            const last = url[end - 1];
+            if (last == '.' or last == ',' or last == ':' or last == '!' or
+                last == '?' or last == '_' or last == '*' or last == '~')
+            {
+                end -= 1;
+                changed = true;
+            } else break;
+        }
+        // Strip trailing entity ref (&name;)
+        if (end > 0 and url[end - 1] == ';') {
+            var j = end - 1;
+            while (j > 0) {
+                j -= 1;
+                const ch = url[j];
+                if ((ch >= 'a' and ch <= 'z') or (ch >= 'A' and ch <= 'Z') or (ch >= '0' and ch <= '9')) continue;
+                if (ch == '&' and j + 2 < end) {
+                    end = j;
+                    changed = true;
+                }
+                break;
+            }
+        }
+        // Strip trailing unbalanced ')'
+        if (end > 0 and url[end - 1] == ')') {
+            var opens: usize = 0;
+            var closes: usize = 0;
+            for (url[0..end]) |ch| {
+                if (ch == '(') opens += 1 else if (ch == ')') closes += 1;
+            }
+            if (closes > opens) {
+                end -= closes - opens;
+                changed = true;
+            }
+        }
+    }
+    return url[0..end];
+}
+
+fn gfmWwwLinkEnd(text: []const u8, after_www: usize) ?usize {
+    // Collect non-space, non-< chars
+    var end = after_www;
+    while (end < text.len and isGfmUrlChar(text[end])) end += 1;
+    if (end == after_www) return null;
+    const raw_url = text[after_www - 4 .. end]; // full "www...."
+    const trimmed = trimGfmTrailingPunct(raw_url);
+    // Domain (before first / ? # or end) must contain at least one period after "www."
+    const domain_part = trimmed[4..]; // after "www."
+    var has_period = false;
+    for (domain_part) |ch| {
+        if (ch == '.' and ch != domain_part[0]) { has_period = true; break; }
+        if (ch == '/' or ch == '?' or ch == '#') break;
+        if (ch == '.') has_period = true;
+    }
+    // Simpler: check if there's any '.' in domain_part
+    for (domain_part) |ch| {
+        if (ch == '.') { has_period = true; break; }
+        if (ch == '/' or ch == '?' or ch == '#') break;
+    }
+    if (!has_period) return null;
+    return (after_www - 4) + trimmed.len;
+}
+
+fn gfmProtocolLinkEnd(text: []const u8, start: usize, proto_start: usize) ?usize {
+    // start = position after "http://" etc., proto_start = position of "http"
+    var end = start;
+    while (end < text.len and isGfmUrlChar(text[end])) end += 1;
+    if (end == start) return null;
+    const raw_url = text[proto_start..end];
+    const trimmed = trimGfmTrailingPunct(raw_url);
+    if (trimmed.len == 0) return null;
+    return proto_start + trimmed.len;
+}
+
+fn isEmailLocalChar(c: u8) bool {
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or
+        c == '.' or c == '!' or c == '#' or c == '$' or c == '%' or c == '&' or
+        c == '\'' or c == '*' or c == '+' or c == '/' or c == '=' or c == '?' or
+        c == '^' or c == '_' or c == '`' or c == '{' or c == '|' or c == '}' or
+        c == '~' or c == '-';
+}
+
+fn isEmailDomainChar(c: u8) bool {
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or
+        c == '-' or c == '_' or c == '.';
+}
+
+fn gfmEmailMatch(text: []const u8, at_pos: usize) ?struct { start: usize, end: usize } {
+    if (at_pos == 0) return null;
+    // Scan backward for local-part
+    var local_start = at_pos;
+    while (local_start > 0 and isEmailLocalChar(text[local_start - 1])) local_start -= 1;
+    if (local_start == at_pos) return null; // no local-part chars
+
+    // Scan forward for domain: chars are [a-zA-Z0-9_-.], at least one period required
+    var domain_end = at_pos + 1;
+    while (domain_end < text.len and isEmailDomainChar(text[domain_end])) domain_end += 1;
+    if (domain_end == at_pos + 1) return null; // no domain chars
+
+    // Trim trailing '.' from domain
+    while (domain_end > at_pos + 1 and text[domain_end - 1] == '.') domain_end -= 1;
+
+    const domain = text[at_pos + 1 .. domain_end];
+    if (domain.len == 0) return null;
+
+    // Domain must have at least one period
+    var has_period = false;
+    for (domain) |ch| if (ch == '.') { has_period = true; break; };
+    if (!has_period) return null;
+
+    // Domain last char must not be '-' or '_'
+    const last_domain_char = domain[domain.len - 1];
+    if (last_domain_char == '-' or last_domain_char == '_') return null;
+
+    return .{ .start = local_start, .end = domain_end };
+}
+
+fn findFirstGfmAutolink(text: []const u8) ?GfmAutolinkMatch {
+    var i: usize = 0;
+    while (i < text.len) {
+        const c = text[i];
+
+        // www. link
+        if (c == 'w' and i + 4 <= text.len and mem.eql(u8, text[i .. i + 4], "www.")) {
+            if (isGfmWordBoundary(text, i)) {
+                if (gfmWwwLinkEnd(text, i + 4)) |end| {
+                    return .{ .text_start = i, .text_end = end, .is_www = true, .is_email = false };
+                }
+            }
+        }
+
+        // http:// or https:// or ftp://
+        if (c == 'h' or c == 'f') {
+            if (isGfmWordBoundary(text, i)) {
+                const proto_len: ?usize = blk: {
+                    if (i + 7 <= text.len and mem.eql(u8, text[i .. i + 7], "http://")) break :blk 7;
+                    if (i + 8 <= text.len and mem.eql(u8, text[i .. i + 8], "https://")) break :blk 8;
+                    if (i + 6 <= text.len and mem.eql(u8, text[i .. i + 6], "ftp://")) break :blk 6;
+                    break :blk null;
+                };
+                if (proto_len) |pl| {
+                    if (gfmProtocolLinkEnd(text, i + pl, i)) |end| {
+                        return .{ .text_start = i, .text_end = end, .is_www = false, .is_email = false };
+                    }
+                }
+            }
+        }
+
+        i += 1;
+    }
+    return null;
+}
+
+/// Remove the last `n` characters worth of content from the tail of `inlines`,
+/// also removing any `delimiters` entries that point into the removed content.
+fn stripLastNCharsFromInlines(
+    inlines: *std.ArrayList(AST.Inline),
+    delimiters: *std.ArrayList(Delimiter),
+    n: usize,
+) void {
+    var remaining = n;
+    while (remaining > 0 and inlines.items.len > 0) {
+        const last = &inlines.items[inlines.items.len - 1];
+        switch (last.*) {
+            .text => |*t| {
+                if (t.content.len <= remaining) {
+                    remaining -= t.content.len;
+                    // Remove any delimiter pointing at this inline
+                    const idx = inlines.items.len - 1;
+                    var di = delimiters.items.len;
+                    while (di > 0) {
+                        di -= 1;
+                        if (delimiters.items[di].inline_idx == idx) {
+                            _ = delimiters.orderedRemove(di);
+                        }
+                    }
+                    inlines.items.len -= 1;
+                } else {
+                    t.content = t.content[0 .. t.content.len - remaining];
+                    remaining = 0;
+                }
+            },
+            else => break, // don't strip non-text nodes
+        }
+    }
+}
+
+fn expandGfmAutolinks(allocator: Allocator, inlines: *std.ArrayList(AST.Inline)) !void {
+    var new_inlines = std.ArrayList(AST.Inline){};
+    for (inlines.items) |item| {
+        if (item == .text) {
+            // Don't expand autolinks in text immediately following a literal '<'.
+            // This prevents GFM expansion inside failed angle-bracket constructs
+            // like `<https://foo.bar/baz bim>` or `< https://foo.bar >`.
+            if (new_inlines.items.len > 0) {
+                const prev = new_inlines.items[new_inlines.items.len - 1];
+                if (prev == .text) {
+                    const pc = prev.text.content;
+                    if (pc.len > 0 and pc[pc.len - 1] == '<') {
+                        try new_inlines.append(allocator, item);
+                        continue;
+                    }
+                }
+            }
+            var remaining = item.text.content;
+            while (remaining.len > 0) {
+                if (findFirstGfmAutolink(remaining)) |m| {
+                    if (m.text_start > 0)
+                        try new_inlines.append(allocator, .{ .text = .{ .content = remaining[0..m.text_start] } });
+                    try new_inlines.append(allocator, .{ .autolink = .{
+                        .url = remaining[m.text_start..m.text_end],
+                        .is_email = m.is_email,
+                        .is_gfm_www = m.is_www,
+                    } });
+                    remaining = remaining[m.text_end..];
+                } else {
+                    try new_inlines.append(allocator, .{ .text = .{ .content = remaining } });
+                    break;
+                }
+            }
+        } else {
+            try new_inlines.append(allocator, item);
+        }
+    }
+    inlines.deinit(allocator);
+    inlines.* = new_inlines;
 }
 
 /// Try to parse a code span starting at `pos` (which points to the first backtick).
@@ -1388,8 +1717,8 @@ fn tryParseCodeSpan(allocator: Allocator, input: []const u8, pos: usize) ?struct
     return null;
 }
 
-fn flattenInlineText(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap) Allocator.Error![]const u8 {
-    var inlines = try parseInlineElements(allocator, input, ref_map);
+fn flattenInlineText(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap, gfm: bool) Allocator.Error![]const u8 {
+    var inlines = try parseInlineElements(allocator, input, ref_map, gfm);
     defer {
         for (inlines.items) |*item| item.deinit(allocator);
         inlines.deinit(allocator);
@@ -1414,6 +1743,9 @@ fn flattenInline(allocator: Allocator, buf: *std.ArrayList(u8), item: AST.Inline
         },
         .image => |img| try buf.appendSlice(allocator, img.alt_text),
         .soft_break => try buf.appendSlice(allocator, "\n"),
+        .strikethrough => |s| {
+            for (s.children.items) |child| try flattenInline(allocator, buf, child);
+        },
         .hard_break, .autolink, .footnote_reference, .html_in_line => {},
     }
 }
@@ -1512,7 +1844,7 @@ fn tryParseHtmlTag(input: []const u8, pos: usize) ?usize {
 
 const InlineParseResult = struct { inline_node: AST.Inline, end: usize };
 
-fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap) ?InlineParseResult {
+fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap, gfm: bool) ?InlineParseResult {
     if (start >= input.len or input[start] != '!' or start + 1 >= input.len or input[start + 1] != '[') return null;
     const be = findClosingBracket(input, start + 2) orelse return null;
     const raw_alt = input[start + 2 .. be];
@@ -1522,7 +1854,7 @@ fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, r
         // Collapsed: ![alt][]
         if (be + 2 < input.len and input[be + 2] == ']') {
             if (resolveRef(allocator, rm, raw_alt)) |ref| {
-                const flat = flattenInlineText(allocator, raw_alt, rm) catch return null;
+                const flat = flattenInlineText(allocator, raw_alt, rm, gfm) catch return null;
                 return .{ .inline_node = .{ .image = .{ .alt_text = flat, .destination = .{ .url = ref.url, .title = ref.title }, .link_type = .collapsed } }, .end = be + 3 };
             }
         } else {
@@ -1530,7 +1862,7 @@ fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, r
             while (le < input.len and input[le] != ']') le += 1;
             if (le < input.len) {
                 if (resolveRef(allocator, rm, input[be + 2 .. le])) |ref| {
-                    const flat = flattenInlineText(allocator, raw_alt, rm) catch return null;
+                    const flat = flattenInlineText(allocator, raw_alt, rm, gfm) catch return null;
                     return .{ .inline_node = .{ .image = .{ .alt_text = flat, .destination = .{ .url = ref.url, .title = ref.title }, .link_type = .reference } }, .end = le + 1 };
                 }
             }
@@ -1538,13 +1870,13 @@ fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, r
     }
     // Shortcut: ![alt]
     if (resolveRef(allocator, rm, raw_alt)) |ref| {
-        const flat = flattenInlineText(allocator, raw_alt, rm) catch return null;
+        const flat = flattenInlineText(allocator, raw_alt, rm, gfm) catch return null;
         return .{ .inline_node = .{ .image = .{ .alt_text = flat, .destination = .{ .url = ref.url, .title = ref.title }, .link_type = .shortcut } }, .end = be + 1 };
     }
     return null;
 }
 
-fn tryParseRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap) ?InlineParseResult {
+fn tryParseRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap, gfm: bool) ?InlineParseResult {
     if (start >= input.len or input[start] != '[') return null;
     const be = findClosingBracket(input, start + 1) orelse return null;
     const link_text = input[start + 1 .. be];
@@ -1555,21 +1887,21 @@ fn tryParseRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *c
         // Collapsed: [text][]
         if (be + 2 < input.len and input[be + 2] == ']') {
             if (resolveRef(allocator, rm, link_text)) |ref|
-                return buildRefLink(allocator, link_text, ref, .collapsed, be + 3, rm);
+                return buildRefLink(allocator, link_text, ref, .collapsed, be + 3, rm, gfm);
         } else {
             // Full: [text][label]
             var le: usize = be + 2;
             while (le < input.len and input[le] != ']') le += 1;
             if (le < input.len) {
                 if (resolveRef(allocator, rm, input[be + 2 .. le])) |ref|
-                    return buildRefLink(allocator, link_text, ref, .reference, le + 1, rm);
+                    return buildRefLink(allocator, link_text, ref, .reference, le + 1, rm, gfm);
             }
         }
     }
     // Shortcut: [text]
     if (!tried_full) {
         if (resolveRef(allocator, rm, link_text)) |ref|
-            return buildRefLink(allocator, link_text, ref, .shortcut, be + 1, rm);
+            return buildRefLink(allocator, link_text, ref, .shortcut, be + 1, rm, gfm);
     }
     return null;
 }
@@ -1581,9 +1913,10 @@ fn buildRefLink(
     link_type: AST.LinkType,
     end: usize,
     rm: ?*const RefMap,
+    gfm: bool,
 ) ?InlineParseResult {
     var link = AST.Link.init(allocator, .{ .url = ref.url, .title = ref.title }, link_type);
-    var nested = parseInlineElements(allocator, text, rm) catch return null;
+    var nested = parseInlineElements(allocator, text, rm, gfm) catch return null;
     if (containsLink(nested.items)) {
         // Can't nest links — free the ref-owned url/title and nested inlines.
         for (nested.items) |*item| item.deinit(allocator);
@@ -1605,14 +1938,15 @@ const Self = @This();
 /// Used when re-parsing blockquote inner content that includes lazy
 /// continuation lines which must not form setext headings.
 has_lazy_setext: bool = false,
+gfm: bool = true,
 
 pub fn init() Self {
     return Self{};
 }
 pub fn deinit(_: *Self, _: Allocator) void {}
 
-fn appendInlines(allocator: Allocator, dest: *std.ArrayList(AST.Inline), content: []const u8, ref_map: ?*const RefMap) !void {
-    var items = try parseInlineElements(allocator, content, ref_map);
+fn appendInlines(allocator: Allocator, dest: *std.ArrayList(AST.Inline), content: []const u8, ref_map: ?*const RefMap, gfm: bool) !void {
+    var items = try parseInlineElements(allocator, content, ref_map, gfm);
     defer items.deinit(allocator);
     for (items.items) |item| try dest.append(allocator, item);
 }
@@ -2010,9 +2344,23 @@ fn parseList(
         var item = AST.ListItem.init(allocator);
         const content = try item_buf.toOwnedSlice(allocator);
         defer allocator.free(content);
-        if (trimLine(content).len > 0) {
+
+        // GFM task list: detect "[ ] " or "[x] " / "[X] " at start of item content
+        var effective_content = content;
+        if (content.len >= 3 and content[0] == '[' and content[2] == ']') {
+            const next_ok = content.len == 3 or content[3] == ' ' or content[3] == '\t' or content[3] == '\n';
+            if (next_ok and content[1] == ' ') {
+                item.task_list_checked = false;
+                effective_content = content[@min(4, content.len)..];
+            } else if (next_ok and (content[1] == 'x' or content[1] == 'X')) {
+                item.task_list_checked = true;
+                effective_content = content[@min(4, content.len)..];
+            }
+        }
+
+        if (trimLine(effective_content).len > 0) {
             var inner = init();
-            var inner_doc = try inner.parseMarkdownWithRefs(allocator, content, ref_map);
+            var inner_doc = try inner.parseMarkdownWithRefs(allocator, effective_content, ref_map);
             for (inner_doc.children.items) |block| try item.children.append(allocator, block);
             // Free the ArrayList backing memory without deiniting moved children.
             inner_doc.children.deinit(allocator);
@@ -2235,6 +2583,7 @@ fn htmlBlockTypeEndFound(line: []const u8, block_type: HtmlBlockType) bool {
 
 fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, ref_map: *const RefMap) !AST.Document {
     var doc = AST.Document.init(allocator);
+    doc.gfm = self.gfm;
     var lines_list = try splitLines(allocator, input);
     defer lines_list.deinit(allocator);
     const lines = lines_list.items;
@@ -2262,7 +2611,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
             var heading = AST.Heading.init(allocator, h.level);
             const owned_content = try allocator.dupe(u8, h.content);
             heading.inline_source = owned_content;
-            try appendInlines(allocator, &heading.children, owned_content, ref_map);
+            try appendInlines(allocator, &heading.children, owned_content, ref_map, self.gfm);
             try doc.children.append(allocator, .{ .heading = heading });
             i += 1;
             continue;
@@ -2440,7 +2789,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
             var para = AST.Paragraph.init(allocator);
             const fn_pc = try allocator.dupe(u8, fd.content);
             para.inline_source = fn_pc;
-            try appendInlines(allocator, &para.children, fn_pc, ref_map);
+            try appendInlines(allocator, &para.children, fn_pc, ref_map, self.gfm);
             try fn_def.children.append(allocator, .{ .paragraph = para });
             try doc.children.append(allocator, .{ .footnote_definition = fn_def });
             i += 1;
@@ -2449,7 +2798,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
 
         // GFM table (header line + delimiter line)
         {
-            if (try tryTableStart(allocator, lines, i, ref_map)) |tres| {
+            if (try tryTableStart(allocator, lines, i, ref_map, self.gfm)) |tres| {
                 try doc.children.append(allocator, .{ .table = tres.table });
                 i = tres.next_line;
                 continue;
@@ -2491,7 +2840,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
                 }
                 const pc = try allocator.dupe(u8, content);
                 para_buf.deinit(allocator);
-                try appendInlines(allocator, &para.children, pc, ref_map);
+                try appendInlines(allocator, &para.children, pc, ref_map, self.gfm);
                 para.inline_source = pc;
             }
             if (is_setext and para.children.items.len > 0) {
@@ -2678,6 +3027,7 @@ fn parseTableRow(
     alignments: []const AST.TableAlignment,
     row_line: []const u8,
     table_row: *AST.TableRow,
+    gfm: bool,
 ) !void {
     const cols = alignments.len;
     const raw_cells = splitTableRow(row_line, cols);
@@ -2686,7 +3036,7 @@ fn parseTableRow(
         var cell = AST.TableCell.init(allocator);
         const dup = try unescapeTablePipes(allocator, cell_src);
         cell.inline_source = dup;
-        try appendInlines(allocator, &cell.children, dup, ref_map);
+        try appendInlines(allocator, &cell.children, dup, ref_map, gfm);
         try table_row.cells.append(allocator, cell);
         if (idx + 1 == cols) break;
     }
@@ -2697,6 +3047,7 @@ fn tryTableStart(
     lines: []const []const u8,
     start: usize,
     ref_map: ?*const RefMap,
+    gfm: bool,
 ) !?TableParseResult {
     if (start + 1 >= lines.len) return null;
 
@@ -2744,7 +3095,7 @@ fn tryTableStart(
     for (align_buf) |a| try table.alignments.append(allocator, a);
 
     // Header row
-    try parseTableRow(allocator, ref_map, table.alignments.items, header_line, &table.header);
+    try parseTableRow(allocator, ref_map, table.alignments.items, header_line, &table.header, gfm);
 
     // Body rows
     var i = start + 2;
@@ -2755,7 +3106,7 @@ fn tryTableStart(
         if (isStandaloneBlockStart(allocator, raw)) break;
 
         var row = AST.TableRow.init(allocator);
-        try parseTableRow(allocator, ref_map, table.alignments.items, raw, &row);
+        try parseTableRow(allocator, ref_map, table.alignments.items, raw, &row, gfm);
         try table.body.append(allocator, row);
     }
 

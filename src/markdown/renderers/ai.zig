@@ -13,7 +13,7 @@
 //!   F`lang / F~lang Fenced code block (fence char + info string)
 //!   BQ              Blockquote
 //!   UL / OL=N       List (OL start number; tight/loose annotation)
-//!   +               List item
+//!   + / +[x] / +[ ] List item (task-list variants for checked/unchecked)
 //!   HR              Thematic break
 //!   HTML            Raw HTML block
 //!   FN=label        Footnote definition
@@ -271,7 +271,11 @@ fn renderBlock(w: anytype, block: AST.Block, depth: usize, allocator: Allocator)
             try w.print(" {s}\n", .{if (lst.tight) "tight" else "loose"});
             for (lst.items.items) |item| {
                 try writeIndent(w, depth + 1);
-                try w.writeAll("+\n");
+                if (item.task_list_checked) |checked| {
+                    try w.writeAll(if (checked) "+[x]\n" else "+[ ]\n");
+                } else {
+                    try w.writeAll("+\n");
+                }
                 for (item.children.items) |child| try renderBlock(w, child, depth + 2, allocator);
             }
         },
@@ -339,6 +343,20 @@ fn renderInline(w: anytype, inl: AST.Inline, depth: usize, allocator: Allocator)
         .strong => |s| {
             try writeIndent(w, depth);
             try w.print("S{c}", .{s.marker});
+            if (isSingleTextRun(s.children.items)) {
+                const run = try collectTextRun(s.children.items, allocator);
+                defer if (run.allocated) allocator.free(run.text);
+                try w.writeByte(' ');
+                try writeQuoted(w, run.text);
+                try w.writeByte('\n');
+            } else {
+                try w.writeByte('\n');
+                try renderInlineList(w, s.children.items, depth + 1, allocator);
+            }
+        },
+        .strikethrough => |s| {
+            try writeIndent(w, depth);
+            try w.writeAll("~~");
             if (isSingleTextRun(s.children.items)) {
                 const run = try collectTextRun(s.children.items, allocator);
                 defer if (run.allocated) allocator.free(run.text);
@@ -577,13 +595,11 @@ test "ai: code span" {
     );
 }
 
-test "ai: adjacent text nodes merge" {
-    // The parser splits [x] into "[" + "x] " due to failed bracket matching.
-    // The renderer should merge them back.
+test "ai: task list item" {
     try ok("- [x] done",
         \\UL tight
-        \\ +
-        \\  P "[x] done"
+        \\ +[x]
+        \\  P "done"
         \\
     );
 }

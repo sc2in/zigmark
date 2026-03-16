@@ -1,6 +1,7 @@
-# CommonMark Compliance
+# Spec Compliance
 
-**Current score: 655 / 655 (100%) — all spec tests passing, 0 memory leaks** ✅ 🎉
+**CommonMark: 652/652 (100%) — all spec tests passing** ✅
+**GFM extensions: 24/24 (100%) — all extension tests passing** ✅
 
 Per-section breakdown (via `zig build spec`):
 
@@ -78,6 +79,14 @@ Per-section breakdown (via `zig build spec`):
 - [x] **Frontmatter support** — YAML/TOML (extension, not in CommonMark)
 - [x] **Footnotes** — Extension, not in CommonMark
 
+### GFM Extensions
+
+- [x] **GFM Tables** — pipe-delimited tables with column alignment (8/8 tests)
+- [x] **GFM Task lists** — `- [x]` / `- [ ]` items rendered as disabled checkboxes (2/2 tests)
+- [x] **GFM Strikethrough** — `~~text~~` rendered as `<del>text</del>` (2/2 tests)
+- [x] **GFM Extended autolinks** — bare `www.`, `http(s)://`, `ftp://`, and email autolinks with trailing punctuation trimming (11/11 tests)
+- [x] **GFM Disallowed raw HTML** — `<title>`, `<textarea>`, `<style>`, `<xmp>`, `<iframe>`, `<noembed>`, `<noframes>`, `<script>`, `<plaintext>` escaped at render time (1/1 tests)
+
 ## Testing
 
 - [x] Run CommonMark spec test suite
@@ -85,5 +94,6 @@ Per-section breakdown (via `zig build spec`):
 - [x] Track compliance percentage
 - [x] Per-section spec build steps (`zig build spec`, `zig build spec-emphasis`, etc.)
 - [x] Verbose failure output per section (`zig build spec-links` shows each failing example)
+- [x] GFM extension spec suite (`zig build gfm`, `zig build gfm-verbose`, per-extension targets)
 - [x] Comprehensive docstrings on all public API members (auto-doc generation via `zig build docs`)
 - [ ] Document any intentional deviations from spec
