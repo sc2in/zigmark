@@ -358,6 +358,7 @@ pub fn runGfmSpecSummary(allocator: std.mem.Allocator, spec_path: []const u8) !G
             .pattern = section,
             .normalize = true,
             .verbose = false,
+            .gfm = true,
         });
         summary.sections[idx] = .{ .section = section, .result = r };
         summary.total_time_ns += r.time_ns;
@@ -522,10 +523,11 @@ pub fn parseSpecTests(allocator: std.mem.Allocator, spec_content: []const u8) !s
 }
 
 /// Run individual test case
-fn runSpecTest(allocator: std.mem.Allocator, test_case: *SpecTest, normalize: bool) !bool {
+fn runSpecTest(allocator: std.mem.Allocator, test_case: *SpecTest, normalize: bool, gfm: bool) !bool {
     const t1 = std.time.nanoTimestamp();
     // Parse markdown with our parser
     var p = Parser.init();
+    p.gfm = gfm;
     var doc = p.parseMarkdown(allocator, test_case.markdown) catch |err| {
         std.log.err("Parse error for test {d}: {}", .{ test_case.example, err });
         return false;
@@ -578,6 +580,7 @@ pub fn runCommonMarkSpecTests(allocator: std.mem.Allocator, spec_file_path: ?[]c
     normalize: bool = true,
     verbose: bool = false,
     number: ?usize = null,
+    gfm: bool = false,
 }) !TestResult {
     // Default to embedded spec or read from file
     const spec_content = if (spec_file_path) |path| blk: {
@@ -630,7 +633,7 @@ pub fn runCommonMarkSpecTests(allocator: std.mem.Allocator, spec_file_path: ?[]c
             std.log.info("Running test {d}: {s} (lines {d}-{d})", .{ test_case.example, test_case.section, test_case.start_line, test_case.end_line });
         }
 
-        const passed = runSpecTest(allocator, test_case, options.normalize) catch |err| {
+        const passed = runSpecTest(allocator, test_case, options.normalize, options.gfm) catch |err| {
             std.log.err("Test {d} errored: {}", .{ test_case.example, err });
             result.errors += 1;
             continue;

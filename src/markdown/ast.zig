@@ -39,6 +39,7 @@ pub const Node = struct {
 /// you are using an arena allocator that will be freed in bulk).
 pub const Document = struct {
     children: std.ArrayList(Block),
+    gfm: bool = true,
 
     /// Create an empty document.
     pub fn init(allocator: std.mem.Allocator) Document {

@@ -444,7 +444,8 @@ const disallowed_html_tags = std.StaticStringMap(void).initComptime(.{
     .{ "noframes", {} }, .{ "script", {} },   .{ "plaintext", {} },
 });
 
-fn writeHtmlFiltered(writer: anytype, s: []const u8) !void {
+fn writeHtmlFiltered(writer: anytype, s: []const u8, gfm: bool) !void {
+    if (!gfm) return writer.writeAll(s);
     var i: usize = 0;
     while (i < s.len) {
         if (s[i] == '<' and i + 1 < s.len) {
@@ -482,7 +483,7 @@ fn writeHtmlFiltered(writer: anytype, s: []const u8) !void {
 
 // ── Inline renderer ───────────────────────────────────────────────────────────
 
-fn renderInline(writer: anytype, item: AST.Inline) !void {
+fn renderInline(writer: anytype, item: AST.Inline, gfm: bool) !void {
     switch (item) {
         .text => |t| try writeEscapedWithEntities(writer, t.content),
         .soft_break => try writer.writeByte('\n'),
@@ -494,17 +495,17 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
         },
         .emphasis => |e| {
             try writer.writeAll("<em>");
-            for (e.children.items) |child| try renderInline(writer, child);
+            for (e.children.items) |child| try renderInline(writer, child, gfm);
             try writer.writeAll("</em>");
         },
         .strong => |s| {
             try writer.writeAll("<strong>");
-            for (s.children.items) |child| try renderInline(writer, child);
+            for (s.children.items) |child| try renderInline(writer, child, gfm);
             try writer.writeAll("</strong>");
         },
         .strikethrough => |s| {
             try writer.writeAll("<del>");
-            for (s.children.items) |child| try renderInline(writer, child);
+            for (s.children.items) |child| try renderInline(writer, child, gfm);
             try writer.writeAll("</del>");
         },
         .link => |l| {
@@ -517,7 +518,7 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
                 try writer.writeByte('"');
             }
             try writer.writeByte('>');
-            for (l.children.items) |child| try renderInline(writer, child);
+            for (l.children.items) |child| try renderInline(writer, child, gfm);
             try writer.writeAll("</a>");
         },
         .image => |img| {
@@ -545,13 +546,13 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
         .footnote_reference => |fr| {
             try writer.print("<a href=\"#fn:{s}\" class=\"footnote-ref\">{s}</a>", .{ fr.label, fr.label });
         },
-        .html_in_line => |hi| try writeHtmlFiltered(writer, hi.content),
+        .html_in_line => |hi| try writeHtmlFiltered(writer, hi.content, gfm),
     }
 }
 
 // ── Block renderer ────────────────────────────────────────────────────────────
 
-fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
+fn renderBlock(writer: *std.Io.Writer, block: AST.Block, gfm: bool) !void {
     switch (block) {
         .table => |tbl| {
             try writer.writeAll("<table>\n");
@@ -565,7 +566,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                     .center => try writer.writeAll("<th align=\"center\">"),
                     .right => try writer.writeAll("<th align=\"right\">"),
                 }
-                for (cell.children.items) |inl| try renderInline(writer, inl);
+                for (cell.children.items) |inl| try renderInline(writer, inl, gfm);
                 try writer.writeAll("</th>\n");
             }
             try writer.writeAll("</tr>\n</thead>\n");
@@ -582,7 +583,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                             .center => try writer.writeAll("<td align=\"center\">"),
                             .right => try writer.writeAll("<td align=\"right\">"),
                         }
-                        for (cell.children.items) |inl| try renderInline(writer, inl);
+                        for (cell.children.items) |inl| try renderInline(writer, inl, gfm);
                         try writer.writeAll("</td>\n");
                     }
                     try writer.writeAll("</tr>\n");
@@ -595,12 +596,12 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
 
         .heading => |h| {
             try writer.print("<h{d}>", .{h.level});
-            for (h.children.items) |item| try renderInline(writer, item);
+            for (h.children.items) |item| try renderInline(writer, item, gfm);
             try writer.print("</h{d}>\n", .{h.level});
         },
         .paragraph => |p| {
             try writer.writeAll("<p>");
-            for (p.children.items) |item| try renderInline(writer, item);
+            for (p.children.items) |item| try renderInline(writer, item, gfm);
             try writer.writeAll("</p>\n");
         },
         .thematic_break => try writer.writeAll("<hr />\n"),
@@ -625,7 +626,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
         },
         .blockquote => |bq| {
             try writer.writeAll("<blockquote>\n");
-            for (bq.children.items) |child| try renderBlock(writer, child);
+            for (bq.children.items) |child| try renderBlock(writer, child, gfm);
             try writer.writeAll("</blockquote>\n");
         },
         .list => |lst| {
@@ -670,7 +671,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                     for (item.children.items) |child| {
                         switch (child) {
                             .paragraph => |p| {
-                                for (p.children.items) |inl| try renderInline(writer, inl);
+                                for (p.children.items) |inl| try renderInline(writer, inl, gfm);
                                 wrote_inline = true;
                             },
                             else => {
@@ -679,7 +680,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                                     try writer.writeByte('\n');
                                 }
                                 wrote_inline = false;
-                                try renderBlock(writer, child);
+                                try renderBlock(writer, child, gfm);
                             },
                         }
                     }
@@ -690,7 +691,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                         try writer.writeAll("<li>");
                     } else {
                         try writer.writeAll("<li>\n");
-                        for (item.children.items) |child| try renderBlock(writer, child);
+                        for (item.children.items) |child| try renderBlock(writer, child, gfm);
                     }
                     try writer.writeAll("</li>\n");
                 }
@@ -703,15 +704,15 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                 switch (child) {
                     .paragraph => |p| {
                         try writer.print("<p><b>{s}</b>: ", .{fd.label});
-                        for (p.children.items) |inl| try renderInline(writer, inl);
+                        for (p.children.items) |inl| try renderInline(writer, inl, gfm);
                         try writer.writeAll("</p>\n");
                     },
-                    else => try renderBlock(writer, child),
+                    else => try renderBlock(writer, child, gfm),
                 }
             }
             try writer.writeAll("</div>\n");
         },
-        .html_block => |hb| try writeHtmlFiltered(writer, hb.content),
+        .html_block => |hb| try writeHtmlFiltered(writer, hb.content, gfm),
     }
 }
 
@@ -723,7 +724,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
 pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-    for (doc.children.items) |child| try renderBlock(&aw.writer, child);
+    for (doc.children.items) |child| try renderBlock(&aw.writer, child, doc.gfm);
     return aw.toOwnedSlice();
 }
 

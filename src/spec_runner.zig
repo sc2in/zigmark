@@ -60,6 +60,7 @@ pub fn main() !void {
                 .normalize = true,
                 .verbose = verbose,
                 .number = number,
+                .gfm = true,
             });
             total_result.passed += r.passed;
             total_result.failed += r.failed;
@@ -80,6 +81,7 @@ pub fn main() !void {
         .normalize = true,
         .verbose = verbose,
         .number = number,
+        .gfm = gfm_mode,
     });
 
     const total = result.total();
