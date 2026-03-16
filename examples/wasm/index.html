@@ -27,6 +27,13 @@
   .preview blockquote { border-left: 3px solid var(--border); padding-left: 12px; color: #8b949e; margin: 0.6em 0; }
   .preview ul, .preview ol { padding-left: 24px; margin: 0.6em 0; }
   .preview img { max-width: 100%; }
+  .preview table { border-collapse: collapse; margin: 0.6em 0; width: 100%; }
+  .preview th, .preview td { border: 1px solid var(--border); padding: 6px 12px; }
+  .preview th { background: #161b22; color: var(--fg); font-weight: bold; }
+  .preview tr:nth-child(even) td { background: #161b22; }
+  .preview [align="left"]   { text-align: left; }
+  .preview [align="center"] { text-align: center; }
+  .preview [align="right"]  { text-align: right; }
   .preview em { color: #d2a8ff; }
   .preview strong { color: #fff; }
   .badge { display: inline-block; background: #238636; color: #fff; font-size: 11px; padding: 2px 8px;
@@ -52,7 +59,7 @@
 
 > **A CommonMark-compliant Markdown parser, written in Zig, compiled to WebAssembly.**
 >
-> - 655/655 spec tests passing ✅
+> - 652/652 CommonMark spec tests passing ✅
 > - Three renderers: HTML, AST, AI
 > - Zero runtime dependencies
 > - Blazing fast — often faster than JS!
@@ -139,11 +146,20 @@ Here is a footnote reference[^1].
 ```
 
 
-## GFM Extensions (coming soon)
+## GFM Tables
 
-- [ ] Task list item
-- [x] Completed item
-~~Strikethrough~~
+| Name    | Role      | Score |
+| ------- | --------- | ----: |
+| Alice   | Engineer  |    42 |
+| Bob     | Designer  |    37 |
+| Charlie | Manager   |    51 |
+
+Alignment: left (`:---`), center (`:---:`), right (`---:`).
+
+| Left    | Center  |  Right |
+| :------ | :-----: | -----: |
+| apples  | bananas | 1.0000 |
+| oranges |  grapes | 0.5000 |
 
 ---
 
@@ -158,7 +174,7 @@ Here is a footnote reference[^1].
 
 ## Spec Compliance
 
-All <b>655/655</b> CommonMark tests pass. 
+All <b>652/652</b> CommonMark tests pass, plus <b>8/8</b> GFM table extension tests.
 See the <a href="https://github.com/sc2in/zigmark">README</a> for a full breakdown.
 
 ---
