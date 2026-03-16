@@ -15,6 +15,8 @@
     # Systems to generate outputs for
     supportedSystems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
     forAllSystems = f: nixpkgs.lib.genAttrs supportedSystems f;
+    # Version is system-independent; shared by packages and checks.
+    version = self.shortRev or self.dirtyShortRev or "dev";
   in {
     packages = forAllSystems (
       system: let
@@ -38,10 +40,6 @@
             ./include
           ];
         };
-        # Version comes from the git tag at build time (inside build.zig),
-        # so we only need a label here for the Nix derivation.  Using the
-        # short rev means the *source hash* doesn't change on tag-only bumps.
-        version = self.shortRev or self.dirtyShortRev or "dev";
       in rec {
         default = env.package {
           pname = zon.name;
@@ -60,6 +58,15 @@
         };
       }
     );
+
+    # `nix flake check` / omnix ci — runs `zig build test` (unit + cmark + gfm spec)
+    checks = forAllSystems (system: {
+      test = self.packages.${system}.default.overrideAttrs (_: {
+        pname = "zigmark-test";
+        buildPhase = "zig build test -Dversion=${version}";
+        installPhase = "touch $out";
+      });
+    });
 
     devShells = forAllSystems (
       system: let
