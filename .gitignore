@@ -4,3 +4,4 @@ zig-out/
 result/
 result
 .direnv/
+.claude/

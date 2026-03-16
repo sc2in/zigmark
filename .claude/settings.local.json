@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(head -50 /home/tsunami/code/sc2/zigmark/.zig-cache/p/commonmark_spec-*/spec.txt)"
-    ]
-  }
-}
