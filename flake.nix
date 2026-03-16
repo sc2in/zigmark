@@ -100,7 +100,7 @@
             if [ -f build.zig.zon ]; then
               if [ ! -f build.zig.zon2json-lock ] || [ build.zig.zon -nt build.zig.zon2json-lock ]; then
                 echo "zig2nix: regenerating build.zig.zon2json-lock..."
-                zig2nix zon2lock build.zig.zon
+                zig2nix zon2lock
               fi
             fi
           '';

@@ -1347,12 +1347,42 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
             continue;
         }
 
+        // GFM email autolink — detect '@' using raw input for full local-part
+        if (c == '@') {
+            var local_start = pos;
+            while (local_start > 0 and isEmailLocalChar(input[local_start - 1])) local_start -= 1;
+            if (local_start < pos) {
+                // Scan forward for domain
+                var domain_end = pos + 1;
+                while (domain_end < input.len and isEmailDomainChar(input[domain_end])) domain_end += 1;
+                // Trim trailing dots
+                while (domain_end > pos + 1 and input[domain_end - 1] == '.') domain_end -= 1;
+                const domain = input[pos + 1 .. domain_end];
+                var has_period = false;
+                for (domain) |ch| if (ch == '.') { has_period = true; break; };
+                const last_ok = domain.len > 0 and domain[domain.len - 1] != '-' and domain[domain.len - 1] != '_';
+                if (has_period and last_ok) {
+                    // Strip already-emitted local-part chars from inlines/delimiters
+                    stripLastNCharsFromInlines(&inlines, &delimiters, pos - local_start);
+                    try inlines.append(allocator, .{ .autolink = .{
+                        .url = input[local_start..domain_end],
+                        .is_email = true,
+                    } });
+                    pos = domain_end;
+                    continue;
+                }
+            }
+            try inlines.append(allocator, .{ .text = .{ .content = input[pos .. pos + 1] } });
+            pos += 1;
+            continue;
+        }
+
         // Plain text
         var te = pos;
         while (te < input.len) {
             const ch = input[te];
             if (ch == '*' or ch == '_' or ch == '~' or ch == '[' or ch == '!' or
-                ch == '`' or ch == '<' or ch == '\\' or ch == '\n') break;
+                ch == '`' or ch == '<' or ch == '\\' or ch == '\n' or ch == '@') break;
             te += 1;
         }
         if (te > pos) {
@@ -1563,16 +1593,43 @@ fn findFirstGfmAutolink(text: []const u8) ?GfmAutolinkMatch {
             }
         }
 
-        // Email: scan for '@'
-        if (c == '@') {
-            if (gfmEmailMatch(text, i)) |m| {
-                return .{ .text_start = m.start, .text_end = m.end, .is_www = false, .is_email = true };
-            }
-        }
-
         i += 1;
     }
     return null;
+}
+
+/// Remove the last `n` characters worth of content from the tail of `inlines`,
+/// also removing any `delimiters` entries that point into the removed content.
+fn stripLastNCharsFromInlines(
+    inlines: *std.ArrayList(AST.Inline),
+    delimiters: *std.ArrayList(Delimiter),
+    n: usize,
+) void {
+    var remaining = n;
+    while (remaining > 0 and inlines.items.len > 0) {
+        const last = &inlines.items[inlines.items.len - 1];
+        switch (last.*) {
+            .text => |*t| {
+                if (t.content.len <= remaining) {
+                    remaining -= t.content.len;
+                    // Remove any delimiter pointing at this inline
+                    const idx = inlines.items.len - 1;
+                    var di = delimiters.items.len;
+                    while (di > 0) {
+                        di -= 1;
+                        if (delimiters.items[di].inline_idx == idx) {
+                            _ = delimiters.orderedRemove(di);
+                        }
+                    }
+                    inlines.items.len -= 1;
+                } else {
+                    t.content = t.content[0 .. t.content.len - remaining];
+                    remaining = 0;
+                }
+            },
+            else => break, // don't strip non-text nodes
+        }
+    }
 }
 
 fn expandGfmAutolinks(allocator: Allocator, inlines: *std.ArrayList(AST.Inline)) !void {
