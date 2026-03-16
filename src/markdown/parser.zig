@@ -1046,13 +1046,13 @@ fn isRightFlanking(input: []const u8, rs: usize, rl: usize) bool {
 
 fn canOpen(input: []const u8, marker: u8, rs: usize, rl: usize) bool {
     const lf = isLeftFlanking(input, rs, rl);
-    if (marker == '*') return lf;
+    if (marker == '*' or marker == '~') return lf;
     return lf and (!isRightFlanking(input, rs, rl) or (rs > 0 and isUnicodePunct(input, rs - 1)));
 }
 
 fn canClose(input: []const u8, marker: u8, rs: usize, rl: usize) bool {
     const rf = isRightFlanking(input, rs, rl);
-    if (marker == '*') return rf;
+    if (marker == '*' or marker == '~') return rf;
     return rf and (!isLeftFlanking(input, rs, rl) or (rs + rl < input.len and isUnicodePunct(input, rs + rl)));
 }
 
@@ -1088,7 +1088,9 @@ fn wrapDelimiters(
     var ci = open_il + 1;
     while (ci < close_il) : (ci += 1) try children.append(allocator, inlines.items[ci]);
 
-    const node: AST.Inline = if (use_count == 2)
+    const node: AST.Inline = if (closer.marker == '~')
+        .{ .strikethrough = .{ .children = children } }
+    else if (use_count == 2)
         .{ .strong = .{ .children = children, .marker = closer.marker } }
     else
         .{ .emphasis = .{ .children = children, .marker = closer.marker } };
@@ -1142,8 +1144,10 @@ fn processEmphasis(allocator: Allocator, inlines: *std.ArrayList(AST.Inline), de
                 (opener.orig_count + closer.orig_count) % 3 == 0 and
                 opener.orig_count % 3 != 0 and closer.orig_count % 3 != 0) continue;
 
+            // Strikethrough (~) requires at least 2 on each side
+            if (closer.marker == '~' and (closer.count < 2 or opener.count < 2)) continue;
             found = true;
-            const uc: usize = if (closer.count >= 2 and opener.count >= 2) 2 else 1;
+            const uc: usize = if (closer.marker == '~') 2 else if (closer.count >= 2 and opener.count >= 2) 2 else 1;
             try wrapDelimiters(allocator, inlines, delimiters, oi, closer_idx, uc);
             closer = &delimiters.items[closer_idx]; // refresh after splice
             if (closer.count == 0) {
@@ -1316,11 +1320,38 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
             continue;
         }
 
+        // Strikethrough delimiter (GFM: ~~text~~)
+        if (c == '~') {
+            const rs = pos;
+            var rl: usize = 0;
+            while (pos + rl < input.len and input[pos + rl] == '~') rl += 1;
+            if (rl >= 2) {
+                const opens = canOpen(input, '~', rs, rl);
+                const closes = canClose(input, '~', rs, rl);
+                try inlines.append(allocator, .{ .text = .{ .content = input[rs .. rs + rl] } });
+                if (opens or closes)
+                    try delimiters.append(allocator, .{
+                        .inline_idx = inlines.items.len - 1,
+                        .input_pos = rs,
+                        .count = rl,
+                        .orig_count = rl,
+                        .marker = '~',
+                        .can_open = opens,
+                        .can_close = closes,
+                        .active = true,
+                    });
+            } else {
+                try inlines.append(allocator, .{ .text = .{ .content = input[rs .. rs + rl] } });
+            }
+            pos += rl;
+            continue;
+        }
+
         // Plain text
         var te = pos;
         while (te < input.len) {
             const ch = input[te];
-            if (ch == '*' or ch == '_' or ch == '[' or ch == '!' or
+            if (ch == '*' or ch == '_' or ch == '~' or ch == '[' or ch == '!' or
                 ch == '`' or ch == '<' or ch == '\\' or ch == '\n') break;
             te += 1;
         }
@@ -1351,8 +1382,225 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
         }
     }
 
+    try expandGfmAutolinks(allocator, &inlines);
     try processEmphasis(allocator, &inlines, &delimiters);
     return inlines;
+}
+
+// ── GFM Extended Autolinks ────────────────────────────────────────────────────
+
+const GfmAutolinkMatch = struct {
+    text_start: usize,
+    text_end: usize,
+    is_www: bool,
+    is_email: bool,
+};
+
+fn isGfmUrlChar(c: u8) bool {
+    return c != ' ' and c != '\t' and c != '\n' and c != '\r' and c != '<';
+}
+
+fn isGfmWordBoundary(text: []const u8, i: usize) bool {
+    if (i == 0) return true;
+    const prev = text[i - 1];
+    return !((prev >= 'a' and prev <= 'z') or (prev >= 'A' and prev <= 'Z') or
+        (prev >= '0' and prev <= '9') or prev == '_');
+}
+
+/// Strip GFM trailing punctuation from a URL slice.
+/// Returns the trimmed slice (a sub-slice of `url`).
+fn trimGfmTrailingPunct(url: []const u8) []const u8 {
+    var end = url.len;
+    var changed = true;
+    while (changed and end > 0) {
+        changed = false;
+        // Strip trailing single punctuation
+        while (end > 0) {
+            const last = url[end - 1];
+            if (last == '.' or last == ',' or last == ':' or last == '!' or
+                last == '?' or last == '_' or last == '*' or last == '~')
+            {
+                end -= 1;
+                changed = true;
+            } else break;
+        }
+        // Strip trailing entity ref (&name;)
+        if (end > 0 and url[end - 1] == ';') {
+            var j = end - 1;
+            while (j > 0) {
+                j -= 1;
+                const ch = url[j];
+                if ((ch >= 'a' and ch <= 'z') or (ch >= 'A' and ch <= 'Z') or (ch >= '0' and ch <= '9')) continue;
+                if (ch == '&' and j + 2 < end) {
+                    end = j;
+                    changed = true;
+                }
+                break;
+            }
+        }
+        // Strip trailing unbalanced ')'
+        if (end > 0 and url[end - 1] == ')') {
+            var opens: usize = 0;
+            var closes: usize = 0;
+            for (url[0..end]) |ch| {
+                if (ch == '(') opens += 1 else if (ch == ')') closes += 1;
+            }
+            if (closes > opens) {
+                end -= closes - opens;
+                changed = true;
+            }
+        }
+    }
+    return url[0..end];
+}
+
+fn gfmWwwLinkEnd(text: []const u8, after_www: usize) ?usize {
+    // Collect non-space, non-< chars
+    var end = after_www;
+    while (end < text.len and isGfmUrlChar(text[end])) end += 1;
+    if (end == after_www) return null;
+    const raw_url = text[after_www - 4 .. end]; // full "www...."
+    const trimmed = trimGfmTrailingPunct(raw_url);
+    // Domain (before first / ? # or end) must contain at least one period after "www."
+    const domain_part = trimmed[4..]; // after "www."
+    var has_period = false;
+    for (domain_part) |ch| {
+        if (ch == '.' and ch != domain_part[0]) { has_period = true; break; }
+        if (ch == '/' or ch == '?' or ch == '#') break;
+        if (ch == '.') has_period = true;
+    }
+    // Simpler: check if there's any '.' in domain_part
+    for (domain_part) |ch| {
+        if (ch == '.') { has_period = true; break; }
+        if (ch == '/' or ch == '?' or ch == '#') break;
+    }
+    if (!has_period) return null;
+    return (after_www - 4) + trimmed.len;
+}
+
+fn gfmProtocolLinkEnd(text: []const u8, start: usize, proto_start: usize) ?usize {
+    // start = position after "http://" etc., proto_start = position of "http"
+    var end = start;
+    while (end < text.len and isGfmUrlChar(text[end])) end += 1;
+    if (end == start) return null;
+    const raw_url = text[proto_start..end];
+    const trimmed = trimGfmTrailingPunct(raw_url);
+    if (trimmed.len == 0) return null;
+    return proto_start + trimmed.len;
+}
+
+fn isEmailLocalChar(c: u8) bool {
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or
+        c == '.' or c == '!' or c == '#' or c == '$' or c == '%' or c == '&' or
+        c == '\'' or c == '*' or c == '+' or c == '/' or c == '=' or c == '?' or
+        c == '^' or c == '_' or c == '`' or c == '{' or c == '|' or c == '}' or
+        c == '~' or c == '-';
+}
+
+fn isEmailDomainChar(c: u8) bool {
+    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or
+        c == '-' or c == '_' or c == '.';
+}
+
+fn gfmEmailMatch(text: []const u8, at_pos: usize) ?struct { start: usize, end: usize } {
+    if (at_pos == 0) return null;
+    // Scan backward for local-part
+    var local_start = at_pos;
+    while (local_start > 0 and isEmailLocalChar(text[local_start - 1])) local_start -= 1;
+    if (local_start == at_pos) return null; // no local-part chars
+
+    // Scan forward for domain: chars are [a-zA-Z0-9_-.], at least one period required
+    var domain_end = at_pos + 1;
+    while (domain_end < text.len and isEmailDomainChar(text[domain_end])) domain_end += 1;
+    if (domain_end == at_pos + 1) return null; // no domain chars
+
+    // Trim trailing '.' from domain
+    while (domain_end > at_pos + 1 and text[domain_end - 1] == '.') domain_end -= 1;
+
+    const domain = text[at_pos + 1 .. domain_end];
+    if (domain.len == 0) return null;
+
+    // Domain must have at least one period
+    var has_period = false;
+    for (domain) |ch| if (ch == '.') { has_period = true; break; };
+    if (!has_period) return null;
+
+    // Domain last char must not be '-' or '_'
+    const last_domain_char = domain[domain.len - 1];
+    if (last_domain_char == '-' or last_domain_char == '_') return null;
+
+    return .{ .start = local_start, .end = domain_end };
+}
+
+fn findFirstGfmAutolink(text: []const u8) ?GfmAutolinkMatch {
+    var i: usize = 0;
+    while (i < text.len) {
+        const c = text[i];
+
+        // www. link
+        if (c == 'w' and i + 4 <= text.len and mem.eql(u8, text[i .. i + 4], "www.")) {
+            if (isGfmWordBoundary(text, i)) {
+                if (gfmWwwLinkEnd(text, i + 4)) |end| {
+                    return .{ .text_start = i, .text_end = end, .is_www = true, .is_email = false };
+                }
+            }
+        }
+
+        // http:// or https:// or ftp://
+        if (c == 'h' or c == 'f') {
+            if (isGfmWordBoundary(text, i)) {
+                const proto_len: ?usize = blk: {
+                    if (i + 7 <= text.len and mem.eql(u8, text[i .. i + 7], "http://")) break :blk 7;
+                    if (i + 8 <= text.len and mem.eql(u8, text[i .. i + 8], "https://")) break :blk 8;
+                    if (i + 6 <= text.len and mem.eql(u8, text[i .. i + 6], "ftp://")) break :blk 6;
+                    break :blk null;
+                };
+                if (proto_len) |pl| {
+                    if (gfmProtocolLinkEnd(text, i + pl, i)) |end| {
+                        return .{ .text_start = i, .text_end = end, .is_www = false, .is_email = false };
+                    }
+                }
+            }
+        }
+
+        // Email: scan for '@'
+        if (c == '@') {
+            if (gfmEmailMatch(text, i)) |m| {
+                return .{ .text_start = m.start, .text_end = m.end, .is_www = false, .is_email = true };
+            }
+        }
+
+        i += 1;
+    }
+    return null;
+}
+
+fn expandGfmAutolinks(allocator: Allocator, inlines: *std.ArrayList(AST.Inline)) !void {
+    var new_inlines = std.ArrayList(AST.Inline){};
+    for (inlines.items) |item| {
+        if (item == .text) {
+            var remaining = item.text.content;
+            while (remaining.len > 0) {
+                if (findFirstGfmAutolink(remaining)) |m| {
+                    if (m.text_start > 0)
+                        try new_inlines.append(allocator, .{ .text = .{ .content = remaining[0..m.text_start] } });
+                    try new_inlines.append(allocator, .{ .autolink = .{
+                        .url = remaining[m.text_start..m.text_end],
+                        .is_email = m.is_email,
+                        .is_gfm_www = m.is_www,
+                    } });
+                    remaining = remaining[m.text_end..];
+                } else {
+                    try new_inlines.append(allocator, .{ .text = .{ .content = remaining } });
+                    break;
+                }
+            }
+        } else {
+            try new_inlines.append(allocator, item);
+        }
+    }
+    inlines.deinit(allocator);
+    inlines.* = new_inlines;
 }
 
 /// Try to parse a code span starting at `pos` (which points to the first backtick).
@@ -1414,6 +1662,9 @@ fn flattenInline(allocator: Allocator, buf: *std.ArrayList(u8), item: AST.Inline
         },
         .image => |img| try buf.appendSlice(allocator, img.alt_text),
         .soft_break => try buf.appendSlice(allocator, "\n"),
+        .strikethrough => |s| {
+            for (s.children.items) |child| try flattenInline(allocator, buf, child);
+        },
         .hard_break, .autolink, .footnote_reference, .html_in_line => {},
     }
 }
@@ -2010,9 +2261,23 @@ fn parseList(
         var item = AST.ListItem.init(allocator);
         const content = try item_buf.toOwnedSlice(allocator);
         defer allocator.free(content);
-        if (trimLine(content).len > 0) {
+
+        // GFM task list: detect "[ ] " or "[x] " / "[X] " at start of item content
+        var effective_content = content;
+        if (content.len >= 3 and content[0] == '[' and content[2] == ']') {
+            const next_ok = content.len == 3 or content[3] == ' ' or content[3] == '\t' or content[3] == '\n';
+            if (next_ok and content[1] == ' ') {
+                item.task_list_checked = false;
+                effective_content = content[@min(4, content.len)..];
+            } else if (next_ok and (content[1] == 'x' or content[1] == 'X')) {
+                item.task_list_checked = true;
+                effective_content = content[@min(4, content.len)..];
+            }
+        }
+
+        if (trimLine(effective_content).len > 0) {
             var inner = init();
-            var inner_doc = try inner.parseMarkdownWithRefs(allocator, content, ref_map);
+            var inner_doc = try inner.parseMarkdownWithRefs(allocator, effective_content, ref_map);
             for (inner_doc.children.items) |block| try item.children.append(allocator, block);
             // Free the ArrayList backing memory without deiniting moved children.
             inner_doc.children.deinit(allocator);

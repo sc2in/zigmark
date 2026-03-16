@@ -194,6 +194,14 @@ fn renderInline(writer: anytype, inl: AST.Inline, prefix: []const u8, is_last: b
                 try renderInline(writer, child, new_prefix, j == s.children.items.len - 1, allocator);
             }
         },
+        .strikethrough => |s| {
+            try writer.writeAll("Strikethrough\n");
+            const new_prefix = try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, child_ext });
+            defer allocator.free(new_prefix);
+            for (s.children.items, 0..) |child, j| {
+                try renderInline(writer, child, new_prefix, j == s.children.items.len - 1, allocator);
+            }
+        },
         .code_span => |cs| {
             try writer.print("CodeSpan \"{s}\"\n", .{cs.content});
         },

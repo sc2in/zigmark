@@ -253,6 +253,7 @@ pub const Inline = union(enum) {
     text: Text,
     emphasis: Emphasis,
     strong: Strong,
+    strikethrough: Strikethrough,
     code_span: CodeSpan,
     link: Link,
     image: Image,
@@ -406,6 +407,8 @@ pub const ListType = enum {
 pub const ListItem = struct {
     children: std.ArrayList(Block),
     tight: bool = true,
+    /// GFM task list: null = not a task item, false = [ ], true = [x]
+    task_list_checked: ?bool = null,
 
     /// Create an empty list item.
     pub fn init(allocator: std.mem.Allocator) ListItem {
@@ -565,6 +568,23 @@ pub const Strong = struct {
     }
 };
 
+/// Strikethrough — rendered as `<del>` (GFM extension).
+///
+/// Delimited by `~~`.
+pub const Strikethrough = struct {
+    children: std.ArrayList(Inline),
+
+    pub fn init(allocator: std.mem.Allocator) Strikethrough {
+        _ = allocator;
+        return Strikethrough{ .children = std.ArrayList(Inline){} };
+    }
+
+    pub fn deinit(self: *Strikethrough, allocator: std.mem.Allocator) void {
+        for (self.children.items) |*child| child.deinit(allocator);
+        self.children.deinit(allocator);
+    }
+};
+
 /// A code span — inline code delimited by backticks (CommonMark §6.1).
 ///
 /// Backtick strings of any length may be used; interior backtick runs
@@ -670,12 +690,15 @@ pub const Image = struct {
 };
 
 /// An autolink — a URI or e-mail address enclosed in angle brackets
-/// (CommonMark §6.9).
+/// (CommonMark §6.9), or a GFM extended autolink (www., http/https/ftp, email).
 ///
-/// Example: `<https://example.com>` or `<user@host>`.
+/// Example: `<https://example.com>` or `<user@host>` (CommonMark),
+/// or `www.example.com` / `foo@bar.baz` (GFM extension).
 pub const Autolink = struct {
     url: []const u8,
     is_email: bool = false,
+    /// GFM www. autolink — href should be "http://" ++ url
+    is_gfm_www: bool = false,
 
     /// Create an autolink node.
     pub fn init(url: []const u8, is_email: bool) Autolink {

@@ -428,6 +428,51 @@ fn writeEscapedTitleWithEntities(writer: anytype, s: []const u8) !void {
     }
 }
 
+// ── GFM disallowed raw HTML filter ───────────────────────────────────────────
+
+/// GFM tagfilter: these tags must have their '<' escaped to '&lt;'
+const disallowed_html_tags = std.StaticStringMap(void).initComptime(.{
+    .{ "title", {} },    .{ "textarea", {} }, .{ "style", {} },
+    .{ "xmp", {} },      .{ "iframe", {} },   .{ "noembed", {} },
+    .{ "noframes", {} }, .{ "script", {} },   .{ "plaintext", {} },
+});
+
+fn writeHtmlFiltered(writer: anytype, s: []const u8) !void {
+    var i: usize = 0;
+    while (i < s.len) {
+        if (s[i] == '<' and i + 1 < s.len) {
+            const rest = s[i + 1 ..];
+            // Skip optional '/' for closing tags
+            const tag_offset: usize = if (rest.len > 0 and rest[0] == '/') 1 else 0;
+            // Extract tag name lowercased (max 16 chars)
+            var tag_buf: [16]u8 = undefined;
+            var tag_len: usize = 0;
+            var k = tag_offset;
+            while (k < rest.len and tag_len < 16) {
+                const ch = rest[k];
+                if ((ch >= 'a' and ch <= 'z') or (ch >= 'A' and ch <= 'Z')) {
+                    tag_buf[tag_len] = if (ch >= 'A' and ch <= 'Z') ch + 32 else ch;
+                    tag_len += 1;
+                    k += 1;
+                } else break;
+            }
+            // After tag name must be space, >, /, \t, \n, or end-of-string
+            const after_tag = tag_offset + tag_len;
+            const valid_end = after_tag >= rest.len or
+                rest[after_tag] == ' ' or rest[after_tag] == '>' or
+                rest[after_tag] == '/' or rest[after_tag] == '\t' or rest[after_tag] == '\n';
+            if (tag_len > 0 and valid_end and disallowed_html_tags.has(tag_buf[0..tag_len])) {
+                try writer.writeAll("&lt;");
+            } else {
+                try writer.writeByte('<');
+            }
+        } else {
+            try writer.writeByte(s[i]);
+        }
+        i += 1;
+    }
+}
+
 // ── Inline renderer ───────────────────────────────────────────────────────────
 
 fn renderInline(writer: anytype, item: AST.Inline) !void {
@@ -449,6 +494,11 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
             try writer.writeAll("<strong>");
             for (s.children.items) |child| try renderInline(writer, child);
             try writer.writeAll("</strong>");
+        },
+        .strikethrough => |s| {
+            try writer.writeAll("<del>");
+            for (s.children.items) |child| try renderInline(writer, child);
+            try writer.writeAll("</del>");
         },
         .link => |l| {
             try writer.writeAll("<a href=\"");
@@ -477,24 +527,18 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
             try writer.writeAll(" />");
         },
         .autolink => |al| {
-            if (al.is_email) {
-                try writer.writeAll("<a href=\"mailto:");
-                try writeUrlEncodedLiteral(writer, al.url);
-                try writer.writeAll("\">");
-                try writeEscaped(writer, al.url);
-                try writer.writeAll("</a>");
-            } else {
-                try writer.writeAll("<a href=\"");
-                try writeUrlEncodedLiteral(writer, al.url);
-                try writer.writeAll("\">");
-                try writeEscaped(writer, al.url);
-                try writer.writeAll("</a>");
-            }
+            try writer.writeAll("<a href=\"");
+            if (al.is_email) try writer.writeAll("mailto:");
+            if (al.is_gfm_www) try writer.writeAll("http://");
+            try writeUrlEncodedLiteral(writer, al.url);
+            try writer.writeAll("\">");
+            try writeEscaped(writer, al.url);
+            try writer.writeAll("</a>");
         },
         .footnote_reference => |fr| {
             try writer.print("<a href=\"#fn:{s}\" class=\"footnote-ref\">{s}</a>", .{ fr.label, fr.label });
         },
-        .html_in_line => |hi| try writer.writeAll(hi.content),
+        .html_in_line => |hi| try writeHtmlFiltered(writer, hi.content),
     }
 }
 
@@ -599,6 +643,13 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
                         item.children.items[0] == .paragraph;
                     if (starts_with_para) {
                         try writer.writeAll("<li>");
+                        if (item.task_list_checked) |checked| {
+                            if (checked) {
+                                try writer.writeAll("<input checked=\"\" disabled=\"\" type=\"checkbox\"> ");
+                            } else {
+                                try writer.writeAll("<input disabled=\"\" type=\"checkbox\"> ");
+                            }
+                        }
                     } else {
                         // Item has only block-level children (e.g. code blocks)
                         if (item.children.items.len == 0) {
@@ -653,7 +704,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
             }
             try writer.writeAll("</div>\n");
         },
-        .html_block => |hb| try writer.writeAll(hb.content),
+        .html_block => |hb| try writeHtmlFiltered(writer, hb.content),
     }
 }
 

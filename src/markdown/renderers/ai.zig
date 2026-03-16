@@ -350,6 +350,20 @@ fn renderInline(w: anytype, inl: AST.Inline, depth: usize, allocator: Allocator)
                 try renderInlineList(w, s.children.items, depth + 1, allocator);
             }
         },
+        .strikethrough => |s| {
+            try writeIndent(w, depth);
+            try w.writeAll("~~");
+            if (isSingleTextRun(s.children.items)) {
+                const run = try collectTextRun(s.children.items, allocator);
+                defer if (run.allocated) allocator.free(run.text);
+                try w.writeByte(' ');
+                try writeQuoted(w, run.text);
+                try w.writeByte('\n');
+            } else {
+                try w.writeByte('\n');
+                try renderInlineList(w, s.children.items, depth + 1, allocator);
+            }
+        },
         .code_span => |cs| {
             try writeIndent(w, depth);
             try w.writeAll("` ");

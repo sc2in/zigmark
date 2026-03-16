@@ -289,6 +289,11 @@ fn renderInline(w: anytype, inl: AST.Inline, allocator: Allocator) !void {
             for (s.children.items) |child| try renderInline(w, child, allocator);
             try w.writeAll(RESET);
         },
+        .strikethrough => |s| {
+            try w.writeAll(STRIKETHROUGH);
+            for (s.children.items) |child| try renderInline(w, child, allocator);
+            try w.writeAll(RESET);
+        },
         .code_span => |cs| {
             try w.writeAll(FG_RED ++ BG_DARK);
             try w.writeByte(' ');
