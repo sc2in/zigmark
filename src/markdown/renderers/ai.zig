@@ -17,6 +17,10 @@
 //!   HR              Thematic break
 //!   HTML            Raw HTML block
 //!   FN=label        Footnote definition
+//!   TABLE           GFM table block
+//!   TH c1 | c2      Header row; quoted cells if all are plain text, else C sub-items
+//!   TR c1 | c2      Body row (same collapsing logic as TH)
+//!   C               Cell within TH/TR when row has rich inline content
 //!
 //! Inline tags:
 //!   . "…"           Text (adjacent text nodes merged)
@@ -128,10 +132,79 @@ fn collectTextRun(items: []const AST.Inline, allocator: Allocator) !struct { tex
     return .{ .text = try buf.toOwnedSlice(allocator), .allocated = true };
 }
 
+// ── Table helpers ─────────────────────────────────────────────────────────────
+
+/// Render one table row (header or body).
+/// If all cells are pure text runs they collapse onto one line:
+///   TH "col1" | "col2"
+/// Otherwise each cell is a `C` sub-item:
+///   TH
+///    C "col1"
+///    C
+///     S* "bold"
+fn renderAiTableRow(
+    w: anytype,
+    cells: []const AST.TableCell,
+    tag: []const u8,
+    depth: usize,
+    allocator: Allocator,
+) !void {
+    const all_text = blk: {
+        for (cells) |cell| {
+            if (!isSingleTextRun(cell.children.items)) break :blk false;
+        }
+        break :blk true;
+    };
+
+    try writeIndent(w, depth);
+    if (all_text) {
+        try w.writeAll(tag);
+        for (cells, 0..) |cell, i| {
+            if (i > 0) try w.writeAll(" |");
+            if (cell.children.items.len > 0) {
+                const run = try collectTextRun(cell.children.items, allocator);
+                defer if (run.allocated) allocator.free(run.text);
+                try w.writeByte(' ');
+                try writeQuoted(w, run.text);
+            }
+        }
+        try w.writeByte('\n');
+    } else {
+        try w.writeAll(tag);
+        try w.writeByte('\n');
+        for (cells) |cell| {
+            if (cell.children.items.len == 0) {
+                try writeIndent(w, depth + 1);
+                try w.writeAll("C\n");
+            } else if (isSingleTextRun(cell.children.items)) {
+                const run = try collectTextRun(cell.children.items, allocator);
+                defer if (run.allocated) allocator.free(run.text);
+                try writeIndent(w, depth + 1);
+                try w.writeAll("C ");
+                try writeQuoted(w, run.text);
+                try w.writeByte('\n');
+            } else {
+                try writeIndent(w, depth + 1);
+                try w.writeAll("C\n");
+                try renderInlineList(w, cell.children.items, depth + 2, allocator);
+            }
+        }
+    }
+}
+
 // ── Block renderer ───────────────────────────────────────────────────────────
 
 fn renderBlock(w: anytype, block: AST.Block, depth: usize, allocator: Allocator) !void {
     switch (block) {
+        .table => |tbl| {
+            try writeIndent(w, depth);
+            try w.writeAll("TABLE\n");
+            try renderAiTableRow(w, tbl.header.cells.items, "TH", depth + 1, allocator);
+            for (tbl.body.items) |row| {
+                try renderAiTableRow(w, row.cells.items, "TR", depth + 1, allocator);
+            }
+        },
+
         .heading => |h| {
             try writeIndent(w, depth);
             try w.print("H{d}", .{h.level});
@@ -528,6 +601,36 @@ test "ai: footnote" {
         \\ ^1
         \\FN=1
         \\ P "content"
+        \\
+    );
+}
+
+test "ai: table simple" {
+    try ok("a | b\n---|---\n1 | 2",
+        \\TABLE
+        \\ TH "a" | "b"
+        \\ TR "1" | "2"
+        \\
+    );
+}
+
+test "ai: table with alignment" {
+    try ok("| abc | defghi |\n:-: | -----------:\nbar | baz",
+        \\TABLE
+        \\ TH "abc" | "defghi"
+        \\ TR "bar" | "baz"
+        \\
+    );
+}
+
+test "ai: table rich cells" {
+    try ok("| **bold** | plain |\n|---|---|\n| a | b |",
+        \\TABLE
+        \\ TH
+        \\  C
+        \\   S* "bold"
+        \\  C "plain"
+        \\ TR "a" | "b"
         \\
     );
 }

@@ -1,6 +1,6 @@
 # zigmark
 
-A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 655 spec tests** (100%).
+A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 652 spec tests** (100%).
 
 Builds as both a **CLI tool** and a **C-callable shared library** (`libzigmark.so`).
 
@@ -187,7 +187,7 @@ LD_LIBRARY_PATH=zig-out/lib ./example
 
 ## Features
 
-### CommonMark Compliance — 655/655 ✅
+### CommonMark Compliance — 652/652 ✅
 
 Every section of the [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) spec passes:
 
@@ -202,7 +202,7 @@ Every section of the [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) sp
 | Setext headings | 27 |
 | Indented code blocks | 12 |
 | Fenced code blocks | 29 |
-| HTML blocks | 46 |
+| HTML blocks | 44 |
 | Link reference definitions | 27 |
 | Paragraphs | 8 |
 | Blank lines | 1 |
@@ -214,15 +214,34 @@ Every section of the [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) sp
 | Links | 90 |
 | Images | 22 |
 | Autolinks | 19 |
-| Raw HTML | 21 |
+| Raw HTML | 20 |
 | Hard line breaks | 15 |
 | Soft line breaks | 2 |
 | Textual content | 3 |
+
+### GFM Extensions — 8/8 ✅
+
+[GitHub Flavored Markdown](https://github.github.com/gfm/) tables are fully supported, passing all 8 spec tests.
+
+| GFM Extension | Tests  |
+|---------------|--------|
+| Tables        | 8/8 ✅ |
+
+```markdown
+| Name    | Role     | Score |
+| ------- | -------- | ----: |
+| Alice   | Engineer |    42 |
+| Bob     | Designer |    37 |
+```
+
+Column alignment (`---`, `:---`, `---:`, `:---:`) is respected in the rendered output.
+Run the GFM suite with `zig build gfm`.
 
 ### Extensions
 
 - **Frontmatter** — YAML (`---`) and TOML (`+++`) extraction, parsed as JSON
 - **Footnotes** — `[^label]` references and definitions
+- **GFM Tables** — pipe-delimited tables with optional column alignment
 
 ## Building & Testing
 
@@ -241,6 +260,12 @@ zig build spec
 
 # Run a single section with verbose failure output
 zig build spec-emphasis
+
+# Run GFM extension spec suite (summary)
+zig build gfm
+
+# Run a specific GFM extension section
+zig build gfm-tables
 
 # Generate docs
 zig build docs
@@ -313,7 +338,7 @@ Requires **Zig 0.15.2** or later.
 
 ## Future Plans
 
-- GFM extensions (tables, strikethrough, task lists)
+- GFM extensions (strikethrough, task lists, autolinks)
 - Additional renderers (LaTeX, plain text, Markdown normaliser)
 - Streaming parser for large documents
 - AST modification API
@@ -340,10 +365,10 @@ hours and we will work with you on a fix before any public disclosure.
 ### Guidelines
 
 - **Tests must pass.** Run `zig build test` (unit) and `zig build spec` (all
-  655 CommonMark spec tests) before opening a PR.
+  652 CommonMark spec tests) before opening a PR.
 - **One concern per PR.** Keep pull requests focused — a bug fix, a new
   feature, or a refactor, not all three at once.
-- **No spec regressions.** The 655/655 CommonMark 0.31.2 pass rate is the
+- **No spec regressions.** The 652/652 CommonMark 0.31.2 pass rate is the
   baseline. PRs that cause spec failures will not be merged.
 - **Follow existing style.** The codebase uses `zig fmt`-standard formatting
   and descriptive naming. When in doubt, match what's already there.

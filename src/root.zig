@@ -1,6 +1,5 @@
 //! Copyright © 2025 [Star City Security Consulting, LLC (SC2)](https://sc2.in)
 //! SPDX-License-Identifier: AGPL-3.0-or-later
-//!TODO: Pass https://github.com/commonmark/commonmark-spec/blob/master/test/spec_tests.py
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const mem = std.mem;
@@ -9,6 +8,7 @@ const Array = std.ArrayList;
 const tst = std.testing;
 const math = std.math;
 
+pub const default_spec_path = @import("config").spec_file_path;
 const mecha = @import("mecha");
 pub const version = @import("config").version;
 
@@ -61,9 +61,6 @@ pub const Renderer = struct {
     }
 };
 
-// Path to the CommonMark spec.txt used for compliance tests.
-// This should match the path passed by the build system (zig build spec --spec ...).
-pub const default_spec_path = "./zig-cache/deps/commonmark_spec/spec.txt";
 /// Character classification helpers used by the parser to implement
 /// CommonMark's definitions of Unicode whitespace, punctuation, etc.
 pub const chars = struct {
@@ -333,6 +330,53 @@ pub const SpecSummary = struct {
     total_time_ns: i128,
 };
 
+/// GFM extension section headings (the sections added by GitHub Flavored Markdown
+/// on top of CommonMark).  These names match the `## …` headings in the GFM spec.
+pub const gfm_sections = [_][]const u8{
+    "Tables (extension)",
+    "Task list items (extension)",
+    "Strikethrough (extension)",
+    "Autolinks (extension)",
+    "Disallowed Raw HTML (extension)",
+};
+
+/// Aggregate result from running every GFM extension section.
+pub const GfmSummary = struct {
+    sections: [gfm_sections.len]SectionResult,
+    all: TestResult,
+    total_time_ns: i128,
+};
+
+/// Run the GFM extension spec suite once per section and once for all
+/// extension sections combined, returning a `GfmSummary`.
+pub fn runGfmSpecSummary(allocator: std.mem.Allocator, spec_path: []const u8) !GfmSummary {
+    var summary: GfmSummary = undefined;
+    summary.total_time_ns = 0;
+
+    for (gfm_sections, 0..) |section, idx| {
+        const r = try runCommonMarkSpecTests(allocator, spec_path, .{
+            .pattern = section,
+            .normalize = true,
+            .verbose = false,
+        });
+        summary.sections[idx] = .{ .section = section, .result = r };
+        summary.total_time_ns += r.time_ns;
+    }
+
+    // Aggregate across all GFM extension sections by running each and summing.
+    var all = TestResult{};
+    for (summary.sections) |s| {
+        all.passed += s.result.passed;
+        all.failed += s.result.failed;
+        all.errors += s.result.errors;
+        all.skipped += s.result.skipped;
+        all.time_ns += s.result.time_ns;
+    }
+    summary.all = all;
+
+    return summary;
+}
+
 /// Run the CommonMark spec suite once per section and once unfiltered,
 /// returning a `SpecSummary` with per-section and aggregate results.
 pub fn runSpecSummary(allocator: std.mem.Allocator, spec_path: []const u8) !SpecSummary {
@@ -441,7 +485,7 @@ pub fn parseSpecTests(allocator: std.mem.Allocator, spec_content: []const u8) !s
         }
 
         // State machine for parsing example blocks
-        if (std.mem.eql(u8, trimmed, "```````````````````````````````` example")) {
+        if (std.mem.startsWith(u8, trimmed, "```````````````````````````````` example")) {
             state = 1;
             start_line = line_number;
             markdown_lines.clearRetainingCapacity();
@@ -777,7 +821,7 @@ test "CommonMark spec compliance" {
 
     // Hard-fail on unexpected results so regressions are caught.
     try testing.expectEqual(@as(usize, 0), summary.all.failed);
-    try testing.expectEqual(@as(usize, 655), summary.all.passed);
+    try testing.expectEqual(@as(usize, 652), summary.all.passed);
     try testing.expectEqual(@as(usize, 0), summary.all.errors);
 }
 
@@ -855,4 +899,8 @@ test "Policy render" {
     const rend = try HTMLRenderer.render(allocator, doc);
     defer allocator.free(rend);
     // std.debug.print("{s}\n", .{rend});
+}
+
+test {
+    tst.refAllDecls(@This());
 }

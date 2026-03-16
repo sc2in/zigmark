@@ -45,7 +45,7 @@ pub fn init(alloc: Allocator, source: []const u8, input_kind: Kind) !FrontMatter
             y.load(alloc) catch |err| switch (err) {
                 error.ParseFailure => {
                     std.debug.assert(y.parse_errors.errorMessageCount() > 0);
-                    y.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(std.io.getStdErr()) });
+                    y.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(std.fs.File.stderr()) });
                     return error.ParseFailure;
                 },
                 else => return err,
@@ -165,9 +165,9 @@ test {
     var json_value = try yamlNodeToJson(alloc, doc);
     defer deinitJsonValue(alloc, &json_value);
 
-    var buf: [1024]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    try std.json.stringify(json_value, .{}, fbs.writer());
+    // var buf: [1024]u8 = undefined;
+    // var fbs = std.io.fixedBufferStream(&buf);
+    // try std.json.stringify(json_value, .{}, fbs.writer());
     // const json_str = fbs.getWritten();
     // std.debug.print("{s}\n", .{json_str});
 }
@@ -208,22 +208,27 @@ pub fn yamlNodeToJson(allocator: std.mem.Allocator, node: Yaml.Value) !JsonValue
             }
             return list;
         },
-        .string => |s| {
-            return JsonValue{ .string = s };
+        .scalar => |s| {
+            const value = blk: {
+                break :blk JsonValue{ .float = std.fmt.parseFloat(f32, s) catch {
+                    break :blk JsonValue{ .integer = std.fmt.parseInt(u32, s, 10) catch {
+                        break :blk JsonValue{ .string = s };
+                    } };
+                } };
+            };
+            return value;
         },
-        .int => |i| {
-            return JsonValue{ .integer = i };
-        },
-        .float => |f| {
-            return JsonValue{ .float = f };
-        },
+
         .boolean => |b| {
             return JsonValue{ .bool = b };
         },
-        else => |u| {
-            std.debug.print("Unsuported type: {}\n", .{u});
-            return error.UnsupportedYamlType;
+        .empty => {
+            return JsonValue{ .null = {} };
         },
+        // else => |u| {
+        //     std.debug.print("Unsuported type: {}\n", .{u});
+        //     return error.UnsupportedYamlType;
+        // },
     }
 }
 
@@ -262,9 +267,9 @@ test "toml to json conversion" {
     var json_value = try tomlValueToJson(alloc, &val);
     defer deinitJsonValue(alloc, &json_value);
 
-    var buf: [1024]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    try std.json.stringify(json_value, .{}, fbs.writer());
+    // var buf: [1024]u8 = undefined;
+    // var fbs = std.io.fixedBufferStream(&buf);
+    // try std.json.stringify(json_value, .{}, fbs.writer());
     // const json_str = fbs.getWritten();
     // std.debug.print("{s}\n", .{json_str});
 }
@@ -308,6 +313,7 @@ pub fn get(self: FrontMatter, path: []const u8) ?std.json.Value {
 /// Looks up a value in a std.json.Value tree using a dot-separated key path.
 /// Returns the found value, or null if any part of the path is missing.
 pub fn jsonFindByPath(root: std.json.Value, path: []const u8) ?std.json.Value {
+    if (path.len == 0) return null;
     var it = std.mem.tokenizeScalar(u8, path, '.');
     var current = root;
     while (it.next()) |segment| {

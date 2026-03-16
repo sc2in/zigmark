@@ -502,6 +502,46 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
 
 fn renderBlock(writer: *std.Io.Writer, block: AST.Block) !void {
     switch (block) {
+        .table => |tbl| {
+            try writer.writeAll("<table>\n");
+
+            // header
+            try writer.writeAll("<thead>\n<tr>\n");
+            for (tbl.header.cells.items, tbl.alignments.items) |cell, col_align| {
+                switch (col_align) {
+                    .none => try writer.writeAll("<th>"),
+                    .left => try writer.writeAll("<th align=\"left\">"),
+                    .center => try writer.writeAll("<th align=\"center\">"),
+                    .right => try writer.writeAll("<th align=\"right\">"),
+                }
+                for (cell.children.items) |inl| try renderInline(writer, inl);
+                try writer.writeAll("</th>\n");
+            }
+            try writer.writeAll("</tr>\n</thead>\n");
+
+            // body
+            if (tbl.body.items.len > 0) {
+                try writer.writeAll("<tbody>\n");
+                for (tbl.body.items) |row| {
+                    try writer.writeAll("<tr>\n");
+                    for (row.cells.items, tbl.alignments.items) |cell, col_align| {
+                        switch (col_align) {
+                            .none => try writer.writeAll("<td>"),
+                            .left => try writer.writeAll("<td align=\"left\">"),
+                            .center => try writer.writeAll("<td align=\"center\">"),
+                            .right => try writer.writeAll("<td align=\"right\">"),
+                        }
+                        for (cell.children.items) |inl| try renderInline(writer, inl);
+                        try writer.writeAll("</td>\n");
+                    }
+                    try writer.writeAll("</tr>\n");
+                }
+                try writer.writeAll("</tbody>\n");
+            }
+
+            try writer.writeAll("</table>\n");
+        },
+
         .heading => |h| {
             try writer.print("<h{d}>", .{h.level});
             for (h.children.items) |item| try renderInline(writer, item);
@@ -905,4 +945,26 @@ test "link with title styles" {
 
 test "link rejects space in bare url" {
     try ok("[link](/my uri)", "<p>[link](/my uri)</p>\n");
+}
+
+test "gfm table basic" {
+    try ok(
+        "a | b\n" ++
+            "---|---\n" ++
+            "1 | 2",
+        "<table>\n" ++
+            "<thead>\n" ++
+            "<tr>\n" ++
+            "<th>a</th>\n" ++
+            "<th>b</th>\n" ++
+            "</tr>\n" ++
+            "</thead>\n" ++
+            "<tbody>\n" ++
+            "<tr>\n" ++
+            "<td>1</td>\n" ++
+            "<td>2</td>\n" ++
+            "</tr>\n" ++
+            "</tbody>\n" ++
+            "</table>\n",
+    );
 }

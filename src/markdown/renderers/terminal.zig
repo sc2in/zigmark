@@ -403,6 +403,152 @@ fn renderInline(w: anytype, inl: AST.Inline, allocator: Allocator) !void {
 
 fn renderBlock(w: anytype, block: AST.Block, indent: usize, bq_depth: usize, allocator: Allocator) !void {
     switch (block) {
+        .table => |tbl| {
+            const columns = tbl.alignments.items.len;
+
+            // Render cell contents to plain strings (ANSI stripped) for width calculations.
+            var header_text = std.ArrayList([]const u8){};
+            defer header_text.deinit(allocator);
+            for (tbl.header.cells.items) |cell| {
+                const txt = try renderInlinePlain(allocator, cell.children.items);
+                try header_text.append(allocator, txt);
+            }
+
+            var body_text = std.ArrayList([]const u8){};
+            defer body_text.deinit(allocator);
+            for (tbl.body.items) |row| {
+                var row_text = std.ArrayList([]const u8){};
+                defer row_text.deinit(allocator);
+                for (row.cells.items) |cell| {
+                    const txt = try renderInlinePlain(allocator, cell.children.items);
+                    try row_text.append(allocator, txt);
+                }
+                const row_flat = try std.mem.join(allocator, "\t", row_text.items);
+                try body_text.append(allocator, row_flat);
+            }
+
+            // Determine column widths.
+            var col_widths = try allocator.alloc(usize, columns);
+            defer allocator.free(col_widths);
+            for (col_widths) |*cw| cw.* = 0;
+
+            // Compute column widths
+            for (header_text.items) |row| {
+                var start: usize = 0;
+                var col: usize = 0;
+                while (start <= row.len and col < columns) {
+                    const end = std.mem.indexOfScalar(u8, row[start..], '\t') orelse row.len - start;
+                    const slice = row[start .. start + end];
+                    if (slice.len > col_widths[col]) col_widths[col] = slice.len;
+                    var step: usize = 0;
+                    if (end != row.len - start) step = 1;
+                    start += end + step;
+                    col += 1;
+                }
+            }
+            for (body_text.items) |row| {
+                var start: usize = 0;
+                var col: usize = 0;
+                while (start <= row.len and col < columns) {
+                    const end = std.mem.indexOfScalar(u8, row[start..], '\t') orelse row.len - start;
+                    const slice = row[start .. start + end];
+                    if (slice.len > col_widths[col]) col_widths[col] = slice.len;
+                    var step: usize = 0;
+                    if (end != row.len - start) step = 1;
+                    start += end + step;
+                    col += 1;
+                }
+            }
+
+            const header_joined = try std.mem.join(allocator, "\t", header_text.items);
+            // Print a row from a tab-separated row string
+            {
+                var start: usize = 0;
+                var col: usize = 0;
+                while (start <= header_joined.len and col < columns) {
+                    const end = std.mem.indexOfScalar(u8, header_joined[start..], '\t') orelse header_joined.len - start;
+                    const slice = header_joined[start .. start + end];
+                    try w.writeAll("| ");
+                    const alignment = if (col < tbl.alignments.items.len) tbl.alignments.items[col] else .none;
+                    const pad = col_widths[col] - slice.len;
+                    switch (alignment) {
+                        .left => {
+                            try w.writeAll(slice);
+                            for (0..pad) |_| try w.writeByte(' ');
+                        },
+                        .right => {
+                            for (0..pad) |_| try w.writeByte(' ');
+                            try w.writeAll(slice);
+                        },
+                        .center => {
+                            const left = pad / 2;
+                            const right = pad - left;
+                            for (0..left) |_| try w.writeByte(' ');
+                            try w.writeAll(slice);
+                            for (0..right) |_| try w.writeByte(' ');
+                        },
+                        .none => {
+                            try w.writeAll(slice);
+                            for (0..pad) |_| try w.writeByte(' ');
+                        },
+                    }
+                    try w.writeAll(" ");
+                    var step: usize = 0;
+                    if (end != header_joined.len - start) step = 1;
+                    start += end + step;
+                    col += 1;
+                }
+                try w.writeAll("|\n");
+                allocator.free(header_joined);
+            }
+            try w.writeAll("|");
+            for (col_widths) |cw| {
+                try w.writeAll(" ");
+                for (0..cw) |_| try w.writeByte('-');
+                try w.writeAll(" |");
+            }
+            try w.writeAll("\n");
+
+            for (body_text.items) |row| {
+                var start: usize = 0;
+                var col: usize = 0;
+                while (start <= row.len and col < columns) {
+                    const end = std.mem.indexOfScalar(u8, row[start..], '\t') orelse row.len - start;
+                    const slice = row[start .. start + end];
+                    try w.writeAll("| ");
+                    const alignment = if (col < tbl.alignments.items.len) tbl.alignments.items[col] else .none;
+                    const pad = col_widths[col] - slice.len;
+                    switch (alignment) {
+                        .left => {
+                            try w.writeAll(slice);
+                            for (0..pad) |_| try w.writeByte(' ');
+                        },
+                        .right => {
+                            for (0..pad) |_| try w.writeByte(' ');
+                            try w.writeAll(slice);
+                        },
+                        .center => {
+                            const left = pad / 2;
+                            const right = pad - left;
+                            for (0..left) |_| try w.writeByte(' ');
+                            try w.writeAll(slice);
+                            for (0..right) |_| try w.writeByte(' ');
+                        },
+                        .none => {
+                            try w.writeAll(slice);
+                            for (0..pad) |_| try w.writeByte(' ');
+                        },
+                    }
+                    try w.writeAll(" ");
+                    var step: usize = 0;
+                    if (end != row.len - start) step = 1;
+                    start += end + step;
+                    col += 1;
+                }
+                try w.writeAll("|\n");
+            }
+        },
+
         .heading => |h| {
             const idx: usize = if (h.level >= 1 and h.level <= 6) h.level - 1 else 5;
             const style = heading_styles[idx];
@@ -570,6 +716,17 @@ fn writeBlockquotePrefix(w: anytype, depth: usize) !void {
     }
 }
 
+/// Render inline content to an owned plain (ANSI-stripped) string.
+fn renderInlinePlain(allocator: Allocator, items: []const AST.Inline) ![]const u8 {
+    var aw: std.io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    try renderInlineList(&aw.writer, items, allocator);
+    const out = try aw.toOwnedSlice();
+    const stripped = try stripAnsi(allocator, out);
+    allocator.free(out);
+    return stripped;
+}
+
 // ── Top-level render ─────────────────────────────────────────────────────────
 
 /// Render `doc` to an allocator-owned byte slice with ANSI terminal styling.
@@ -592,16 +749,17 @@ pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 fn ok(markdown: []const u8, needle: []const u8) !void {
-    const allocator = tst.allocator;
+    var arena = std.heap.ArenaAllocator.init(tst.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     var parser = Parser.init();
     defer parser.deinit(allocator);
     var doc = try parser.parseMarkdown(allocator, markdown);
     defer doc.deinit(allocator);
     const out = try render(allocator, doc);
     defer allocator.free(out);
-    // For terminal output we just check that the expected substring is present
-    // since exact ANSI matching would be very fragile.
-    try tst.expect(std.mem.indexOf(u8, out, needle) != null);
+    // For terminal output, ignore ANSI escape sequences when searching.
+    try tst.expect(containsIgnoringAnsi(out, needle));
 }
 
 /// Strip all ANSI escape sequences so we can assert on visible text.
@@ -620,6 +778,38 @@ fn stripAnsi(allocator: Allocator, input: []const u8) ![]u8 {
         }
     }
     return buf.toOwnedSlice(allocator);
+}
+
+/// Returns true if `needle` is found in `haystack` when ignoring ANSI escapes.
+fn containsIgnoringAnsi(haystack: []const u8, needle: []const u8) bool {
+    var i: usize = 0;
+    while (i < haystack.len) {
+        if (haystack[i] == '\x1b' and i + 1 < haystack.len and haystack[i + 1] == '[') {
+            // Skip ESC [ ... <letter>
+            i += 2;
+            while (i < haystack.len and (haystack[i] < 0x40 or haystack[i] > 0x7E)) : (i += 1) {}
+            if (i < haystack.len) i += 1;
+            continue;
+        }
+
+        // Attempt match from this position, skipping over ANSI sequences.
+        var hi: usize = i;
+        var nj: usize = 0;
+        while (hi < haystack.len and nj < needle.len) {
+            if (haystack[hi] == '\x1b' and hi + 1 < haystack.len and haystack[hi + 1] == '[') {
+                hi += 2;
+                while (hi < haystack.len and (haystack[hi] < 0x40 or haystack[hi] > 0x7E)) : (hi += 1) {}
+                if (hi < haystack.len) hi += 1;
+                continue;
+            }
+            if (haystack[hi] != needle[nj]) break;
+            hi += 1;
+            nj += 1;
+        }
+        if (nj == needle.len) return true;
+        i += 1;
+    }
+    return false;
 }
 
 fn okStripped(markdown: []const u8, expected: []const u8) !void {
@@ -716,6 +906,18 @@ test "terminal: ANSI codes present" {
 
 test "terminal: footnote" {
     try ok("[^1]\n[^1]: content", "[^1]: content");
+}
+
+test "terminal: table" {
+    // Basic table layout check (headers + row data).
+    try ok(
+        "| a | b |\n|---|---|\n| x | y |",
+        "| a | b |",
+    );
+    try ok(
+        "| a | b |\n|---|---|\n| x | y |",
+        "| x | y |",
+    );
 }
 
 test "terminal: image extension detection" {
