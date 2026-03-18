@@ -513,6 +513,58 @@ fn deinitJsonValue(alloc: std.mem.Allocator, value: *std.json.Value) void {
     }
 }
 
+/// Deep-clone a `std.json.Value` tree using `alloc`.
+/// Strings and number_string values are duplicated; scalars are copied by value.
+/// The caller owns all allocated memory; free with `deinitJsonValue` for
+/// containers (note: string values must be freed separately if needed).
+pub fn cloneJsonValue(alloc: Allocator, value: std.json.Value) Allocator.Error!std.json.Value {
+    return switch (value) {
+        .null => .{ .null = {} },
+        .bool => |b| .{ .bool = b },
+        .integer => |n| .{ .integer = n },
+        .float => |f| .{ .float = f },
+        .number_string => |s| .{ .number_string = try alloc.dupe(u8, s) },
+        .string => |s| .{ .string = try alloc.dupe(u8, s) },
+        .array => |arr| blk: {
+            var new_arr = try std.json.Array.initCapacity(alloc, arr.items.len);
+            for (arr.items) |item| {
+                new_arr.appendAssumeCapacity(try cloneJsonValue(alloc, item));
+            }
+            break :blk .{ .array = new_arr };
+        },
+        .object => |obj| blk: {
+            var new_obj: std.json.ObjectMap = .init(alloc);
+            var it = obj.iterator();
+            while (it.next()) |entry| {
+                const key = try alloc.dupe(u8, entry.key_ptr.*);
+                const val = try cloneJsonValue(alloc, entry.value_ptr.*);
+                try new_obj.put(key, val);
+            }
+            break :blk .{ .object = new_obj };
+        },
+    };
+}
+
+/// Recursively deep-merge `overlay` into `base` using `alloc`.
+/// For `.object` values: recurse (overlay keys win on leaf conflicts).
+/// For all other types: overlay value replaces the base value (cloned).
+fn mergeJsonValue(alloc: Allocator, base: *std.json.Value, overlay: std.json.Value) Allocator.Error!void {
+    if (base.* == .object and overlay == .object) {
+        var it = overlay.object.iterator();
+        while (it.next()) |entry| {
+            if (base.object.getPtr(entry.key_ptr.*)) |existing| {
+                try mergeJsonValue(alloc, existing, entry.value_ptr.*);
+            } else {
+                const key = try alloc.dupe(u8, entry.key_ptr.*);
+                const val = try cloneJsonValue(alloc, entry.value_ptr.*);
+                try base.object.put(key, val);
+            }
+        }
+    } else {
+        base.* = try cloneJsonValue(alloc, overlay);
+    }
+}
+
 /// Recursively convert a `zig-yaml` value tree into `std.json.Value`.
 pub fn yamlNodeToJson(allocator: std.mem.Allocator, node: Yaml.Value) !JsonValue {
     switch (node) {
@@ -634,6 +686,88 @@ pub fn tableToJson(allocator: std.mem.Allocator, table: *tomlz.parser.Table) err
 /// Look up a value by dot-separated key path (e.g. `"extra.owner"`).
 pub fn get(self: FrontMatter, path: []const u8) ?std.json.Value {
     return jsonFindByPath(self.root, path);
+}
+
+/// Set (or create) a value at a dot-separated key path in `self.root`.
+/// Intermediate objects that do not exist are created automatically.
+/// The provided `value` is deep-cloned with `alloc` so the caller retains
+/// ownership of the original.
+///
+/// Returns `error.InvalidFieldArg` for an empty path and
+/// `error.NotAnObject` if traversal hits a non-object intermediate node.
+pub fn set(self: *FrontMatter, alloc: Allocator, path: []const u8, value: std.json.Value) !void {
+    if (path.len == 0) return error.InvalidFieldArg;
+    if (self.root != .object) return error.NotAnObject;
+    const owned = try cloneJsonValue(alloc, value);
+    var segs = std.mem.tokenizeScalar(u8, path, '.');
+    var current: *std.json.Value = &self.root;
+    while (segs.next()) |seg| {
+        const is_last = segs.rest().len == 0;
+        if (is_last) {
+            const key = try alloc.dupe(u8, seg);
+            try current.object.put(key, owned);
+            return;
+        }
+        if (current.object.getPtr(seg)) |child| {
+            if (child.* != .object) return error.NotAnObject;
+            current = child;
+        } else {
+            const key = try alloc.dupe(u8, seg);
+            try current.object.put(key, .{ .object = .init(alloc) });
+            current = current.object.getPtr(seg).?;
+        }
+    }
+}
+
+/// Deep-merge `overlay.root` into `self.root` using `alloc`.
+///
+/// For object values the merge is recursive: overlay keys are added or
+/// overwrite matching base keys; unmatched base keys are preserved.
+/// For all other value types the overlay wins outright.
+/// `self` retains its original format (YAML/TOML/JSON/ZON); the overlay's
+/// format is ignored.
+pub fn merge(self: *FrontMatter, alloc: Allocator, overlay: FrontMatter) !void {
+    try mergeJsonValue(alloc, &self.root, overlay.root);
+}
+
+// ── Field argument parsing ────────────────────────────────────────────────────
+
+/// Parsed result of a `"key.path=value"` command-line argument.
+/// Both `path` and any string `value.string` alias the original `arg` slice.
+pub const FieldArg = struct {
+    path: []const u8,
+    value: std.json.Value,
+};
+
+/// Infer the JSON type of a raw string value (no allocation required).
+///
+/// Type precedence:
+///   1. `"true"` / `"false"` → `.bool`
+///   2. `"null"` → `.null`
+///   3. Valid integer (no `.` in string) → `.integer`
+///   4. Valid float (has `.` and parses) → `.float`
+///   5. Everything else → `.string` (aliases `raw`)
+pub fn inferValue(raw: []const u8) std.json.Value {
+    if (std.mem.eql(u8, raw, "true")) return .{ .bool = true };
+    if (std.mem.eql(u8, raw, "false")) return .{ .bool = false };
+    if (std.mem.eql(u8, raw, "null")) return .{ .null = {} };
+    if (std.mem.indexOfScalar(u8, raw, '.') == null) {
+        if (std.fmt.parseInt(i64, raw, 10)) |n| return .{ .integer = n } else |_| {}
+    } else {
+        if (std.fmt.parseFloat(f64, raw)) |f| return .{ .float = f } else |_| {}
+    }
+    return .{ .string = raw };
+}
+
+/// Parse a `"key.path=value"` argument into a `FieldArg`.
+///
+/// The `value` is type-inferred via `inferValue`; string values alias `arg`.
+/// Returns `error.InvalidFieldArg` when there is no `=` or the path is empty.
+pub fn parseFieldArg(arg: []const u8) error{InvalidFieldArg}!FieldArg {
+    const eq = std.mem.indexOfScalar(u8, arg, '=') orelse return error.InvalidFieldArg;
+    const path = arg[0..eq];
+    if (path.len == 0) return error.InvalidFieldArg;
+    return .{ .path = path, .value = inferValue(arg[eq + 1 ..]) };
 }
 
 /// Looks up a value in a std.json.Value tree using a dot-separated key path.

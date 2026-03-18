@@ -136,6 +136,56 @@ char *zigmark_frontmatter_get(ZigmarkFrontmatter *fm, const char *key);
  */
 char *zigmark_frontmatter_serialize(ZigmarkFrontmatter *fm);
 
+/**
+ * Deep-merge @p overlay into @p base (overlay keys win for leaf conflicts).
+ *
+ * The merge is recursive for object values: keys present only in the overlay
+ * are added to the base; keys present in both are overwritten (scalar) or
+ * recursively merged (object).  The base retains its original format.
+ *
+ * @param base     The document to merge into; modified in place.
+ * @param overlay  The document to merge from; left unmodified.
+ * @return         0 on success, -1 on failure.
+ */
+int zigmark_frontmatter_merge(ZigmarkFrontmatter *base,
+                              const ZigmarkFrontmatter *overlay);
+
+/**
+ * Set a value at a dot-separated key path using a JSON-encoded value string.
+ *
+ * Intermediate objects that do not exist are created automatically.
+ *
+ * @param fm         A handle returned by zigmark_frontmatter_parse().
+ * @param path       NUL-terminated dot-separated key path (e.g. @c "extra.owner").
+ * @param json_value NUL-terminated compact JSON string for the new value
+ *                   (e.g. @c "\"hello\"", @c "42", @c "true", @c "[1,2]").
+ * @return           0 on success, -1 on failure (bad JSON, OOM, or bad path).
+ */
+int zigmark_frontmatter_set(ZigmarkFrontmatter *fm,
+                            const char *path,
+                            const char *json_value);
+
+/**
+ * Set a value at a dot-separated key path using an auto-typed raw string.
+ *
+ * Type inference rules (applied in order):
+ *   - @c "true" / @c "false" → boolean
+ *   - @c "null" → null
+ *   - Valid integer literal (no @c .) → integer
+ *   - Valid float literal → float
+ *   - Everything else → string
+ *
+ * Intermediate objects that do not exist are created automatically.
+ *
+ * @param fm    A handle returned by zigmark_frontmatter_parse().
+ * @param path  NUL-terminated dot-separated key path.
+ * @param raw   NUL-terminated raw value string.
+ * @return      0 on success, -1 on failure.
+ */
+int zigmark_frontmatter_set_raw(ZigmarkFrontmatter *fm,
+                                const char *path,
+                                const char *raw);
+
 #ifdef __cplusplus
 }
 #endif

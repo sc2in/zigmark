@@ -258,6 +258,65 @@ export fn zigmark_frontmatter_serialize(ptr: ?*OpaqueFm) ?[*:0]u8 {
     return c_str[0..buf.len :0];
 }
 
+/// Deep-merge `overlay` into `base` (overlay keys win for leaf conflicts).
+/// The base retains its original format (YAML/TOML/JSON/ZON).
+///
+/// Returns 0 on success, -1 on failure.
+export fn zigmark_frontmatter_merge(base: ?*OpaqueFm, overlay: ?*OpaqueFm) c_int {
+    const b = base orelse return -1;
+    const o = overlay orelse return -1;
+    b.fm.merge(b.allocator, o.fm) catch return -1;
+    return 0;
+}
+
+/// Set a value at a dot-separated key path.
+///
+/// @param path       NUL-terminated dot-separated key path (e.g. `"extra.owner"`).
+/// @param json_value NUL-terminated compact JSON string for the new value
+///                   (e.g. `"\"hello\""`, `"42"`, `"true"`, `"[1,2,3]"`).
+///
+/// Returns 0 on success, -1 on failure (parse error, OOM, or bad path).
+export fn zigmark_frontmatter_set(ptr: ?*OpaqueFm, path: [*:0]const u8, json_value: [*:0]const u8) c_int {
+    const wrapper = ptr orelse return -1;
+    var path_len: usize = 0;
+    while (path[path_len] != 0) : (path_len += 1) {}
+    var val_len: usize = 0;
+    while (json_value[val_len] != 0) : (val_len += 1) {}
+    const parsed = std.json.parseFromSlice(
+        std.json.Value,
+        wrapper.allocator,
+        json_value[0..val_len],
+        .{},
+    ) catch return -1;
+    defer parsed.deinit();
+    wrapper.fm.set(wrapper.allocator, path[0..path_len], parsed.value) catch return -1;
+    return 0;
+}
+
+/// Set a value using auto-typed raw string (not JSON-quoted).
+///
+/// Type inference rules (applied in order):
+///   - `"true"` / `"false"` → bool
+///   - `"null"` → null
+///   - Valid integer literal (no `.`) → integer
+///   - Valid float literal → float
+///   - Everything else → string (value is copied)
+///
+/// @param path  NUL-terminated dot-separated key path.
+/// @param raw   NUL-terminated raw value string.
+///
+/// Returns 0 on success, -1 on failure.
+export fn zigmark_frontmatter_set_raw(ptr: ?*OpaqueFm, path: [*:0]const u8, raw: [*:0]const u8) c_int {
+    const wrapper = ptr orelse return -1;
+    var path_len: usize = 0;
+    while (path[path_len] != 0) : (path_len += 1) {}
+    var raw_len: usize = 0;
+    while (raw[raw_len] != 0) : (raw_len += 1) {}
+    const value = Frontmatter.inferValue(raw[0..raw_len]);
+    wrapper.fm.set(wrapper.allocator, path[0..path_len], value) catch return -1;
+    return 0;
+}
+
 test "enhanced parse and render" {
     const allocator = std.testing.allocator;
 
