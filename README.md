@@ -4,21 +4,6 @@ A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 6
 
 Builds as both a **CLI tool** and a **C-callable shared library** (`libzigmark.so`).
 
-## Performance
-
-<!-- bench-start -->
-_Last updated: 2026-03-18_
-
-| Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
-|:---|---:|---:|---:|---:|
-| `zigmark (ReleaseSafe)` | 2.7 ± 1.3 | 1.5 | 14.1 | 1.40 ± 1.10 |
-| `zigmark (ReleaseSmall)` | 2.7 ± 1.1 | 1.5 | 9.3 | 1.41 ± 1.06 |
-| `zigmark (ReleaseFast)` | 2.4 ± 1.4 | 1.4 | 15.1 | 1.29 ± 1.07 |
-| `discount` | 2.0 ± 0.9 | 1.1 | 9.8 | 1.07 ± 0.82 |
-| `lowdown` | 1.9 ± 1.2 | 1.0 | 9.7 | 1.00 |
-| `pandoc` | 150.2 ± 14.3 | 118.0 | 245.8 | 79.09 ± 49.62 |
-
-<!-- bench-end -->
 
 ## Installation
 
@@ -507,6 +492,25 @@ Requires **Zig 0.15.2** or later.
 - **`Renderer`** — Type-erased vtable interface for pluggable output backends
 - **`Frontmatter`** — YAML/TOML/JSON/ZON metadata extraction, mutation (`set`, `delete`, `merge`), and re-serialisation; YAML via [zig-yaml](https://github.com/kubkon/zig-yaml), TOML via [tomlz](https://github.com/tsunaminoai/tomlz), JSON via `std.json`, ZON via a built-in recursive-descent parser
 - **C ABI** — Opaque-pointer API in `root.zig` exported as `libzigmark.so`
+
+## Performance
+
+<!-- bench-start -->
+_Last updated: 2026-03-18 · input: `README.md` (15 KB) · run `nix run .#bench` to reproduce_
+
+| Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
+|:---|---:|---:|---:|---:|
+| `lowdown` | 1.8 ± 0.9 | 1.0 | 9.4 | 1.00 |
+| `discount` | 2.1 ± 1.2 | 1.2 | 12.6 | 1.18 ± 0.89 |
+| **`zigmark (ReleaseSafe)`** | 2.7 ± 1.3 | 1.5 | 19.7 | 1.47 ± 1.03 |
+| **`zigmark (ReleaseSmall)`** | 2.9 ± 1.4 | 1.6 | 13.2 | 1.61 ± 1.10 |
+| **`zigmark (ReleaseFast)`** | 2.9 ± 1.6 | 1.4 | 14.7 | 1.58 ± 1.20 |
+| `cmark` | 5.5 ± 1.4 | 3.2 | 16.7 | 3.06 ± 1.72 |
+| `cmark-gfm` | 5.8 ± 1.8 | 3.5 | 20.1 | 3.21 ± 1.89 |
+| `pandoc` | 140.7 ± 9.8 | 122.4 | 166.7 | 1.00 |
+
+<!-- bench-end -->
+
 
 ## Future Plans
 

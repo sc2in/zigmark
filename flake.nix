@@ -143,7 +143,7 @@
         bench = let
           bench-app = pkgs.writeShellApplication {
             name = "zigmark-bench";
-            runtimeInputs = with pkgs; [hyperfine pandoc discount lowdown python3 zig];
+            runtimeInputs = with pkgs; [hyperfine pandoc discount lowdown cmark cmark-gfm python3 zig];
             text = ''
               set -euo pipefail
               REPO="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -166,9 +166,17 @@
               zig build -Doptimize=ReleaseFast  && cp zig-out/bin/zigmark /tmp/zigmark-fast
 
               RESULT_MD=$(mktemp /tmp/bench-result-XXXXXX.md)
-              trap 'rm -f "$RESULT_MD" /tmp/zigmark-safe /tmp/zigmark-small /tmp/zigmark-fast' EXIT
+              PANDOC_MD=$(mktemp /tmp/bench-pandoc-XXXXXX.md)
+              # cmark and cmark-gfm write to stdout; wrap them so -N (no-shell) mode can discard output.
+              CMARK_WRAP=$(mktemp /tmp/cmark-wrap-XXXXXX)
+              printf '#!/bin/sh\nexec cmark "$@" > /dev/null\n' > "$CMARK_WRAP"
+              chmod +x "$CMARK_WRAP"
+              CMARK_GFM_WRAP=$(mktemp /tmp/cmark-gfm-wrap-XXXXXX)
+              printf '#!/bin/sh\nexec cmark-gfm "$@" > /dev/null\n' > "$CMARK_GFM_WRAP"
+              chmod +x "$CMARK_GFM_WRAP"
+              trap 'rm -f "$RESULT_MD" "$PANDOC_MD" "$CMARK_WRAP" "$CMARK_GFM_WRAP" /tmp/zigmark-safe /tmp/zigmark-small /tmp/zigmark-fast' EXIT
 
-              echo "▸ Running hyperfine…"
+              echo "▸ Running hyperfine (fast tools — 500 runs)…"
               hyperfine \
                 -N \
                 --warmup 50 \
@@ -177,25 +185,67 @@
                 --command-name "zigmark (ReleaseSafe)"  "/tmp/zigmark-safe  -o /dev/null $BENCH_FILE" \
                 --command-name "zigmark (ReleaseSmall)" "/tmp/zigmark-small -o /dev/null $BENCH_FILE" \
                 --command-name "zigmark (ReleaseFast)"  "/tmp/zigmark-fast  -o /dev/null $BENCH_FILE" \
+                --command-name "cmark"                   "$CMARK_WRAP $BENCH_FILE" \
+                --command-name "cmark-gfm"              "$CMARK_GFM_WRAP $BENCH_FILE" \
                 --command-name "discount"               "markdown -o /dev/null $BENCH_FILE" \
-                --command-name "lowdown"                "lowdown  -o /dev/null $BENCH_FILE" \
-                --command-name "pandoc"                 "pandoc   -o /dev/null $BENCH_FILE"
+                --command-name "lowdown"                "lowdown  -o /dev/null $BENCH_FILE"
+
+              echo "▸ Running hyperfine (pandoc — 20 runs)…"
+              hyperfine \
+                -N \
+                --warmup 3 \
+                --runs 20 \
+                --export-markdown "$PANDOC_MD" \
+                --command-name "pandoc" "pandoc -o /dev/null $BENCH_FILE"
 
               echo ""
               echo "▸ Updating README.md…"
-              python3 - "$REPO/README.md" "$RESULT_MD" <<'PYEOF'
+              python3 - "$REPO/README.md" "$RESULT_MD" "$PANDOC_MD" "$BENCH_FILE" <<'PYEOF'
               import re, sys, pathlib, datetime
 
               readme_path = pathlib.Path(sys.argv[1])
-              bench_path  = pathlib.Path(sys.argv[2])
+              fast_md     = pathlib.Path(sys.argv[2]).read_text()
+              pandoc_md   = pathlib.Path(sys.argv[3]).read_text()
+              bench_file  = sys.argv[4]
 
-              bench_md = bench_path.read_text()
-              readme   = readme_path.read_text()
+              def parse_mean_ms(row):
+                  # row cells: | cmd | mean ± sd | min | max | rel |
+                  cells = [c.strip() for c in row.strip().strip("|").split("|")]
+                  try:
+                      return float(cells[1].split()[0])
+                  except (IndexError, ValueError):
+                      return float("inf")
 
-              today = datetime.date.today().isoformat()
+              def is_data_row(line):
+                  return line.startswith("|") and not line.startswith("| Command") and not line.startswith("|:")
+
+              # Collect all data rows from both tables.
+              fast_lines   = fast_md.rstrip().splitlines()
+              pandoc_lines = pandoc_md.rstrip().splitlines()
+              header = [l for l in fast_lines if l.startswith("| Command")][0]
+              sep    = [l for l in fast_lines if l.startswith("|:")][0]
+              data_rows = [l for l in fast_lines + pandoc_lines if is_data_row(l)]
+
+              # Sort by mean time ascending.
+              data_rows.sort(key=parse_mean_ms)
+
+              # Bold zigmark rows (the command cell is the first column).
+              def bold_if_zigmark(row):
+                  if "zigmark" not in row:
+                      return row
+                  # Replace the backtick-quoted command name with a bolded version.
+                  return re.sub(r"(`[^`]+`)", r"**\1**", row, count=1)
+
+              data_rows = [bold_if_zigmark(r) for r in data_rows]
+              bench_md = "\n".join([header, sep] + data_rows) + "\n"
+
+              bench_size = pathlib.Path(bench_file).stat().st_size
+              readme = readme_path.read_text()
+              today  = datetime.date.today().isoformat()
               new_section = (
                   f"<!-- bench-start -->\n"
-                  f"_Last updated: {today}_\n\n"
+                  f"_Last updated: {today} · input: `{pathlib.Path(bench_file).name}`"
+                  f" ({bench_size // 1024} KB) · run `nix run .#bench` to reproduce_\n\n"
                   f"{bench_md}\n"
                   f"<!-- bench-end -->"
               )

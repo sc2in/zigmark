@@ -377,10 +377,37 @@ fn isSetextDashLine(line: []const u8) bool {
     return true;
 }
 
+// Comptime truth-table: O(1) ASCII punctuation test — single array load,
+// no branch chain.  Encodes the same set as the original four-range check.
+const ascii_punct_table: [256]bool = blk: {
+    var t = [_]bool{false} ** 256;
+    var c: u9 = '!';
+    while (c <= '/') : (c += 1) t[c] = true; // ! " # $ % & ' ( ) * + , - . /
+    c = ':';
+    while (c <= '@') : (c += 1) t[c] = true; // : ; < = > ? @
+    c = '[';
+    while (c <= '`') : (c += 1) t[c] = true; // [ \ ] ^ _ `
+    c = '{';
+    while (c <= '~') : (c += 1) t[c] = true; // { | } ~
+    break :blk t;
+};
+
 fn isAsciiPunct(c: u8) bool {
-    return (c >= '!' and c <= '/') or (c >= ':' and c <= '@') or
-        (c >= '[' and c <= '`') or (c >= '{' and c <= '~');
+    return ascii_punct_table[c];
 }
+
+// Break-char tables for the inline plain-text scan.  One array load replaces
+// 9-10 comparisons per character in the hottest loop in the parser.
+const inline_break_cm: [256]bool = blk: {
+    var t = [_]bool{false} ** 256;
+    for ("*_~[!`<\\\n") |c| t[c] = true;
+    break :blk t;
+};
+const inline_break_gfm: [256]bool = blk: {
+    var t = inline_break_cm;
+    t['@'] = true;
+    break :blk t;
+};
 
 // ── Tab-aware indentation helpers ────────────────────────────────────────────
 
@@ -1027,9 +1054,34 @@ fn isUnicodePunct(input: []const u8, pos: usize) bool {
     return false;
 }
 
-fn isUnicodeCodepointPunct(cp: u32) bool {
+// 8KB comptime bitset covering the entire BMP (U+0000..U+FFFF).
+// Bit N of byte bmp_punct_bitset[N/8] is set iff codepoint N is punctuation.
+// This replaces a 70-iteration linear scan with a single bit-test for BMP chars.
+// Supplementary-plane codepoints fall through to the linear scan (rare in practice).
+const bmp_punct_bitset: [8192]u8 = blk: {
+    // The bitset iterates over every BMP codepoint in each unicode range.
+    // Total iterations are ~10 000 — raise the quota from the default of 1000.
+    @setEvalBranchQuota(200_000);
+    var bs = [_]u8{0} ** 8192;
     const UR = @import("unicode_ranges.zig");
     for (UR.ranges) |r| {
+        if (r[0] > 0xFFFF) continue; // supplementary-only range
+        const hi = if (r[1] > 0xFFFF) @as(u32, 0xFFFF) else r[1];
+        var cp: u32 = r[0];
+        while (cp <= hi) : (cp += 1) bs[cp / 8] |= @as(u8, 1) << @intCast(cp % 8);
+    }
+    break :blk bs;
+};
+
+fn isUnicodeCodepointPunct(cp: u32) bool {
+    if (cp < 0x10000) {
+        // Fast path: single bit-test in the 8KB BMP table (stays hot in L1 cache).
+        return (bmp_punct_bitset[cp / 8] >> @intCast(cp % 8)) & 1 != 0;
+    }
+    // Supplementary planes (U+10000+): linear scan through only the supra-BMP ranges.
+    const UR = @import("unicode_ranges.zig");
+    for (UR.ranges) |r| {
+        if (r[0] <= 0xFFFF) continue;
         if (cp < r[0]) return false;
         if (cp <= r[1]) return true;
     }
@@ -1093,6 +1145,8 @@ fn wrapDelimiters(
 
     // Gather children between opener and closer
     var children = std.ArrayList(AST.Inline){};
+    const child_count = close_il -| (open_il + 1);
+    if (child_count > 0) try children.ensureTotalCapacity(allocator, child_count);
     var ci = open_il + 1;
     while (ci < close_il) : (ci += 1) try children.append(allocator, inlines.items[ci]);
 
@@ -1182,6 +1236,38 @@ fn processEmphasis(allocator: Allocator, inlines: *std.ArrayList(AST.Inline), de
         }
     }
     inlines.items.len = w;
+}
+
+/// SIMD-accelerated scan for the first "break" character in inline text.
+/// Uses @Vector comparisons (PCMPEQB/VPCMPEQB) to process `vlen` bytes per
+/// iteration — up to 32x throughput vs scalar for long plain-text spans.
+fn indexOfBreakChar(input: []const u8, pos: usize, gfm: bool) usize {
+    const vlen = std.simd.suggestVectorLength(u8) orelse 1;
+    const Vec = @Vector(vlen, u8);
+    // Comptime-splat each needle — each becomes a PCMPEQB operand.
+    const s_star: Vec = @splat('*');
+    const s_under: Vec = @splat('_');
+    const s_tilde: Vec = @splat('~');
+    const s_lbrack: Vec = @splat('[');
+    const s_bang: Vec = @splat('!');
+    const s_btick: Vec = @splat('`');
+    const s_lt: Vec = @splat('<');
+    const s_bslash: Vec = @splat('\\');
+    const s_nl: Vec = @splat('\n');
+    const fallback = if (gfm) &inline_break_gfm else &inline_break_cm;
+    var i = pos;
+    while (i + vlen <= input.len) {
+        const blk: Vec = input[i..][0..vlen].*;
+        var hits = (blk == s_star) | (blk == s_under) | (blk == s_tilde) |
+            (blk == s_lbrack) | (blk == s_bang) | (blk == s_btick) |
+            (blk == s_lt) | (blk == s_bslash) | (blk == s_nl);
+        if (gfm) hits = hits | (blk == @as(Vec, @splat('@')));
+        if (@reduce(.Or, hits)) return i + std.simd.firstTrue(hits).?;
+        i += vlen;
+    }
+    // Scalar tail for bytes that don't fill a full vector.
+    while (i < input.len) : (i += 1) if (fallback[input[i]]) return i;
+    return input.len;
 }
 
 fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap, gfm: bool) !std.ArrayList(AST.Inline) {
@@ -1388,14 +1474,8 @@ fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const
             continue;
         }
 
-        // Plain text
-        var te = pos;
-        while (te < input.len) {
-            const ch = input[te];
-            if (ch == '*' or ch == '_' or ch == '~' or ch == '[' or ch == '!' or
-                ch == '`' or ch == '<' or ch == '\\' or ch == '\n' or (gfm and ch == '@')) break;
-            te += 1;
-        }
+        // Plain text — SIMD scan; processes vlen bytes per iteration.
+        const te = indexOfBreakChar(input, pos, gfm);
         if (te > pos) {
             try inlines.append(allocator, .{ .text = .{ .content = input[pos..te] } });
             pos = te;
