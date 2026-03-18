@@ -19,8 +19,8 @@ jobs:
         include:
           - os: ubuntu-latest
             system: x86_64-linux
-          - os: ubuntu-24.04-arm
-            system: aarch64-linux
+          # - os: ubuntu-24.04-arm
+          #   system: aarch64-linux
 
     runs-on: ${{ matrix.os }}
     permissions:
@@ -82,23 +82,23 @@ jobs:
             dist/checksums.txt
           generate_release_notes: true
 
-  flakehub-publish:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
+  # flakehub-publish:
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     id-token: write
+  #     contents: read
 
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-          ref: "${{ (inputs.tag != null) && format('refs/tags/{0}', inputs.tag) || '' }}"
+  #   steps:
+  #     - uses: actions/checkout@v6
+  #       with:
+  #         persist-credentials: false
+  #         ref: "${{ (inputs.tag != null) && format('refs/tags/{0}', inputs.tag) || '' }}"
 
-      - uses: DeterminateSystems/determinate-nix-action@v3
+  #     - uses: DeterminateSystems/determinate-nix-action@v3
 
-      - uses: DeterminateSystems/flakehub-push@main
-        with:
-          visibility: unlisted
-          name: sc2in/zigmark
-          tag: "${{ inputs.tag }}"
-          include-output-paths: true
+  #     - uses: DeterminateSystems/flakehub-push@main
+  #       with:
+  #         visibility: unlisted
+  #         name: sc2in/zigmark
+  #         tag: "${{ inputs.tag }}"
+  #         include-output-paths: true
