@@ -25,8 +25,6 @@
         env = zig2nix.outputs.zig-env.${system} {zig = nixpkgs.legacyPackages.${system}.zig;};
         pkgs = nixpkgs.legacyPackages.${system};
         lib = pkgs.lib;
-        # Read name and version directly from build.zig.zon
-        zon = env.fromZON ./build.zig.zon;
 
         # Only include files that affect the build output so that changes to
         # README, flake.nix, examples/, docs/ etc. don't bust the Nix cache.
@@ -42,7 +40,7 @@
         };
       in rec {
         default = env.package {
-          pname = zon.name;
+          pname = "zigmark";
           inherit version;
           src = buildSrc;
 
