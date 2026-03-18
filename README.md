@@ -4,21 +4,6 @@ A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 6
 
 Builds as both a **CLI tool** and a **C-callable shared library** (`libzigmark.so`).
 
-## Performance
-
-<!-- bench-start -->
-_Last updated: 2026-03-18_
-
-| Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
-|:---|---:|---:|---:|---:|
-| `zigmark (ReleaseSafe)` | 2.7 ± 1.3 | 1.5 | 14.1 | 1.40 ± 1.10 |
-| `zigmark (ReleaseSmall)` | 2.7 ± 1.1 | 1.5 | 9.3 | 1.41 ± 1.06 |
-| `zigmark (ReleaseFast)` | 2.4 ± 1.4 | 1.4 | 15.1 | 1.29 ± 1.07 |
-| `discount` | 2.0 ± 0.9 | 1.1 | 9.8 | 1.07 ± 0.82 |
-| `lowdown` | 1.9 ± 1.2 | 1.0 | 9.7 | 1.00 |
-| `pandoc` | 150.2 ± 14.3 | 118.0 | 245.8 | 79.09 ± 49.62 |
-
-<!-- bench-end -->
 
 ## Installation
 
@@ -507,6 +492,40 @@ Requires **Zig 0.15.2** or later.
 - **`Renderer`** — Type-erased vtable interface for pluggable output backends
 - **`Frontmatter`** — YAML/TOML/JSON/ZON metadata extraction, mutation (`set`, `delete`, `merge`), and re-serialisation; YAML via [zig-yaml](https://github.com/kubkon/zig-yaml), TOML via [tomlz](https://github.com/tsunaminoai/tomlz), JSON via `std.json`, ZON via a built-in recursive-descent parser
 - **C ABI** — Opaque-pointer API in `root.zig` exported as `libzigmark.so`
+
+## Performance
+
+<!-- bench-start -->
+_Last updated: 2026-03-18 · input: `README.md` (15 KB) · run `nix run .#bench` to reproduce_
+
+### Speed
+
+| Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
+|:---|---:|---:|---:|---:|
+| `discount` | 1.9 ± 0.7 | 1.2 | 9.9 | 1.00 |
+| `lowdown` | 1.9 ± 1.0 | 1.0 | 7.9 | 1.00 ± 0.64 |
+| **`zigmark (ReleaseFast)`** | 2.6 ± 1.3 | 1.5 | 11.3 | 1.36 ± 0.84 |
+| **`zigmark (ReleaseSafe)`** | 2.7 ± 1.3 | 1.6 | 11.1 | 1.41 ± 0.85 |
+| **`zigmark (ReleaseSmall)`** | 2.7 ± 0.9 | 1.6 | 8.2 | 1.41 ± 0.72 |
+| `cmark` | 5.5 ± 1.5 | 3.3 | 14.3 | 2.85 ± 1.34 |
+| `cmark-gfm` | 5.6 ± 1.8 | 3.6 | 29.6 | 2.91 ± 1.44 |
+| `pandoc` | 137.1 ± 10.3 | 120.2 | 160.8 | 1.00 |
+
+### Memory (peak RSS)
+
+| Command | Peak RSS (KB) |
+|:---|---:|
+| **`zigmark (ReleaseSmall)`** | 1168 |
+| **`zigmark (ReleaseFast)`** | 1516 |
+| **`zigmark (ReleaseSafe)`** | 1576 |
+| `discount` | 1968 |
+| `lowdown` | 2880 |
+| `cmark` | 4200 |
+| `cmark-gfm` | 4224 |
+| `pandoc` | 124504 |
+
+<!-- bench-end -->
+
 
 ## Future Plans
 
