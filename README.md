@@ -67,6 +67,24 @@ zigmark -f ai README.md
 
 Produces a token-efficient AST representation suitable for LLM consumption.
 
+### Extract Frontmatter as JSON
+
+```bash
+zigmark -f frontmatter post.md
+```
+
+Parses the frontmatter block (YAML `---`, TOML `+++`, JSON `{`, or ZON `.{`) and
+emits it as pretty-printed JSON.  Outputs `{}` when no frontmatter is present,
+so the output is always valid JSON and safe to pipe.
+
+```bash
+# Pipe into jq
+zigmark -f frontmatter post.md | jq '.title'
+
+# Extract a nested key
+zigmark -f frontmatter post.md | jq '.extra.author'
+```
+
 ### Options
 
 ```
@@ -74,7 +92,8 @@ Usage: zigmark [OPTIONS] [FILE]
 
   -h, --help          Display this help and exit.
   -v, --version       Print version and exit.
-  -f, --format <str>  Output format: "html" (default), "ast", or "ai".
+  -f, --format <str>  Output format: "html" (default), "ast", "ai", "terminal",
+                      or "frontmatter".
   -o, --output <str>  Write output to FILE instead of stdout.
 ```
 
@@ -127,6 +146,53 @@ var links = try query.links(allocator);
 
 // Count elements
 const para_count = query.count(.paragraph);
+```
+
+### Frontmatter
+
+Extract and query structured metadata from the top of a Markdown file.  All four formats are normalised to `std.json.Value` for uniform access.
+
+| Format | Opening marker | Example |
+|--------|---------------|---------|
+| YAML   | `---`          | `--- \ntitle: Hello\n---` |
+| TOML   | `+++`          | `+++\ntitle = "Hello"\n+++` |
+| JSON   | `{`            | `{"title": "Hello"}` |
+| ZON    | `.{`           | `.{ .title = "Hello" }` |
+
+```zig
+const FrontMatter = zigmark.FrontMatter;
+
+// Parse from a full Markdown document (auto-detects format)
+var fm = try FrontMatter.initFromMarkdown(allocator, markdown_source);
+defer fm.deinit();
+
+// Dot-separated key lookup — returns ?std.json.Value
+const title  = fm.get("title");            // top-level key
+const host   = fm.get("server.host");      // nested key
+const first  = fm.get("tags");             // array → .array variant
+
+if (title) |t| std.debug.print("title: {s}\n", .{t.string});
+
+// Or parse a bare frontmatter string directly
+var fm2 = try FrontMatter.init(allocator, source, .toml);
+defer fm2.deinit();
+```
+
+ZON frontmatter supports the full frontmatter subset: anonymous structs, array tuples, strings (with escape sequences), integers (decimal / hex / octal / binary), floats, booleans, `null`, and enum literals (returned as strings).
+
+```zig
+// ZON example
+const source =
+    \\.{
+    \\    .title   = "My Post",
+    \\    .tags    = .{ "zig", "wasm" },
+    \\    .draft   = false,
+    \\    .weight  = 10,
+    \\    .status  = .published,   // enum literal → "published"
+    \\}
+;
+var fm = try FrontMatter.init(allocator, source, .zon);
+defer fm.deinit();
 ```
 
 ### Custom Renderers
@@ -265,7 +331,7 @@ Run the GFM suite with `zig build gfm`.
 
 ### Extensions
 
-- **Frontmatter** — YAML (`---`) and TOML (`+++`) extraction, parsed as JSON
+- **Frontmatter** — YAML (`---`), TOML (`+++`), JSON (`{`), and ZON (`.{`) extraction, all normalised to `std.json.Value`
 - **Footnotes** — `[^label]` references and definitions
 - **GFM Tables** — pipe-delimited tables with optional column alignment
 - **GFM Task lists** — `- [x]` / `- [ ]` items rendered as disabled checkboxes
@@ -363,7 +429,7 @@ Requires **Zig 0.15.2** or later.
 - **`ASTRenderer`** — Human-readable tree diagram with box-drawing characters
 - **`AIRenderer`** — Token-efficient AST representation for LLM consumption
 - **`Renderer`** — Type-erased vtable interface for pluggable output backends
-- **`Frontmatter`** — YAML/TOML metadata extraction via [zig-yaml](https://github.com/kubkon/zig-yaml) and [tomlz](https://github.com/tsunaminoai/tomlz)
+- **`Frontmatter`** — YAML/TOML/JSON/ZON metadata extraction; YAML via [zig-yaml](https://github.com/kubkon/zig-yaml), TOML via [tomlz](https://github.com/tsunaminoai/tomlz), JSON via `std.json`, ZON via a built-in recursive-descent parser
 - **C ABI** — Opaque-pointer API in `root.zig` exported as `libzigmark.so`
 
 ## Future Plans

@@ -18,7 +18,7 @@ pub fn main() !void {
     const params = comptime clap.parseParamsComptime(
         \\-h, --help               Display this help and exit.
         \\-v, --version            Print version and exit.
-        \\-f, --format <str>       Output format: "html" (default), "ast", "ai", or "terminal".
+        \\-f, --format <str>       Output format: "html" (default), "ast", "ai", "terminal", or "frontmatter".
         \\-o, --output <str>       Write output to FILE instead of stdout.
         \\<str>                    Input markdown file (reads stdin if omitted).
         \\
@@ -135,8 +135,30 @@ pub fn main() !void {
         defer alloc.free(term);
         writer.interface.writeAll(term) catch {};
         writer.interface.flush() catch {};
+    } else if (std.mem.eql(u8, format, "frontmatter")) {
+        var fm = zigmark.Frontmatter.initFromMarkdown(alloc, input) catch |err| switch (err) {
+            error.InvalidFrontMatter => {
+                // No frontmatter present — emit empty object so output is always valid JSON.
+                writer.interface.writeAll("{}\n") catch {};
+                writer.interface.flush() catch {};
+                return;
+            },
+            else => {
+                std.debug.print("error: failed to parse frontmatter: {}\n", .{err});
+                return err;
+            },
+        };
+        defer fm.deinit();
+        const json_out = std.json.Stringify.valueAlloc(alloc, fm.root, .{ .whitespace = .indent_2 }) catch |err| {
+            std.debug.print("error: failed to serialize frontmatter to JSON: {}\n", .{err});
+            return err;
+        };
+        defer alloc.free(json_out);
+        writer.interface.writeAll(json_out) catch {};
+        writer.interface.writeAll("\n") catch {};
+        writer.interface.flush() catch {};
     } else {
-        std.debug.print("error: unknown format '{s}'. Use 'html', 'ast', 'ai', or 'terminal'.\n", .{format});
+        std.debug.print("error: unknown format '{s}'. Use 'html', 'ast', 'ai', 'terminal', or 'frontmatter'.\n", .{format});
         return error.InvalidArgument;
     }
 }
