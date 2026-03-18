@@ -67,6 +67,55 @@ void zigmark_free_string(char *str);
  */
 const char *zigmark_version(void);
 
+/* ── Frontmatter ──────────────────────────────────────────────────────────── */
+
+/** Opaque handle to parsed frontmatter metadata. */
+typedef struct ZigmarkFrontmatter ZigmarkFrontmatter;
+
+/**
+ * Parse frontmatter from a UTF-8 Markdown buffer of @p len bytes.
+ *
+ * Auto-detects the format:
+ *   - YAML  — opening @c ---
+ *   - TOML  — opening @c +++
+ *   - JSON  — opening @c {
+ *   - ZON   — opening @c .{
+ *
+ * @param input  Pointer to the Markdown source (need not be NUL-terminated).
+ * @param len    Length of the input in bytes.
+ * @return       An opaque frontmatter handle, or NULL if no valid frontmatter
+ *               is present or on parse / allocation failure.
+ *               Free with zigmark_frontmatter_free().
+ */
+ZigmarkFrontmatter *zigmark_frontmatter_parse(const char *input, size_t len);
+
+/**
+ * Free a frontmatter handle previously returned by zigmark_frontmatter_parse().
+ */
+void zigmark_frontmatter_free(ZigmarkFrontmatter *fm);
+
+/**
+ * Serialize the entire frontmatter to a pretty-printed JSON string.
+ *
+ * @return A NUL-terminated JSON string, or NULL on failure.
+ *         Free with zigmark_free_string().
+ */
+char *zigmark_frontmatter_to_json(ZigmarkFrontmatter *fm);
+
+/**
+ * Look up a dot-separated key path in the frontmatter and return its value
+ * as a compact JSON string.
+ *
+ * Examples: @c "title", @c "extra.author", @c "tags"
+ *
+ * @param fm   A handle returned by zigmark_frontmatter_parse().
+ * @param key  A NUL-terminated dot-separated key path.
+ * @return     A NUL-terminated JSON string for the value, or NULL if the key
+ *             is not found or on failure.
+ *             Free with zigmark_free_string().
+ */
+char *zigmark_frontmatter_get(ZigmarkFrontmatter *fm, const char *key);
+
 #ifdef __cplusplus
 }
 #endif

@@ -175,6 +175,73 @@ export fn zigmark_version() [*:0]const u8 {
     return version.ptr[0..version.len :0];
 }
 
+// ── Frontmatter C ABI ─────────────────────────────────────────────────────────
+
+/// Internal wrapper that pairs a FrontMatter with the allocator that owns it.
+const OpaqueFm = struct {
+    fm: Frontmatter,
+    allocator: Allocator,
+};
+
+/// Serialize a `std.json.Value` to a NUL-terminated C string allocated with
+/// `alloc`.  Returns null on failure.  Caller must free with
+/// `zigmark_free_string`.
+fn jsonValueToC(alloc: Allocator, value: std.json.Value, options: std.json.Stringify.Options) ?[*:0]u8 {
+    const json = std.json.Stringify.valueAlloc(alloc, value, options) catch return null;
+    const c_str = alloc.realloc(json, json.len + 1) catch {
+        alloc.free(json);
+        return null;
+    };
+    c_str[json.len] = 0;
+    return c_str[0..json.len :0];
+}
+
+/// Parse frontmatter from a UTF-8 Markdown buffer.
+/// Auto-detects YAML (`---`), TOML (`+++`), JSON (`{`), or ZON (`.{`).
+///
+/// Returns an opaque handle, or null if no valid frontmatter is present or on
+/// allocation / parse failure.  Free with `zigmark_frontmatter_free`.
+export fn zigmark_frontmatter_parse(input: [*]const u8, len: usize) ?*OpaqueFm {
+    const allocator = std.heap.page_allocator;
+    const slice = input[0..len];
+    var fm = Frontmatter.initFromMarkdown(allocator, slice) catch return null;
+    const wrapper = allocator.create(OpaqueFm) catch {
+        fm.deinit();
+        return null;
+    };
+    wrapper.* = .{ .fm = fm, .allocator = allocator };
+    return wrapper;
+}
+
+/// Free a frontmatter handle previously returned by `zigmark_frontmatter_parse`.
+export fn zigmark_frontmatter_free(ptr: ?*OpaqueFm) void {
+    const wrapper = ptr orelse return;
+    wrapper.fm.deinit();
+    wrapper.allocator.destroy(wrapper);
+}
+
+/// Serialize the entire frontmatter to a pretty-printed JSON string.
+///
+/// Returns a NUL-terminated string, or null on failure.
+/// Free with `zigmark_free_string`.
+export fn zigmark_frontmatter_to_json(ptr: ?*OpaqueFm) ?[*:0]u8 {
+    const wrapper = ptr orelse return null;
+    return jsonValueToC(wrapper.allocator, wrapper.fm.root, .{ .whitespace = .indent_2 });
+}
+
+/// Look up a dot-separated key path in the frontmatter and return its value as
+/// a compact JSON string (e.g. `"title"`, `"extra.author"`, `"tags"`).
+///
+/// Returns a NUL-terminated string, or null if the key is not found or on
+/// failure.  Free with `zigmark_free_string`.
+export fn zigmark_frontmatter_get(ptr: ?*OpaqueFm, key: [*:0]const u8) ?[*:0]u8 {
+    const wrapper = ptr orelse return null;
+    var key_len: usize = 0;
+    while (key[key_len] != 0) : (key_len += 1) {}
+    const value = wrapper.fm.get(key[0..key_len]) orelse return null;
+    return jsonValueToC(wrapper.allocator, value, .{});
+}
+
 test "enhanced parse and render" {
     const allocator = std.testing.allocator;
 
