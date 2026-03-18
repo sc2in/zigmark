@@ -4,6 +4,12 @@ A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 6
 
 Builds as both a **CLI tool** and a **C-callable shared library** (`libzigmark.so`).
 
+## Performance
+
+<!-- bench-start -->
+_Run `nix run .#bench` to populate this section._
+<!-- bench-end -->
+
 ## Installation
 
 Add `zigmark` as a dependency in your `build.zig.zon`:
@@ -417,6 +423,9 @@ nix develop
 
 # WASM live preview demo
 nix run .#wasm-demo
+
+# Run CLI performance benchmark (compares zigmark vs cmark, updates README)
+nix run .#bench
 ```
 
 Requires **Zig 0.15.2** or later.

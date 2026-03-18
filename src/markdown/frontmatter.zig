@@ -23,6 +23,9 @@ root: JsonValue,
 /// The raw frontmatter source text (without delimiters).
 source: []const u8,
 original: Origin,
+/// Arena that owns all memory allocated by `set()` and `merge()`.
+/// Lazily initialised on first mutation; freed by `deinit()`.
+set_arena: ?std.heap.ArenaAllocator = null,
 
 const Origin = union(Kind) {
     yaml: Yaml,
@@ -101,6 +104,7 @@ pub fn deinit(self: *FrontMatter) void {
         .json => |*p| p.deinit(),
         .zon => |*a| a.deinit(),
     }
+    if (self.set_arena) |*a| a.deinit();
 }
 
 /// Extract and parse frontmatter from a full Markdown document.
@@ -688,16 +692,66 @@ pub fn get(self: FrontMatter, path: []const u8) ?std.json.Value {
     return jsonFindByPath(self.root, path);
 }
 
+/// Remove the key at `path` from `self.root`.
+/// Returns `true` if the key existed and was removed, `false` otherwise.
+pub fn delete(self: *FrontMatter, path: []const u8) bool {
+    if (path.len == 0 or self.root != .object) return false;
+    var segs = std.mem.tokenizeScalar(u8, path, '.');
+    var current: *std.json.Value = &self.root;
+    while (segs.next()) |seg| {
+        const is_last = segs.rest().len == 0;
+        if (current.* != .object) return false;
+        if (is_last) return current.object.orderedRemove(seg);
+        current = current.object.getPtr(seg) orelse return false;
+    }
+    return false;
+}
+
+/// Return the byte offset in `txt` where the Markdown body begins —
+/// i.e. the first byte after the frontmatter block and its closing
+/// delimiter (including a trailing newline if present).
+///
+/// Returns `null` when `txt` does not start with recognizable frontmatter.
+pub fn bodyOffset(txt: []const u8) ?usize {
+    if (txt.len < 3) return null;
+
+    // JSON: self-delimiting `{…}`
+    if (txt[0] == '{') {
+        const end = findBraceEnd(txt) orelse return null;
+        return if (end < txt.len and txt[end] == '\n') end + 1 else end;
+    }
+
+    // ZON: self-delimiting `.{…}`
+    if (txt.len >= 2 and txt[0] == '.' and txt[1] == '{') {
+        const end = findBraceEnd(txt[1..]) orelse return null;
+        const abs = end + 1;
+        return if (abs < txt.len and txt[abs] == '\n') abs + 1 else abs;
+    }
+
+    const marker: []const u8 = switch (txt[0]) {
+        '-' => "---",
+        '+' => "+++",
+        else => return null,
+    };
+    const close = std.mem.indexOfPos(u8, txt, 3, marker) orelse return null;
+    var end = close + 3;
+    if (end < txt.len and txt[end] == '\n') end += 1;
+    return end;
+}
+
 /// Set (or create) a value at a dot-separated key path in `self.root`.
 /// Intermediate objects that do not exist are created automatically.
-/// The provided `value` is deep-cloned with `alloc` so the caller retains
-/// ownership of the original.
+/// The provided `value` is deep-cloned; all new allocations are owned by
+/// an internal arena and freed when `deinit()` is called.
 ///
 /// Returns `error.InvalidFieldArg` for an empty path and
 /// `error.NotAnObject` if traversal hits a non-object intermediate node.
-pub fn set(self: *FrontMatter, alloc: Allocator, path: []const u8, value: std.json.Value) !void {
+pub fn set(self: *FrontMatter, path: []const u8, value: std.json.Value) !void {
     if (path.len == 0) return error.InvalidFieldArg;
     if (self.root != .object) return error.NotAnObject;
+    if (self.set_arena == null)
+        self.set_arena = std.heap.ArenaAllocator.init(self.allocator);
+    const alloc = self.set_arena.?.allocator();
     const owned = try cloneJsonValue(alloc, value);
     var segs = std.mem.tokenizeScalar(u8, path, '.');
     var current: *std.json.Value = &self.root;
@@ -719,15 +773,18 @@ pub fn set(self: *FrontMatter, alloc: Allocator, path: []const u8, value: std.js
     }
 }
 
-/// Deep-merge `overlay.root` into `self.root` using `alloc`.
+/// Deep-merge `overlay.root` into `self.root`.
 ///
 /// For object values the merge is recursive: overlay keys are added or
 /// overwrite matching base keys; unmatched base keys are preserved.
 /// For all other value types the overlay wins outright.
 /// `self` retains its original format (YAML/TOML/JSON/ZON); the overlay's
-/// format is ignored.
-pub fn merge(self: *FrontMatter, alloc: Allocator, overlay: FrontMatter) !void {
-    try mergeJsonValue(alloc, &self.root, overlay.root);
+/// format is ignored.  All new allocations go into the internal set-arena
+/// and are freed by `deinit()`.
+pub fn merge(self: *FrontMatter, overlay: FrontMatter) !void {
+    if (self.set_arena == null)
+        self.set_arena = std.heap.ArenaAllocator.init(self.allocator);
+    try mergeJsonValue(self.set_arena.?.allocator(), &self.root, overlay.root);
 }
 
 // ── Field argument parsing ────────────────────────────────────────────────────

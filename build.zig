@@ -239,8 +239,14 @@ pub fn build(b: *std.Build) void {
     }
 
     // ── spec runs wired into zig build test ───────────────────────────────────
-    // Reuse the same spec_step pathway (summary mode now exits 1 on any failure).
-    test_step.dependOn(spec_step);
+    // Use --quiet: silent on full pass; dumps the table only on a regression.
+    // The verbose summary table is reserved for `zig build spec`.
+    const spec_check_cmark = b.addRunArtifact(spec_exe);
+    spec_check_cmark.addArgs(&.{ "--quiet", "--spec", spec_txt_path.getPath(b) });
+    const spec_check_gfm = b.addRunArtifact(spec_exe);
+    spec_check_gfm.addArgs(&.{ "--quiet", "--gfm", "--spec", gfm_spec_txt_path.getPath(b) });
+    spec_check_gfm.step.dependOn(&spec_check_cmark.step);
+    test_step.dependOn(&spec_check_gfm.step);
 
     // ── WASM build ───────────────────────────────────────────────────────────
 

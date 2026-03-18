@@ -1,6 +1,18 @@
 //! Copyright © 2025 [Star City Security Consulting, LLC (SC2)](https://sc2.in)
 //! SPDX-License-Identifier: AGPL-3.0-or-later
 const std = @import("std");
+
+// Suppress zig-yaml's verbose tokenizer/parser debug tracing so that
+// `zig build test` and nix checks stay quiet.  All other log scopes
+// (including our own warn/err paths for spec failures) remain at the
+// default level.
+pub const std_options: std.Options = .{
+    .log_scope_levels = &.{
+        .{ .scope = .tokenizer, .level = .warn },
+        .{ .scope = .parser, .level = .warn },
+    },
+};
+
 const Allocator = std.mem.Allocator;
 const mem = std.mem;
 const testing = std.testing;
@@ -21,6 +33,7 @@ const ai = @import("markdown/renderers/ai.zig");
 /// Renderers
 const ast_mod = @import("markdown/renderers/ast_renderer.zig");
 const html = @import("markdown/renderers/html.zig");
+const markdown_mod = @import("markdown/renderers/markdown.zig");
 const terminal = @import("markdown/renderers/terminal.zig");
 
 /// Pre-built renderer that serialises an `AST.Document` to CommonMark-compliant HTML.
@@ -35,6 +48,10 @@ pub const AIRenderer = Renderer.create(ai);
 
 /// Pre-built renderer that serialises an `AST.Document` with ANSI terminal styling.
 pub const TerminalRenderer = Renderer.create(terminal);
+
+/// Pre-built renderer that serialises an `AST.Document` back to normalised
+/// CommonMark+GFM Markdown.  Useful for round-trip normalization passes.
+pub const MarkdownRenderer = Renderer.create(markdown_mod);
 
 /// A type-erased rendering back-end.
 ///
@@ -265,7 +282,7 @@ export fn zigmark_frontmatter_serialize(ptr: ?*OpaqueFm) ?[*:0]u8 {
 export fn zigmark_frontmatter_merge(base: ?*OpaqueFm, overlay: ?*OpaqueFm) c_int {
     const b = base orelse return -1;
     const o = overlay orelse return -1;
-    b.fm.merge(b.allocator, o.fm) catch return -1;
+    b.fm.merge(o.fm) catch return -1;
     return 0;
 }
 
@@ -289,7 +306,7 @@ export fn zigmark_frontmatter_set(ptr: ?*OpaqueFm, path: [*:0]const u8, json_val
         .{},
     ) catch return -1;
     defer parsed.deinit();
-    wrapper.fm.set(wrapper.allocator, path[0..path_len], parsed.value) catch return -1;
+    wrapper.fm.set(path[0..path_len], parsed.value) catch return -1;
     return 0;
 }
 
@@ -313,7 +330,7 @@ export fn zigmark_frontmatter_set_raw(ptr: ?*OpaqueFm, path: [*:0]const u8, raw:
     var raw_len: usize = 0;
     while (raw[raw_len] != 0) : (raw_len += 1) {}
     const value = Frontmatter.inferValue(raw[0..raw_len]);
-    wrapper.fm.set(wrapper.allocator, path[0..path_len], value) catch return -1;
+    wrapper.fm.set(path[0..path_len], value) catch return -1;
     return 0;
 }
 
@@ -944,22 +961,23 @@ test "CommonMark spec compliance" {
     const allocator = arena.allocator();
     const summary = try runSpecSummary(allocator, default_spec_path);
 
-    std.debug.print("\n{s:<40} {s:>6} {s:>6} {s:>6}\n", .{ "Section", "Pass", "Fail", "Total" });
-    std.debug.print("{s:-<58}\n", .{""});
-
+    // Print the section table only when something fails so CI logs stay clean.
     var section_total: usize = 0;
-    for (summary.sections) |s| {
-        const t = s.result.total();
-        section_total += t;
-        if (t > 0) {
-            std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{ s.section, s.result.passed, s.result.failed, t });
-        }
-    }
+    for (summary.sections) |s| section_total += s.result.total();
 
-    std.debug.print("{s:-<58}\n", .{""});
-    std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{
-        "TOTAL", summary.all.passed, summary.all.failed, summary.all.total(),
-    });
+    if (summary.all.failed > 0 or summary.all.errors > 0) {
+        std.debug.print("\n{s:<40} {s:>6} {s:>6} {s:>6}\n", .{ "Section", "Pass", "Fail", "Total" });
+        std.debug.print("{s:-<58}\n", .{""});
+        for (summary.sections) |s| {
+            const t = s.result.total();
+            if (t > 0)
+                std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{ s.section, s.result.passed, s.result.failed, t });
+        }
+        std.debug.print("{s:-<58}\n", .{""});
+        std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{
+            "TOTAL", summary.all.passed, summary.all.failed, summary.all.total(),
+        });
+    }
 
     // Verify the section breakdown covers all tests (no miscategorization).
     try testing.expectEqual(summary.all.total(), section_total);

@@ -694,69 +694,49 @@ test "frontmatter: toMarkdown reattaches body" {
 // not freed by deinitJsonValue) are reclaimed by the arena on deinit.
 
 test "frontmatter: set top-level key" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    var fm = try FrontMatter.init(alloc, "title = \"Old\"", .toml);
+    var fm = try FrontMatter.init(tst.allocator, "title = \"Old\"", .toml);
     defer fm.deinit();
 
-    try fm.set(alloc, "title", .{ .string = "New" });
+    try fm.set("title", .{ .string = "New" });
     try tst.expectEqualStrings("New", fm.get("title").?.string);
 }
 
 test "frontmatter: set creates new key" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    var fm = try FrontMatter.init(alloc, "title = \"Hello\"", .toml);
+    var fm = try FrontMatter.init(tst.allocator, "title = \"Hello\"", .toml);
     defer fm.deinit();
 
-    try fm.set(alloc, "draft", .{ .bool = true });
+    try fm.set("draft", .{ .bool = true });
     try tst.expectEqualDeep(std.json.Value{ .bool = true }, fm.get("draft").?);
 }
 
 test "frontmatter: set nested key (auto-creates intermediates)" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    var fm = try FrontMatter.init(alloc, "title = \"Hello\"", .toml);
+    var fm = try FrontMatter.init(tst.allocator, "title = \"Hello\"", .toml);
     defer fm.deinit();
 
-    try fm.set(alloc, "extra.owner", .{ .string = "SC2" });
+    try fm.set("extra.owner", .{ .string = "SC2" });
     try tst.expectEqualStrings("SC2", fm.get("extra.owner").?.string);
 }
 
 test "frontmatter: set overwrites existing nested key" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
     const source =
         \\[extra]
         \\owner = "Old"
     ;
-    var fm = try FrontMatter.init(alloc, source, .toml);
+    var fm = try FrontMatter.init(tst.allocator, source, .toml);
     defer fm.deinit();
 
-    try fm.set(alloc, "extra.owner", .{ .string = "New" });
+    try fm.set("extra.owner", .{ .string = "New" });
     try tst.expectEqualStrings("New", fm.get("extra.owner").?.string);
 }
 
 test "frontmatter: set scalar types" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    var fm = try FrontMatter.init(alloc, "x = 0", .toml);
+    var fm = try FrontMatter.init(tst.allocator, "x = 0", .toml);
     defer fm.deinit();
 
-    try fm.set(alloc, "n", .{ .integer = 42 });
-    try fm.set(alloc, "f", .{ .float = 3.14 });
-    try fm.set(alloc, "b", .{ .bool = false });
-    try fm.set(alloc, "z", .{ .null = {} });
+    try fm.set("n", .{ .integer = 42 });
+    try fm.set("f", .{ .float = 3.14 });
+    try fm.set("b", .{ .bool = false });
+    try fm.set("z", .{ .null = {} });
 
     try tst.expectEqual(@as(i64, 42), fm.get("n").?.integer);
     try tst.expectApproxEqAbs(@as(f64, 3.14), fm.get("f").?.float, 0.001);
@@ -765,82 +745,62 @@ test "frontmatter: set scalar types" {
 }
 
 test "frontmatter: set empty path returns error" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    var fm = try FrontMatter.init(alloc, "x = 1", .toml);
+    var fm = try FrontMatter.init(tst.allocator, "x = 1", .toml);
     defer fm.deinit();
 
-    try tst.expectError(error.InvalidFieldArg, fm.set(alloc, "", .{ .integer = 1 }));
+    try tst.expectError(error.InvalidFieldArg, fm.set("", .{ .integer = 1 }));
 }
 
 test "frontmatter: merge adds overlay keys" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    var base = try FrontMatter.init(alloc, "title = \"Base\"", .toml);
+    var base = try FrontMatter.init(tst.allocator, "title = \"Base\"", .toml);
     defer base.deinit();
 
-    var overlay = try FrontMatter.init(alloc, "author = \"Alice\"", .toml);
+    var overlay = try FrontMatter.init(tst.allocator, "author = \"Alice\"", .toml);
     defer overlay.deinit();
 
-    try base.merge(alloc, overlay);
+    try base.merge(overlay);
 
     try tst.expectEqualStrings("Base", base.get("title").?.string);
     try tst.expectEqualStrings("Alice", base.get("author").?.string);
 }
 
 test "frontmatter: merge overlay key wins on conflict" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    var base = try FrontMatter.init(alloc, "title = \"Old\"\ndraft = false", .toml);
+    var base = try FrontMatter.init(tst.allocator, "title = \"Old\"\ndraft = false", .toml);
     defer base.deinit();
 
-    var overlay = try FrontMatter.init(alloc, "title = \"New\"", .toml);
+    var overlay = try FrontMatter.init(tst.allocator, "title = \"New\"", .toml);
     defer overlay.deinit();
 
-    try base.merge(alloc, overlay);
+    try base.merge(overlay);
 
     try tst.expectEqualStrings("New", base.get("title").?.string);
     try tst.expectEqualDeep(std.json.Value{ .bool = false }, base.get("draft").?);
 }
 
 test "frontmatter: merge preserves base format" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
     // TOML base merged with JSON overlay — result must serialize as TOML
-    var base = try FrontMatter.init(alloc, "title = \"Base\"", .toml);
+    var base = try FrontMatter.init(tst.allocator, "title = \"Base\"", .toml);
     defer base.deinit();
 
-    var overlay = try FrontMatter.init(alloc, "{\"draft\": true}", .json);
+    var overlay = try FrontMatter.init(tst.allocator, "{\"draft\": true}", .json);
     defer overlay.deinit();
 
-    try base.merge(alloc, overlay);
+    try base.merge(overlay);
 
-    const out = try base.serialize(alloc);
-    defer alloc.free(out);
+    const out = try base.serialize(tst.allocator);
+    defer tst.allocator.free(out);
 
     try tst.expect(std.mem.startsWith(u8, out, "+++\n"));
     try tst.expect(std.mem.indexOf(u8, out, "draft") != null);
 }
 
 test "frontmatter: merge deep-merges nested objects" {
-    var arena = std.heap.ArenaAllocator.init(tst.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
     const base_src =
         \\[extra]
         \\owner = "SC2"
         \\version = "1.0"
     ;
-    var base = try FrontMatter.init(alloc, base_src, .toml);
+    var base = try FrontMatter.init(tst.allocator, base_src, .toml);
     defer base.deinit();
 
     const overlay_src =
@@ -848,10 +808,10 @@ test "frontmatter: merge deep-merges nested objects" {
         \\version = "2.0"
         \\reviewed = true
     ;
-    var overlay = try FrontMatter.init(alloc, overlay_src, .toml);
+    var overlay = try FrontMatter.init(tst.allocator, overlay_src, .toml);
     defer overlay.deinit();
 
-    try base.merge(alloc, overlay);
+    try base.merge(overlay);
 
     // Original key preserved
     try tst.expectEqualStrings("SC2", base.get("extra.owner").?.string);
