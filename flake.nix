@@ -145,18 +145,11 @@
         bench = let
           bench-app = pkgs.writeShellApplication {
             name = "zigmark-bench";
-            runtimeInputs = with pkgs; [hyperfine cmark python3 zig];
+            runtimeInputs = with pkgs; [hyperfine pandoc discount lowdown python3 zig];
             text = ''
               set -euo pipefail
               REPO="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
               cd "$REPO"
-
-              echo "▸ Building zigmark (ReleaseFast)…"
-              zig build -Doptimize=ReleaseFast
-              ZIGMARK="$REPO/zig-out/bin/zigmark"
-
-              # Locate cmark reference binary
-              CMARK_BIN="${pkgs.cmark}/bin/cmark"
 
               # Use the CommonMark spec as a large representative input.
               # Fall back to README.md if the dependency cache is unavailable.
@@ -169,18 +162,26 @@
               fi
               echo "  Benchmark file: $BENCH_FILE ($(wc -c < "$BENCH_FILE") bytes)"
 
+              echo "▸ Building zigmark (ReleaseSafe, ReleaseSmall, ReleaseFast)…"
+              zig build -Doptimize=ReleaseSafe  && cp zig-out/bin/zigmark /tmp/zigmark-safe
+              zig build -Doptimize=ReleaseSmall && cp zig-out/bin/zigmark /tmp/zigmark-small
+              zig build -Doptimize=ReleaseFast  && cp zig-out/bin/zigmark /tmp/zigmark-fast
+
               RESULT_MD=$(mktemp /tmp/bench-result-XXXXXX.md)
-              trap 'rm -f "$RESULT_MD"' EXIT
+              trap 'rm -f "$RESULT_MD" /tmp/zigmark-safe /tmp/zigmark-small /tmp/zigmark-fast' EXIT
 
               echo "▸ Running hyperfine…"
               hyperfine \
+                -N \
                 --warmup 50 \
                 --runs 500 \
                 --export-markdown "$RESULT_MD" \
-                --command-name "zigmark" \
-                "$ZIGMARK $BENCH_FILE > /dev/null" \
-                --command-name "cmark" \
-                "$CMARK_BIN $BENCH_FILE > /dev/null"
+                --command-name "zigmark (ReleaseSafe)"  "/tmp/zigmark-safe  -o /dev/null $BENCH_FILE" \
+                --command-name "zigmark (ReleaseSmall)" "/tmp/zigmark-small -o /dev/null $BENCH_FILE" \
+                --command-name "zigmark (ReleaseFast)"  "/tmp/zigmark-fast  -o /dev/null $BENCH_FILE" \
+                --command-name "discount"               "markdown -o /dev/null $BENCH_FILE" \
+                --command-name "lowdown"                "lowdown  -o /dev/null $BENCH_FILE" \
+                --command-name "pandoc"                 "pandoc   -o /dev/null $BENCH_FILE"
 
               echo ""
               echo "▸ Updating README.md…"

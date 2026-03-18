@@ -7,7 +7,17 @@ Builds as both a **CLI tool** and a **C-callable shared library** (`libzigmark.s
 ## Performance
 
 <!-- bench-start -->
-_Run `nix run .#bench` to populate this section._
+_Last updated: 2026-03-18_
+
+| Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
+|:---|---:|---:|---:|---:|
+| `zigmark (ReleaseSafe)` | 2.7 ± 1.3 | 1.5 | 14.1 | 1.40 ± 1.10 |
+| `zigmark (ReleaseSmall)` | 2.7 ± 1.1 | 1.5 | 9.3 | 1.41 ± 1.06 |
+| `zigmark (ReleaseFast)` | 2.4 ± 1.4 | 1.4 | 15.1 | 1.29 ± 1.07 |
+| `discount` | 2.0 ± 0.9 | 1.1 | 9.8 | 1.07 ± 0.82 |
+| `lowdown` | 1.9 ± 1.2 | 1.0 | 9.7 | 1.00 |
+| `pandoc` | 150.2 ± 14.3 | 118.0 | 245.8 | 79.09 ± 49.62 |
+
 <!-- bench-end -->
 
 ## Installation
