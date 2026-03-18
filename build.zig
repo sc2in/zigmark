@@ -65,9 +65,20 @@ pub fn build(b: *std.Build) void {
     zigmark.addImport("mecha", mecha.module("mecha"));
     zigmark.addImport("dt", dt.module("datetime"));
 
-    // The shared library needs its own module instance so the exe doesn't
-    // get implicitly linked against the .so (which causes TLS / undefined
-    // symbol errors in ReleaseSafe).
+    // The shared library needs its own module instance.  When the exe and .so
+    // share a module, lld rejects the build because the .so's PIC TLS access
+    // calls __tls_get_addr (provided by glibc) but the exe is fully static.
+    // Fixing that by adding linkLibC() compiles the module into the exe AND
+    // makes it dynamically linked against libc — but the .so is still never
+    // actually loaded at runtime because all zigmark symbols are already
+    // satisfied by the exe's own compiled copy.  Net result: larger exe with
+    // a libc dependency and no size saving.
+    //
+    // The root cause is that Zig's module system always compiles code inline;
+    // there is no "header-only import" concept.  The exe must either (a) keep
+    // the module compiled in (current approach, self-contained 4 MB binary) or
+    // (b) be rewritten to use extern C API declarations so @import("zigmark")
+    // is never used.  (a) is the right trade-off for a CLI tool.
     const zigmark_lib = b.addModule("zigmark_lib", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,

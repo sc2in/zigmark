@@ -242,6 +242,22 @@ export fn zigmark_frontmatter_get(ptr: ?*OpaqueFm, key: [*:0]const u8) ?[*:0]u8 
     return jsonValueToC(wrapper.allocator, value, .{});
 }
 
+/// Serialize the frontmatter back to its original format (YAML/TOML/JSON/ZON)
+/// including delimiters, reflecting any modifications made to the parsed tree.
+///
+/// Returns a NUL-terminated string, or null on failure.
+/// Free with `zigmark_free_string`.
+export fn zigmark_frontmatter_serialize(ptr: ?*OpaqueFm) ?[*:0]u8 {
+    const wrapper = ptr orelse return null;
+    const buf = wrapper.fm.serialize(wrapper.allocator) catch return null;
+    const c_str = wrapper.allocator.realloc(buf, buf.len + 1) catch {
+        wrapper.allocator.free(buf);
+        return null;
+    };
+    c_str[buf.len] = 0;
+    return c_str[0..buf.len :0];
+}
+
 test "enhanced parse and render" {
     const allocator = std.testing.allocator;
 

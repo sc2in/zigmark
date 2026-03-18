@@ -528,3 +528,163 @@ test "frontmatter: initFromMarkdown ZON" {
     try tst.expectEqualStrings("Test", fm.get("title").?.string);
     try tst.expectEqual(@as(i64, 7), fm.get("weight").?.integer);
 }
+
+// ── serialize / toMarkdown tests ─────────────────────────────────────────────
+
+test "frontmatter: serialize YAML round-trip" {
+    const alloc = tst.allocator;
+    // Note: zig-yaml represents YAML booleans as strings, so we test
+    // string, integer, and float values here — types it does round-trip.
+    const input =
+        \\---
+        \\title: Hello World
+        \\weight: 5
+        \\---
+        \\# Content
+    ;
+    var fm = try FrontMatter.initFromMarkdown(alloc, input);
+    defer fm.deinit();
+
+    const out = try fm.serialize(alloc);
+    defer alloc.free(out);
+
+    // Must start and end with delimiters
+    try tst.expect(std.mem.startsWith(u8, out, "---\n"));
+    try tst.expect(std.mem.endsWith(u8, out, "---\n"));
+    // Re-parse and verify values survived the round-trip.
+    // Note: zig-yaml's scalar converter tries parseFloat before parseInt, so
+    // integers may come back as .float — accept either representation.
+    var fm2 = try FrontMatter.initFromMarkdown(alloc, out);
+    defer fm2.deinit();
+    try tst.expectEqualStrings("Hello World", fm2.get("title").?.string);
+    const weight = fm2.get("weight").?;
+    switch (weight) {
+        .integer => |n| try tst.expectEqual(@as(i64, 5), n),
+        .float => |f| try tst.expectApproxEqAbs(@as(f64, 5.0), f, 0.001),
+        else => return error.UnexpectedType,
+    }
+}
+
+test "frontmatter: serialize YAML nested and array" {
+    const alloc = tst.allocator;
+    const source =
+        \\tags:
+        \\  - zig
+        \\  - markdown
+        \\extra:
+        \\  owner: SC2
+    ;
+    var fm = try FrontMatter.init(alloc, source, .yaml);
+    defer fm.deinit();
+
+    const out = try fm.serialize(alloc);
+    defer alloc.free(out);
+
+    var fm2 = try FrontMatter.initFromMarkdown(alloc, out);
+    defer fm2.deinit();
+    try tst.expectEqualStrings("zig", fm2.get("tags").?.array.items[0].string);
+    try tst.expectEqualStrings("SC2", fm2.get("extra.owner").?.string);
+}
+
+test "frontmatter: serialize TOML round-trip" {
+    const alloc = tst.allocator;
+    const input =
+        \\+++
+        \\title = "My Post"
+        \\weight = 3
+        \\draft = false
+        \\+++
+        \\# Content
+    ;
+    var fm = try FrontMatter.initFromMarkdown(alloc, input);
+    defer fm.deinit();
+
+    const out = try fm.serialize(alloc);
+    defer alloc.free(out);
+
+    try tst.expect(std.mem.startsWith(u8, out, "+++\n"));
+    try tst.expect(std.mem.endsWith(u8, out, "+++\n"));
+    var fm2 = try FrontMatter.initFromMarkdown(alloc, out);
+    defer fm2.deinit();
+    try tst.expectEqualStrings("My Post", fm2.get("title").?.string);
+    try tst.expectEqual(@as(i64, 3), fm2.get("weight").?.integer);
+    try tst.expectEqualDeep(std.json.Value{ .bool = false }, fm2.get("draft").?);
+}
+
+test "frontmatter: serialize TOML nested section" {
+    const alloc = tst.allocator;
+    const source =
+        \\title = "Post"
+        \\
+        \\[extra]
+        \\owner = "SC2"
+    ;
+    var fm = try FrontMatter.init(alloc, source, .toml);
+    defer fm.deinit();
+
+    const out = try fm.serialize(alloc);
+    defer alloc.free(out);
+
+    var fm2 = try FrontMatter.initFromMarkdown(alloc, out);
+    defer fm2.deinit();
+    try tst.expectEqualStrings("Post", fm2.get("title").?.string);
+    try tst.expectEqualStrings("SC2", fm2.get("extra.owner").?.string);
+}
+
+test "frontmatter: serialize JSON round-trip" {
+    const alloc = tst.allocator;
+    const input =
+        \\{"title": "Test", "weight": 10, "draft": true}
+        \\# Content
+    ;
+    var fm = try FrontMatter.initFromMarkdown(alloc, input);
+    defer fm.deinit();
+
+    const out = try fm.serialize(alloc);
+    defer alloc.free(out);
+
+    var fm2 = try FrontMatter.initFromMarkdown(alloc, out);
+    defer fm2.deinit();
+    try tst.expectEqualStrings("Test", fm2.get("title").?.string);
+    try tst.expectEqual(@as(i64, 10), fm2.get("weight").?.integer);
+    try tst.expectEqualDeep(std.json.Value{ .bool = true }, fm2.get("draft").?);
+}
+
+test "frontmatter: serialize ZON round-trip" {
+    const alloc = tst.allocator;
+    const input =
+        \\.{ .title = "ZON Post", .draft = false, .weight = 7 }
+        \\# Content
+    ;
+    var fm = try FrontMatter.initFromMarkdown(alloc, input);
+    defer fm.deinit();
+
+    const out = try fm.serialize(alloc);
+    defer alloc.free(out);
+
+    var fm2 = try FrontMatter.initFromMarkdown(alloc, out);
+    defer fm2.deinit();
+    try tst.expectEqualStrings("ZON Post", fm2.get("title").?.string);
+    try tst.expectEqualDeep(std.json.Value{ .bool = false }, fm2.get("draft").?);
+    try tst.expectEqual(@as(i64, 7), fm2.get("weight").?.integer);
+}
+
+test "frontmatter: toMarkdown reattaches body" {
+    const alloc = tst.allocator;
+    const source =
+        \\---
+        \\title: Hello
+        \\---
+        \\
+        \\## Body content
+    ;
+    var fm = try FrontMatter.initFromMarkdown(alloc, source);
+    defer fm.deinit();
+
+    const body = "## Body content";
+    const doc = try fm.toMarkdown(alloc, body);
+    defer alloc.free(doc);
+
+    try tst.expect(std.mem.startsWith(u8, doc, "---\n"));
+    try tst.expect(std.mem.indexOf(u8, doc, "## Body content") != null);
+}

@@ -116,6 +116,26 @@ char *zigmark_frontmatter_to_json(ZigmarkFrontmatter *fm);
  */
 char *zigmark_frontmatter_get(ZigmarkFrontmatter *fm, const char *key);
 
+/**
+ * Serialize the frontmatter back to its original format, including delimiters.
+ *
+ * The output reflects the current state of the parsed value tree, so any
+ * programmatic modifications are included.  The format matches whatever was
+ * originally detected at parse time:
+ *
+ * | Format | Delimiters | Example output              |
+ * |--------|------------|-----------------------------|
+ * | YAML   | `---`      | `---\ntitle: Hello\n---\n`  |
+ * | TOML   | `+++`      | `+++\ntitle = "Hello"\n+++\n`|
+ * | JSON   | none       | `{\n  "title": "Hello"\n}\n` |
+ * | ZON    | none       | `.{ .title = "Hello" }\n`   |
+ *
+ * @param fm  A handle returned by zigmark_frontmatter_parse().
+ * @return    A NUL-terminated string in the original format, or NULL on
+ *            failure.  Free with zigmark_free_string().
+ */
+char *zigmark_frontmatter_serialize(ZigmarkFrontmatter *fm);
+
 #ifdef __cplusplus
 }
 #endif

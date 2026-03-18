@@ -682,6 +682,338 @@ test "jsonFindByPath works" {
     try tst.expect(not_found == null);
 }
 
+// ── Serialization ─────────────────────────────────────────────────────────────
+
+/// Serialize the frontmatter back to its original format, including delimiters.
+///
+/// | Format | Output                                         |
+/// |--------|------------------------------------------------|
+/// | YAML   | `---\nkey: val\n---\n`                         |
+/// | TOML   | `+++\nkey = "val"\n+++\n`                      |
+/// | JSON   | Pretty-printed JSON object followed by `\n`    |
+/// | ZON    | `.{ .key = "val" }\n`                          |
+///
+/// Serialization always reflects the current state of `self.root`, so any
+/// modifications made after parsing are included in the output.
+///
+/// The caller owns the returned slice; free with `alloc.free`.
+pub fn serialize(self: FrontMatter, alloc: Allocator) ![]u8 {
+    var aw: std.Io.Writer.Allocating = .init(alloc);
+    defer aw.deinit();
+    const w = &aw.writer;
+    switch (self.original) {
+        .yaml => {
+            try w.writeAll("---\n");
+            try writeYamlValue(w, self.root, 0);
+            try w.writeAll("---\n");
+        },
+        .toml => {
+            try w.writeAll("+++\n");
+            try writeTomlDocument(alloc, w, self.root);
+            try w.writeAll("+++\n");
+        },
+        .json => {
+            const json = try std.json.Stringify.valueAlloc(alloc, self.root, .{ .whitespace = .indent_2 });
+            defer alloc.free(json);
+            try w.writeAll(json);
+            try w.writeByte('\n');
+        },
+        .zon => {
+            try writeZonValue(w, self.root, 0);
+            try w.writeByte('\n');
+        },
+    }
+    return aw.toOwnedSlice();
+}
+
+/// Prepend the serialized frontmatter to `body` and return the full Markdown
+/// document.  A single newline is inserted between the frontmatter block and
+/// the body when `body` is non-empty and does not already start with `\n`.
+///
+/// The caller owns the returned slice; free with `alloc.free`.
+pub fn toMarkdown(self: FrontMatter, alloc: Allocator, body: []const u8) ![]u8 {
+    const fm_str = try self.serialize(alloc);
+    defer alloc.free(fm_str);
+    if (body.len == 0) return alloc.dupe(u8, fm_str);
+    const sep: []const u8 = if (body[0] == '\n') "" else "\n";
+    return std.mem.concat(alloc, u8, &.{ fm_str, sep, body });
+}
+
+// ── YAML emitter ──────────────────────────────────────────────────────────────
+
+fn writeIndent(writer: anytype, level: usize) !void {
+    var i: usize = 0;
+    while (i < level * 2) : (i += 1) try writer.writeByte(' ');
+}
+
+/// Returns true if `s` must be wrapped in double quotes to be a valid YAML
+/// plain scalar.
+fn yamlNeedsQuote(s: []const u8) bool {
+    if (s.len == 0) return true;
+    for (&[_][]const u8{ "true", "false", "null", "yes", "no", "on", "off", "~" }) |kw| {
+        if (std.ascii.eqlIgnoreCase(s, kw)) return true;
+    }
+    switch (s[0]) {
+        '{', '}', '[', ']', ',', '#', '&', '*', '?', '|', '<', '>', '=', '!', '%', '@', '`', ':', '"', '\'', '\\' => return true,
+        '-' => if (s.len == 1 or s[1] == ' ') return true,
+        else => {},
+    }
+    for (s, 0..) |c, i| {
+        switch (c) {
+            '\n', '\r', '\t' => return true,
+            ':' => if (i + 1 < s.len and (s[i + 1] == ' ' or s[i + 1] == '\n')) return true,
+            '#' => if (i > 0 and s[i - 1] == ' ') return true,
+            else => {},
+        }
+    }
+    if (s[s.len - 1] == ':') return true;
+    return false;
+}
+
+fn writeYamlString(writer: anytype, s: []const u8) !void {
+    if (!yamlNeedsQuote(s)) {
+        try writer.writeAll(s);
+        return;
+    }
+    try writer.writeByte('"');
+    for (s) |c| {
+        switch (c) {
+            '"' => try writer.writeAll("\\\""),
+            '\\' => try writer.writeAll("\\\\"),
+            '\n' => try writer.writeAll("\\n"),
+            '\r' => try writer.writeAll("\\r"),
+            '\t' => try writer.writeAll("\\t"),
+            else => try writer.writeByte(c),
+        }
+    }
+    try writer.writeByte('"');
+}
+
+/// Write the YAML representation of `value` at the given indent level.
+/// For objects and arrays the output always ends with a newline; scalars do not
+/// emit a trailing newline (the caller is responsible for that).
+fn writeYamlValue(writer: anytype, value: std.json.Value, indent: usize) !void {
+    switch (value) {
+        .null => try writer.writeAll("null"),
+        .bool => |b| try writer.writeAll(if (b) "true" else "false"),
+        .integer => |n| try writer.print("{d}", .{n}),
+        .float => |f| try writer.print("{d}", .{f}),
+        .number_string => |s| try writer.writeAll(s),
+        .string => |s| try writeYamlString(writer, s),
+        .array => |arr| {
+            for (arr.items) |item| {
+                try writeIndent(writer, indent);
+                switch (item) {
+                    .object, .array => {
+                        try writer.writeAll("-\n");
+                        try writeYamlValue(writer, item, indent + 1);
+                    },
+                    else => {
+                        try writer.writeAll("- ");
+                        try writeYamlValue(writer, item, indent);
+                        try writer.writeByte('\n');
+                    },
+                }
+            }
+        },
+        .object => |obj| {
+            var it = obj.iterator();
+            while (it.next()) |entry| {
+                try writeIndent(writer, indent);
+                try writer.writeAll(entry.key_ptr.*);
+                switch (entry.value_ptr.*) {
+                    .object, .array => {
+                        try writer.writeAll(":\n");
+                        try writeYamlValue(writer, entry.value_ptr.*, indent + 1);
+                    },
+                    else => {
+                        try writer.writeAll(": ");
+                        try writeYamlValue(writer, entry.value_ptr.*, 0);
+                        try writer.writeByte('\n');
+                    },
+                }
+            }
+        },
+    }
+}
+
+// ── TOML emitter ──────────────────────────────────────────────────────────────
+
+fn isObjectArray(arr: std.json.Array) bool {
+    for (arr.items) |item| {
+        if (item == .object) return true;
+    }
+    return false;
+}
+
+fn writeTomlString(writer: anytype, s: []const u8) !void {
+    try writer.writeByte('"');
+    for (s) |c| {
+        switch (c) {
+            '"' => try writer.writeAll("\\\""),
+            '\\' => try writer.writeAll("\\\\"),
+            '\n' => try writer.writeAll("\\n"),
+            '\r' => try writer.writeAll("\\r"),
+            '\t' => try writer.writeAll("\\t"),
+            else => try writer.writeByte(c),
+        }
+    }
+    try writer.writeByte('"');
+}
+
+/// Write a TOML scalar or inline array.  Objects are not handled here — they
+/// appear as section headers, emitted by `writeTomlSection`.
+fn writeTomlInline(writer: anytype, value: std.json.Value) !void {
+    switch (value) {
+        .null => try writer.writeAll("\"\""),
+        .bool => |b| try writer.writeAll(if (b) "true" else "false"),
+        .integer => |n| try writer.print("{d}", .{n}),
+        .float => |f| try writer.print("{d}", .{f}),
+        .number_string => |s| try writer.writeAll(s),
+        .string => |s| try writeTomlString(writer, s),
+        .array => |arr| {
+            try writer.writeByte('[');
+            for (arr.items, 0..) |item, i| {
+                if (i > 0) try writer.writeAll(", ");
+                try writeTomlInline(writer, item);
+            }
+            try writer.writeByte(']');
+        },
+        .object => |obj| {
+            // Inline table fallback — only reached for objects nested inside arrays.
+            try writer.writeByte('{');
+            var it = obj.iterator();
+            var first = true;
+            while (it.next()) |entry| {
+                if (!first) try writer.writeAll(", ");
+                first = false;
+                try writer.writeAll(entry.key_ptr.*);
+                try writer.writeAll(" = ");
+                try writeTomlInline(writer, entry.value_ptr.*);
+            }
+            try writer.writeByte('}');
+        },
+    }
+}
+
+/// Write the scalar/array key-value pairs of `obj` then recurse into sub-tables.
+/// `prefix` is the dotted section path used to build `[prefix.subkey]` headers.
+fn writeTomlSection(alloc: Allocator, writer: anytype, obj: std.json.ObjectMap, prefix: []const u8) !void {
+    // Pass 1 — scalars and scalar arrays
+    var it = obj.iterator();
+    while (it.next()) |entry| {
+        const v = entry.value_ptr.*;
+        const is_table = v == .object or (v == .array and isObjectArray(v.array));
+        if (!is_table) {
+            try writer.writeAll(entry.key_ptr.*);
+            try writer.writeAll(" = ");
+            try writeTomlInline(writer, v);
+            try writer.writeByte('\n');
+        }
+    }
+    // Pass 2 — sub-tables and arrays of tables
+    it = obj.iterator();
+    while (it.next()) |entry| {
+        const v = entry.value_ptr.*;
+        const sub = try std.fmt.allocPrint(alloc, "{s}.{s}", .{ prefix, entry.key_ptr.* });
+        defer alloc.free(sub);
+        if (v == .object) {
+            try writer.print("\n[{s}]\n", .{sub});
+            try writeTomlSection(alloc, writer, v.object, sub);
+        } else if (v == .array and isObjectArray(v.array)) {
+            for (v.array.items) |item| {
+                if (item != .object) continue;
+                try writer.print("\n[[{s}]]\n", .{sub});
+                try writeTomlSection(alloc, writer, item.object, sub);
+            }
+        }
+    }
+}
+
+fn writeTomlDocument(alloc: Allocator, writer: anytype, root: std.json.Value) !void {
+    if (root != .object) return;
+    const obj = root.object;
+    // Pass 1 — top-level scalars and scalar arrays
+    var it = obj.iterator();
+    while (it.next()) |entry| {
+        const v = entry.value_ptr.*;
+        const is_table = v == .object or (v == .array and isObjectArray(v.array));
+        if (!is_table) {
+            try writer.writeAll(entry.key_ptr.*);
+            try writer.writeAll(" = ");
+            try writeTomlInline(writer, v);
+            try writer.writeByte('\n');
+        }
+    }
+    // Pass 2 — [section] and [[array-of-tables]]
+    it = obj.iterator();
+    while (it.next()) |entry| {
+        const v = entry.value_ptr.*;
+        if (v == .object) {
+            try writer.print("\n[{s}]\n", .{entry.key_ptr.*});
+            try writeTomlSection(alloc, writer, v.object, entry.key_ptr.*);
+        } else if (v == .array and isObjectArray(v.array)) {
+            for (v.array.items) |item| {
+                if (item != .object) continue;
+                try writer.print("\n[[{s}]]\n", .{entry.key_ptr.*});
+                try writeTomlSection(alloc, writer, item.object, entry.key_ptr.*);
+            }
+        }
+    }
+}
+
+// ── ZON emitter ───────────────────────────────────────────────────────────────
+
+fn writeZonString(writer: anytype, s: []const u8) !void {
+    try writer.writeByte('"');
+    for (s) |c| {
+        switch (c) {
+            '"' => try writer.writeAll("\\\""),
+            '\\' => try writer.writeAll("\\\\"),
+            '\n' => try writer.writeAll("\\n"),
+            '\r' => try writer.writeAll("\\r"),
+            '\t' => try writer.writeAll("\\t"),
+            else => try writer.writeByte(c),
+        }
+    }
+    try writer.writeByte('"');
+}
+
+fn writeZonValue(writer: anytype, value: std.json.Value, indent: usize) !void {
+    switch (value) {
+        .null => try writer.writeAll("null"),
+        .bool => |b| try writer.writeAll(if (b) "true" else "false"),
+        .integer => |n| try writer.print("{d}", .{n}),
+        .float => |f| try writer.print("{d}", .{f}),
+        .number_string => |s| try writer.writeAll(s),
+        .string => |s| try writeZonString(writer, s),
+        .array => |arr| {
+            try writer.writeAll(".{\n");
+            for (arr.items) |item| {
+                try writeIndent(writer, indent + 1);
+                try writeZonValue(writer, item, indent + 1);
+                try writer.writeAll(",\n");
+            }
+            try writeIndent(writer, indent);
+            try writer.writeByte('}');
+        },
+        .object => |obj| {
+            try writer.writeAll(".{\n");
+            var it = obj.iterator();
+            while (it.next()) |entry| {
+                try writeIndent(writer, indent + 1);
+                try writer.writeByte('.');
+                try writer.writeAll(entry.key_ptr.*);
+                try writer.writeAll(" = ");
+                try writeZonValue(writer, entry.value_ptr.*, indent + 1);
+                try writer.writeAll(",\n");
+            }
+            try writeIndent(writer, indent);
+            try writer.writeByte('}');
+        },
+    }
+}
+
 // tera integration test moved to the standalone tera package
 
 test {
