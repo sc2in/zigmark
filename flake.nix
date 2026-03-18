@@ -2,8 +2,8 @@
   description = "ZigMark - Simple markdown processing for zig";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    zig2nix.url = "github:Cloudef/zig2nix";
+    nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.1.964459.tar.gz";
+    zig2nix.url = "https://flakehub.com/f/Cloudef/zig2nix/0.1.885.tar.gz";
   };
 
   outputs = {
