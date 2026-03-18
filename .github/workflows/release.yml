@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v?[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to re-publish to FlakeHub"
+        type: string
+        required: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            system: x86_64-linux
+          - os: ubuntu-24.04-arm
+            system: aarch64-linux
+
+    runs-on: ${{ matrix.os }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/determinate-nix-action@main
+
+      - name: Setup Nix cache
+        uses: DeterminateSystems/flakehub-cache-action@main
+        with:
+          use-gha-cache: "enabled"
+          flakehub-flake-name: "sc2in/ZigMark"
+
+      - name: Build
+        run: nix build
+
+      - name: Package
+        run: |
+          ARCHIVE="zigmark-${{ github.ref_name }}-${{ matrix.system }}.tar.gz"
+          tar czf "$ARCHIVE" --dereference \
+            -C result \
+            bin \
+            lib \
+            include
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.system }}
+          path: ${{ env.ARCHIVE }}
+          retention-days: 1
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz > checksums.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/checksums.txt
+          generate_release_notes: true
+
+  flakehub-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          ref: "${{ (inputs.tag != null) && format('refs/tags/{0}', inputs.tag) || '' }}"
+
+      - uses: DeterminateSystems/determinate-nix-action@v3
+
+      - uses: DeterminateSystems/flakehub-push@main
+        with:
+          visibility: unlisted
+          name: sc2in/zigmark
+          tag: "${{ inputs.tag }}"
+          include-output-paths: true

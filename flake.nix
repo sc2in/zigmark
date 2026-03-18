@@ -136,6 +136,94 @@
             ${pkgs.python3}/bin/python3 -m http.server "$PORT" -d zig-out/wasm
           ''}";
         };
+
+        # CLI performance benchmark vs cmark:  nix run .#bench
+        #
+        # Builds zigmark (ReleaseFast), then runs hyperfine comparing zigmark
+        # and cmark on the CommonMark spec file.  Results are written back into
+        # the README.md <!-- bench-start / bench-end --> section.
+        bench = let
+          bench-app = pkgs.writeShellApplication {
+            name = "zigmark-bench";
+            runtimeInputs = with pkgs; [hyperfine pandoc discount lowdown python3 zig];
+            text = ''
+              set -euo pipefail
+              REPO="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+              cd "$REPO"
+
+              # Use the CommonMark spec as a large representative input.
+              # Fall back to README.md if the dependency cache is unavailable.
+              SPEC_TXT="$(find "$REPO/.zig-cache" -name "spec.txt" -path "*/commonmark_spec*" 2>/dev/null | head -1 || true)"
+              if [ -z "$SPEC_TXT" ]; then
+                echo "  spec.txt not cached yet — using README.md as benchmark input"
+                BENCH_FILE="$REPO/README.md"
+              else
+                BENCH_FILE="$SPEC_TXT"
+              fi
+              echo "  Benchmark file: $BENCH_FILE ($(wc -c < "$BENCH_FILE") bytes)"
+
+              echo "▸ Building zigmark (ReleaseSafe, ReleaseSmall, ReleaseFast)…"
+              zig build -Doptimize=ReleaseSafe  && cp zig-out/bin/zigmark /tmp/zigmark-safe
+              zig build -Doptimize=ReleaseSmall && cp zig-out/bin/zigmark /tmp/zigmark-small
+              zig build -Doptimize=ReleaseFast  && cp zig-out/bin/zigmark /tmp/zigmark-fast
+
+              RESULT_MD=$(mktemp /tmp/bench-result-XXXXXX.md)
+              trap 'rm -f "$RESULT_MD" /tmp/zigmark-safe /tmp/zigmark-small /tmp/zigmark-fast' EXIT
+
+              echo "▸ Running hyperfine…"
+              hyperfine \
+                -N \
+                --warmup 50 \
+                --runs 500 \
+                --export-markdown "$RESULT_MD" \
+                --command-name "zigmark (ReleaseSafe)"  "/tmp/zigmark-safe  -o /dev/null $BENCH_FILE" \
+                --command-name "zigmark (ReleaseSmall)" "/tmp/zigmark-small -o /dev/null $BENCH_FILE" \
+                --command-name "zigmark (ReleaseFast)"  "/tmp/zigmark-fast  -o /dev/null $BENCH_FILE" \
+                --command-name "discount"               "markdown -o /dev/null $BENCH_FILE" \
+                --command-name "lowdown"                "lowdown  -o /dev/null $BENCH_FILE" \
+                --command-name "pandoc"                 "pandoc   -o /dev/null $BENCH_FILE"
+
+              echo ""
+              echo "▸ Updating README.md…"
+              python3 - "$REPO/README.md" "$RESULT_MD" <<'PYEOF'
+              import re, sys, pathlib, datetime
+
+              readme_path = pathlib.Path(sys.argv[1])
+              bench_path  = pathlib.Path(sys.argv[2])
+
+              bench_md = bench_path.read_text()
+              readme   = readme_path.read_text()
+
+              today = datetime.date.today().isoformat()
+              new_section = (
+                  f"<!-- bench-start -->\n"
+                  f"_Last updated: {today}_\n\n"
+                  f"{bench_md}\n"
+                  f"<!-- bench-end -->"
+              )
+
+              updated = re.sub(
+                  r"<!-- bench-start -->.*?<!-- bench-end -->",
+                  new_section,
+                  readme,
+                  flags=re.DOTALL,
+              )
+
+              if updated == readme:
+                  print("  WARNING: bench markers not found in README.md — appending.")
+                  updated = readme.rstrip() + "\n\n" + new_section + "\n"
+
+              readme_path.write_text(updated)
+              print(f"  README.md updated.")
+              PYEOF
+
+              echo "✓ Done. Benchmark results written to README.md."
+            '';
+          };
+        in {
+          type = "app";
+          program = "${bench-app}/bin/zigmark-bench";
+        };
       }
     );
   };

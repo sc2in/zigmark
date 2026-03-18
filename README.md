@@ -4,6 +4,22 @@ A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 6
 
 Builds as both a **CLI tool** and a **C-callable shared library** (`libzigmark.so`).
 
+## Performance
+
+<!-- bench-start -->
+_Last updated: 2026-03-18_
+
+| Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
+|:---|---:|---:|---:|---:|
+| `zigmark (ReleaseSafe)` | 2.7 ± 1.3 | 1.5 | 14.1 | 1.40 ± 1.10 |
+| `zigmark (ReleaseSmall)` | 2.7 ± 1.1 | 1.5 | 9.3 | 1.41 ± 1.06 |
+| `zigmark (ReleaseFast)` | 2.4 ± 1.4 | 1.4 | 15.1 | 1.29 ± 1.07 |
+| `discount` | 2.0 ± 0.9 | 1.1 | 9.8 | 1.07 ± 0.82 |
+| `lowdown` | 1.9 ± 1.2 | 1.0 | 9.7 | 1.00 |
+| `pandoc` | 150.2 ± 14.3 | 118.0 | 245.8 | 79.09 ± 49.62 |
+
+<!-- bench-end -->
+
 ## Installation
 
 Add `zigmark` as a dependency in your `build.zig.zon`:
@@ -67,15 +83,63 @@ zigmark -f ai README.md
 
 Produces a token-efficient AST representation suitable for LLM consumption.
 
+### Extract Frontmatter as JSON
+
+```bash
+zigmark -f frontmatter post.md
+```
+
+Parses the frontmatter block (YAML `---`, TOML `+++`, JSON `{`, or ZON `.{`) and
+emits it as pretty-printed JSON.  Outputs `{}` when no frontmatter is present,
+so the output is always valid JSON and safe to pipe.
+
+```bash
+# Pipe into jq
+zigmark -f frontmatter post.md | jq '.title'
+
+# Extract a nested key
+zigmark -f frontmatter post.md | jq '.extra.author'
+```
+
+### Edit Frontmatter
+
+`--format markdown` re-serialises the frontmatter (in its original format) and
+passes the body through verbatim.  Use `--set` and `--delete` to mutate fields
+before writing:
+
+```bash
+# Update a field and delete another, keep body unchanged
+zigmark -f markdown --set title="New Title" --delete draft post.md
+
+# Set a nested key (intermediate objects are created automatically)
+zigmark -f markdown --set extra.owner=SC2 post.md
+
+# Pipe the result back over the original file
+zigmark -f markdown --set date=2025-06-01 post.md -o post.md
+```
+
+`--format normalize` does the same frontmatter handling but also reconstructs
+the Markdown body from the AST, normalising headings to ATX style, links to
+inline, and code blocks to fenced:
+
+```bash
+zigmark -f normalize --set title="Clean" post.md
+```
+
 ### Options
 
 ```
 Usage: zigmark [OPTIONS] [FILE]
 
-  -h, --help          Display this help and exit.
-  -v, --version       Print version and exit.
-  -f, --format <str>  Output format: "html" (default), "ast", or "ai".
-  -o, --output <str>  Write output to FILE instead of stdout.
+  -h, --help            Display this help and exit.
+  -v, --version         Print version and exit.
+  -f, --format <str>    Output format: "html" (default), "ast", "ai",
+                        "terminal", "frontmatter", "markdown", or "normalize".
+  -o, --output <str>    Write output to FILE instead of stdout.
+  -s, --set <str>...    Set a frontmatter field (KEY=VALUE). Repeatable.
+                        Applies to: markdown, normalize, frontmatter formats.
+  -d, --delete <str>... Delete a frontmatter field (dot-path). Repeatable.
+                        Applies to: markdown, normalize, frontmatter formats.
 ```
 
 ## Zig Library Usage
@@ -129,6 +193,70 @@ var links = try query.links(allocator);
 const para_count = query.count(.paragraph);
 ```
 
+### Frontmatter
+
+Extract and query structured metadata from the top of a Markdown file.  All four formats are normalised to `std.json.Value` for uniform access.
+
+| Format | Opening marker | Example |
+|--------|---------------|---------|
+| YAML   | `---`          | `--- \ntitle: Hello\n---` |
+| TOML   | `+++`          | `+++\ntitle = "Hello"\n+++` |
+| JSON   | `{`            | `{"title": "Hello"}` |
+| ZON    | `.{`           | `.{ .title = "Hello" }` |
+
+```zig
+const FrontMatter = zigmark.FrontMatter;
+
+// Parse from a full Markdown document (auto-detects format)
+var fm = try FrontMatter.initFromMarkdown(allocator, markdown_source);
+defer fm.deinit();
+
+// Dot-separated key lookup — returns ?std.json.Value
+const title  = fm.get("title");            // top-level key
+const host   = fm.get("server.host");      // nested key
+const first  = fm.get("tags");             // array → .array variant
+
+if (title) |t| std.debug.print("title: {s}\n", .{t.string});
+
+// Or parse a bare frontmatter string directly
+var fm2 = try FrontMatter.init(allocator, source, .toml);
+defer fm2.deinit();
+
+// Mutate: set a value at a dot-separated path (creates intermediates as needed)
+try fm.set("title", .{ .string = "New Title" });
+try fm.set("extra.owner", .{ .string = "SC2" });
+try fm.set("draft", .{ .bool = false });
+
+// Delete a key
+_ = fm.delete("draft");
+
+// Deep-merge another frontmatter document (overlay keys win on conflict)
+var overlay = try FrontMatter.initFromMarkdown(allocator, other_source);
+defer overlay.deinit();
+try fm.merge(overlay);
+
+// Re-serialise in the original format (YAML/TOML/JSON/ZON)
+const serialized = try fm.serialize(allocator);
+defer allocator.free(serialized);
+```
+
+ZON frontmatter supports the full frontmatter subset: anonymous structs, array tuples, strings (with escape sequences), integers (decimal / hex / octal / binary), floats, booleans, `null`, and enum literals (returned as strings).
+
+```zig
+// ZON example
+const source =
+    \\.{
+    \\    .title   = "My Post",
+    \\    .tags    = .{ "zig", "wasm" },
+    \\    .draft   = false,
+    \\    .weight  = 10,
+    \\    .status  = .published,   // enum literal → "published"
+    \\}
+;
+var fm = try FrontMatter.init(allocator, source, .zon);
+defer fm.deinit();
+```
+
 ### Custom Renderers
 
 The renderer interface is pluggable — implement a `render(Allocator, AST.Document) ![]u8` function:
@@ -147,15 +275,25 @@ The build produces `libzigmark.so` and `include/zigmark.h` — a self-contained 
 ```c
 #include "zigmark.h"
 
-ZigmarkDocument *zigmark_parse(const char *input, size_t len);
-void             zigmark_free_document(ZigmarkDocument *doc);
+ZigmarkDocument  *zigmark_parse(const char *input, size_t len);
+void              zigmark_free_document(ZigmarkDocument *doc);
 
-char            *zigmark_render_html(ZigmarkDocument *doc);
-char            *zigmark_render_ast(ZigmarkDocument *doc);
-char            *zigmark_render_ai(ZigmarkDocument *doc);
-void             zigmark_free_string(char *str);
+char             *zigmark_render_html(ZigmarkDocument *doc);
+char             *zigmark_render_ast(ZigmarkDocument *doc);
+char             *zigmark_render_ai(ZigmarkDocument *doc);
+void              zigmark_free_string(char *str);
 
-const char      *zigmark_version(void);
+const char       *zigmark_version(void);
+
+/* Frontmatter */
+ZigmarkFrontmatter *zigmark_frontmatter_parse(const char *input, size_t len);
+void                zigmark_frontmatter_free(ZigmarkFrontmatter *fm);
+char               *zigmark_frontmatter_to_json(ZigmarkFrontmatter *fm);
+char               *zigmark_frontmatter_get(ZigmarkFrontmatter *fm, const char *key);
+char               *zigmark_frontmatter_serialize(ZigmarkFrontmatter *fm);
+int                 zigmark_frontmatter_merge(ZigmarkFrontmatter *base, ZigmarkFrontmatter *overlay);
+int                 zigmark_frontmatter_set(ZigmarkFrontmatter *fm, const char *path, const char *json_value);
+int                 zigmark_frontmatter_set_raw(ZigmarkFrontmatter *fm, const char *path, const char *raw);
 ```
 
 ### Example
@@ -265,7 +403,7 @@ Run the GFM suite with `zig build gfm`.
 
 ### Extensions
 
-- **Frontmatter** — YAML (`---`) and TOML (`+++`) extraction, parsed as JSON
+- **Frontmatter** — YAML (`---`), TOML (`+++`), JSON (`{`), and ZON (`.{`) extraction, all normalised to `std.json.Value`
 - **Footnotes** — `[^label]` references and definitions
 - **GFM Tables** — pipe-delimited tables with optional column alignment
 - **GFM Task lists** — `- [x]` / `- [ ]` items rendered as disabled checkboxes
@@ -351,6 +489,9 @@ nix develop
 
 # WASM live preview demo
 nix run .#wasm-demo
+
+# Run CLI performance benchmark (compares zigmark vs cmark, updates README)
+nix run .#bench
 ```
 
 Requires **Zig 0.15.2** or later.
@@ -362,13 +503,14 @@ Requires **Zig 0.15.2** or later.
 - **`HTMLRenderer`** — CommonMark-compliant HTML serialiser
 - **`ASTRenderer`** — Human-readable tree diagram with box-drawing characters
 - **`AIRenderer`** — Token-efficient AST representation for LLM consumption
+- **`MarkdownRenderer`** — AST→Markdown normaliser; converts headings to ATX, links to inline, code blocks to fenced
 - **`Renderer`** — Type-erased vtable interface for pluggable output backends
-- **`Frontmatter`** — YAML/TOML metadata extraction via [zig-yaml](https://github.com/kubkon/zig-yaml) and [tomlz](https://github.com/tsunaminoai/tomlz)
+- **`Frontmatter`** — YAML/TOML/JSON/ZON metadata extraction, mutation (`set`, `delete`, `merge`), and re-serialisation; YAML via [zig-yaml](https://github.com/kubkon/zig-yaml), TOML via [tomlz](https://github.com/tsunaminoai/tomlz), JSON via `std.json`, ZON via a built-in recursive-descent parser
 - **C ABI** — Opaque-pointer API in `root.zig` exported as `libzigmark.so`
 
 ## Future Plans
 
-- Additional renderers (LaTeX, plain text, Markdown normaliser)
+- Additional renderers (LaTeX, plain text)
 - Streaming parser for large documents
 - AST modification API
 

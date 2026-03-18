@@ -1,6 +1,18 @@
 //! Copyright © 2025 [Star City Security Consulting, LLC (SC2)](https://sc2.in)
 //! SPDX-License-Identifier: AGPL-3.0-or-later
 const std = @import("std");
+
+// Suppress zig-yaml's verbose tokenizer/parser debug tracing so that
+// `zig build test` and nix checks stay quiet.  All other log scopes
+// (including our own warn/err paths for spec failures) remain at the
+// default level.
+pub const std_options: std.Options = .{
+    .log_scope_levels = &.{
+        .{ .scope = .tokenizer, .level = .warn },
+        .{ .scope = .parser, .level = .warn },
+    },
+};
+
 const Allocator = std.mem.Allocator;
 const mem = std.mem;
 const testing = std.testing;
@@ -21,6 +33,7 @@ const ai = @import("markdown/renderers/ai.zig");
 /// Renderers
 const ast_mod = @import("markdown/renderers/ast_renderer.zig");
 const html = @import("markdown/renderers/html.zig");
+const markdown_mod = @import("markdown/renderers/markdown.zig");
 const terminal = @import("markdown/renderers/terminal.zig");
 
 /// Pre-built renderer that serialises an `AST.Document` to CommonMark-compliant HTML.
@@ -35,6 +48,10 @@ pub const AIRenderer = Renderer.create(ai);
 
 /// Pre-built renderer that serialises an `AST.Document` with ANSI terminal styling.
 pub const TerminalRenderer = Renderer.create(terminal);
+
+/// Pre-built renderer that serialises an `AST.Document` back to normalised
+/// CommonMark+GFM Markdown.  Useful for round-trip normalization passes.
+pub const MarkdownRenderer = Renderer.create(markdown_mod);
 
 /// A type-erased rendering back-end.
 ///
@@ -173,6 +190,148 @@ export fn zigmark_free_string(ptr: ?[*:0]u8) void {
 /// The pointer is valid for the lifetime of the process (string literal).
 export fn zigmark_version() [*:0]const u8 {
     return version.ptr[0..version.len :0];
+}
+
+// ── Frontmatter C ABI ─────────────────────────────────────────────────────────
+
+/// Internal wrapper that pairs a FrontMatter with the allocator that owns it.
+const OpaqueFm = struct {
+    fm: Frontmatter,
+    allocator: Allocator,
+};
+
+/// Serialize a `std.json.Value` to a NUL-terminated C string allocated with
+/// `alloc`.  Returns null on failure.  Caller must free with
+/// `zigmark_free_string`.
+fn jsonValueToC(alloc: Allocator, value: std.json.Value, options: std.json.Stringify.Options) ?[*:0]u8 {
+    const json = std.json.Stringify.valueAlloc(alloc, value, options) catch return null;
+    const c_str = alloc.realloc(json, json.len + 1) catch {
+        alloc.free(json);
+        return null;
+    };
+    c_str[json.len] = 0;
+    return c_str[0..json.len :0];
+}
+
+/// Parse frontmatter from a UTF-8 Markdown buffer.
+/// Auto-detects YAML (`---`), TOML (`+++`), JSON (`{`), or ZON (`.{`).
+///
+/// Returns an opaque handle, or null if no valid frontmatter is present or on
+/// allocation / parse failure.  Free with `zigmark_frontmatter_free`.
+export fn zigmark_frontmatter_parse(input: [*]const u8, len: usize) ?*OpaqueFm {
+    const allocator = std.heap.page_allocator;
+    const slice = input[0..len];
+    var fm = Frontmatter.initFromMarkdown(allocator, slice) catch return null;
+    const wrapper = allocator.create(OpaqueFm) catch {
+        fm.deinit();
+        return null;
+    };
+    wrapper.* = .{ .fm = fm, .allocator = allocator };
+    return wrapper;
+}
+
+/// Free a frontmatter handle previously returned by `zigmark_frontmatter_parse`.
+export fn zigmark_frontmatter_free(ptr: ?*OpaqueFm) void {
+    const wrapper = ptr orelse return;
+    wrapper.fm.deinit();
+    wrapper.allocator.destroy(wrapper);
+}
+
+/// Serialize the entire frontmatter to a pretty-printed JSON string.
+///
+/// Returns a NUL-terminated string, or null on failure.
+/// Free with `zigmark_free_string`.
+export fn zigmark_frontmatter_to_json(ptr: ?*OpaqueFm) ?[*:0]u8 {
+    const wrapper = ptr orelse return null;
+    return jsonValueToC(wrapper.allocator, wrapper.fm.root, .{ .whitespace = .indent_2 });
+}
+
+/// Look up a dot-separated key path in the frontmatter and return its value as
+/// a compact JSON string (e.g. `"title"`, `"extra.author"`, `"tags"`).
+///
+/// Returns a NUL-terminated string, or null if the key is not found or on
+/// failure.  Free with `zigmark_free_string`.
+export fn zigmark_frontmatter_get(ptr: ?*OpaqueFm, key: [*:0]const u8) ?[*:0]u8 {
+    const wrapper = ptr orelse return null;
+    var key_len: usize = 0;
+    while (key[key_len] != 0) : (key_len += 1) {}
+    const value = wrapper.fm.get(key[0..key_len]) orelse return null;
+    return jsonValueToC(wrapper.allocator, value, .{});
+}
+
+/// Serialize the frontmatter back to its original format (YAML/TOML/JSON/ZON)
+/// including delimiters, reflecting any modifications made to the parsed tree.
+///
+/// Returns a NUL-terminated string, or null on failure.
+/// Free with `zigmark_free_string`.
+export fn zigmark_frontmatter_serialize(ptr: ?*OpaqueFm) ?[*:0]u8 {
+    const wrapper = ptr orelse return null;
+    const buf = wrapper.fm.serialize(wrapper.allocator) catch return null;
+    const c_str = wrapper.allocator.realloc(buf, buf.len + 1) catch {
+        wrapper.allocator.free(buf);
+        return null;
+    };
+    c_str[buf.len] = 0;
+    return c_str[0..buf.len :0];
+}
+
+/// Deep-merge `overlay` into `base` (overlay keys win for leaf conflicts).
+/// The base retains its original format (YAML/TOML/JSON/ZON).
+///
+/// Returns 0 on success, -1 on failure.
+export fn zigmark_frontmatter_merge(base: ?*OpaqueFm, overlay: ?*OpaqueFm) c_int {
+    const b = base orelse return -1;
+    const o = overlay orelse return -1;
+    b.fm.merge(o.fm) catch return -1;
+    return 0;
+}
+
+/// Set a value at a dot-separated key path.
+///
+/// @param path       NUL-terminated dot-separated key path (e.g. `"extra.owner"`).
+/// @param json_value NUL-terminated compact JSON string for the new value
+///                   (e.g. `"\"hello\""`, `"42"`, `"true"`, `"[1,2,3]"`).
+///
+/// Returns 0 on success, -1 on failure (parse error, OOM, or bad path).
+export fn zigmark_frontmatter_set(ptr: ?*OpaqueFm, path: [*:0]const u8, json_value: [*:0]const u8) c_int {
+    const wrapper = ptr orelse return -1;
+    var path_len: usize = 0;
+    while (path[path_len] != 0) : (path_len += 1) {}
+    var val_len: usize = 0;
+    while (json_value[val_len] != 0) : (val_len += 1) {}
+    const parsed = std.json.parseFromSlice(
+        std.json.Value,
+        wrapper.allocator,
+        json_value[0..val_len],
+        .{},
+    ) catch return -1;
+    defer parsed.deinit();
+    wrapper.fm.set(path[0..path_len], parsed.value) catch return -1;
+    return 0;
+}
+
+/// Set a value using auto-typed raw string (not JSON-quoted).
+///
+/// Type inference rules (applied in order):
+///   - `"true"` / `"false"` → bool
+///   - `"null"` → null
+///   - Valid integer literal (no `.`) → integer
+///   - Valid float literal → float
+///   - Everything else → string (value is copied)
+///
+/// @param path  NUL-terminated dot-separated key path.
+/// @param raw   NUL-terminated raw value string.
+///
+/// Returns 0 on success, -1 on failure.
+export fn zigmark_frontmatter_set_raw(ptr: ?*OpaqueFm, path: [*:0]const u8, raw: [*:0]const u8) c_int {
+    const wrapper = ptr orelse return -1;
+    var path_len: usize = 0;
+    while (path[path_len] != 0) : (path_len += 1) {}
+    var raw_len: usize = 0;
+    while (raw[raw_len] != 0) : (raw_len += 1) {}
+    const value = Frontmatter.inferValue(raw[0..raw_len]);
+    wrapper.fm.set(path[0..path_len], value) catch return -1;
+    return 0;
 }
 
 test "enhanced parse and render" {
@@ -802,22 +961,23 @@ test "CommonMark spec compliance" {
     const allocator = arena.allocator();
     const summary = try runSpecSummary(allocator, default_spec_path);
 
-    std.debug.print("\n{s:<40} {s:>6} {s:>6} {s:>6}\n", .{ "Section", "Pass", "Fail", "Total" });
-    std.debug.print("{s:-<58}\n", .{""});
-
+    // Print the section table only when something fails so CI logs stay clean.
     var section_total: usize = 0;
-    for (summary.sections) |s| {
-        const t = s.result.total();
-        section_total += t;
-        if (t > 0) {
-            std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{ s.section, s.result.passed, s.result.failed, t });
-        }
-    }
+    for (summary.sections) |s| section_total += s.result.total();
 
-    std.debug.print("{s:-<58}\n", .{""});
-    std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{
-        "TOTAL", summary.all.passed, summary.all.failed, summary.all.total(),
-    });
+    if (summary.all.failed > 0 or summary.all.errors > 0) {
+        std.debug.print("\n{s:<40} {s:>6} {s:>6} {s:>6}\n", .{ "Section", "Pass", "Fail", "Total" });
+        std.debug.print("{s:-<58}\n", .{""});
+        for (summary.sections) |s| {
+            const t = s.result.total();
+            if (t > 0)
+                std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{ s.section, s.result.passed, s.result.failed, t });
+        }
+        std.debug.print("{s:-<58}\n", .{""});
+        std.debug.print("{s:<40} {d:>6} {d:>6} {d:>6}\n", .{
+            "TOTAL", summary.all.passed, summary.all.failed, summary.all.total(),
+        });
+    }
 
     // Verify the section breakdown covers all tests (no miscategorization).
     try testing.expectEqual(summary.all.total(), section_total);

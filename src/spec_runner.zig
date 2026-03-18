@@ -1,6 +1,13 @@
 const std = @import("std");
 const print = std.debug.print;
 
+pub const std_options: std.Options = .{
+    .log_scope_levels = &.{
+        .{ .scope = .tokenizer, .level = .warn },
+        .{ .scope = .parser, .level = .warn },
+    },
+};
+
 const zigmark = @import("zigmark");
 
 const default_spec_path = "./src/markdown/spec.txt";
@@ -19,6 +26,7 @@ pub fn main() !void {
     var verbose = false;
     var number: ?usize = null;
     var summary_only = false;
+    var quiet = false;
     var gfm_mode = false;
     var spec_path: ?[]const u8 = null;
 
@@ -27,6 +35,8 @@ pub fn main() !void {
             verbose = true;
         } else if (std.mem.eql(u8, arg, "--summary")) {
             summary_only = true;
+        } else if (std.mem.eql(u8, arg, "--quiet") or std.mem.eql(u8, arg, "-q")) {
+            quiet = true;
         } else if (std.mem.eql(u8, arg, "--gfm")) {
             gfm_mode = true;
         } else if (std.mem.eql(u8, arg, "--section") or std.mem.eql(u8, arg, "-s")) {
@@ -41,6 +51,16 @@ pub fn main() !void {
     }
 
     const use_spec_path = spec_path orelse default_spec_path;
+
+    // --quiet: silent on full pass; dump the full table only on failure.
+    if (quiet) {
+        const failed: usize = if (gfm_mode)
+            try quietCheck(allocator, use_spec_path, true)
+        else
+            try quietCheck(allocator, use_spec_path, false);
+        if (failed > 0) std.process.exit(1);
+        return;
+    }
 
     if (summary_only) {
         const failed: usize = if (gfm_mode)
@@ -97,6 +117,22 @@ pub fn main() !void {
 
     if (result.failed > 0) {
         std.process.exit(1);
+    }
+}
+
+/// Quiet check: run the full suite, emit nothing on success.
+/// On failure, print the full section table then exit 1.
+fn quietCheck(allocator: std.mem.Allocator, spec_path: []const u8, gfm: bool) !usize {
+    if (gfm) {
+        const summary = try zigmark.runGfmSpecSummary(allocator, spec_path);
+        if (summary.all.failed == 0) return 0;
+        _ = try printGfmSummary(allocator, spec_path);
+        return summary.all.failed;
+    } else {
+        const summary = try zigmark.runSpecSummary(allocator, spec_path);
+        if (summary.all.failed == 0) return 0;
+        _ = try printSummary(allocator, spec_path);
+        return summary.all.failed;
     }
 }
 
