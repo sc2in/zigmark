@@ -1,8 +1,9 @@
 //! Frontmatter parser for Markdown documents.
 //!
-//! Extracts and parses YAML (`---`) or TOML (`+++`) frontmatter blocks
-//! from the beginning of a Markdown file.  The parsed key/value tree is
-//! normalised into `std.json.Value` for uniform downstream access.
+//! Extracts and parses YAML (`---`), TOML (`+++`), JSON (`{`), or ZON (`.{`)
+//! frontmatter blocks from the beginning of a Markdown file.  The parsed
+//! key/value tree is normalised into `std.json.Value` for uniform downstream
+//! access.
 
 const std = @import("std");
 const Array = std.ArrayList;
@@ -26,22 +27,27 @@ original: Origin,
 const Origin = union(Kind) {
     yaml: Yaml,
     toml: tomlz.Table,
+    /// `std.json.Parsed` owns all json memory in an arena; we must NOT call
+    /// `deinitJsonValue` on `.root` for this variant.
+    json: std.json.Parsed(JsonValue),
+    /// Arena that owns all ZON-parsed memory; same caveat as `.json`.
+    zon: std.heap.ArenaAllocator,
 };
 
 const Kind = enum {
     yaml,
     toml,
+    json,
+    zon,
 };
 
-/// Parse `source` as frontmatter of `input_kind` (YAML or TOML).
+/// Parse `source` as frontmatter of `input_kind` (YAML, TOML, JSON, or ZON).
 /// Returns a `FrontMatter` whose `.root` field contains the parsed tree.
 pub fn init(alloc: Allocator, source: []const u8, input_kind: Kind) !FrontMatter {
     var orig: Origin = undefined;
     const value: JsonValue = switch (input_kind) {
         .yaml => blk: {
             var y = Yaml{ .source = source };
-            // defer y.deinit(alloc);
-
             y.load(alloc) catch |err| switch (err) {
                 error.ParseFailure => {
                     std.debug.assert(y.parse_errors.errorMessageCount() > 0);
@@ -56,13 +62,22 @@ pub fn init(alloc: Allocator, source: []const u8, input_kind: Kind) !FrontMatter
         },
         .toml => blk: {
             const doc = try tomlz.parser.parse(alloc, source);
-            // defer doc.deinit(alloc);
-
             var val: tomlz.Value = .{ .table = doc };
             orig = .{ .toml = doc };
             break :blk try tomlValueToJson(alloc, &val);
         },
-        // else => return error.UnhandledSourceType,
+        .json => blk: {
+            const parsed = try std.json.parseFromSlice(JsonValue, alloc, source, .{});
+            orig = .{ .json = parsed };
+            break :blk parsed.value;
+        },
+        .zon => blk: {
+            var arena = std.heap.ArenaAllocator.init(alloc);
+            errdefer arena.deinit();
+            const v = try parseZon(arena.allocator(), source);
+            orig = .{ .zon = arena };
+            break :blk v;
+        },
     };
     return .{
         .allocator = alloc,
@@ -73,25 +88,336 @@ pub fn init(alloc: Allocator, source: []const u8, input_kind: Kind) !FrontMatter
 }
 /// Release all memory owned by this `FrontMatter` instance.
 pub fn deinit(self: *FrontMatter) void {
-    deinitJsonValue(self.allocator, &self.root);
     switch (self.original) {
-        inline else => |*o| o.deinit(self.allocator),
+        .yaml => |*o| {
+            deinitJsonValue(self.allocator, &self.root);
+            o.deinit(self.allocator);
+        },
+        .toml => |*o| {
+            deinitJsonValue(self.allocator, &self.root);
+            o.deinit(self.allocator);
+        },
+        // Arena-based: frees self.root memory too — do NOT call deinitJsonValue.
+        .json => |*p| p.deinit(),
+        .zon => |*a| a.deinit(),
     }
 }
 
 /// Extract and parse frontmatter from a full Markdown document.
 ///
-/// The first line must be `---` (YAML) or `+++` (TOML).  The
-/// frontmatter extends to the next matching delimiter.
+/// Supported opening markers:
+///   `---`  → YAML (closes at next `---`)
+///   `+++`  → TOML (closes at next `+++`)
+///   `{`    → JSON (self-delimiting object)
+///   `.{`   → ZON  (self-delimiting anonymous struct)
 pub fn initFromMarkdown(alloc: Allocator, txt: []const u8) !FrontMatter {
     if (txt.len < 3) return error.InvalidFrontMatter;
+
+    // JSON: self-delimiting object starting with '{'
+    if (txt[0] == '{') {
+        const end = findBraceEnd(txt) orelse return error.InvalidFrontMatter;
+        return init(alloc, txt[0..end], .json);
+    }
+
+    // ZON: self-delimiting anonymous struct starting with '.{'
+    if (txt.len >= 2 and txt[0] == '.' and txt[1] == '{') {
+        const end = findBraceEnd(txt[1..]) orelse return error.InvalidFrontMatter;
+        return init(alloc, txt[0 .. end + 1], .zon);
+    }
+
     const kind: Kind = switch (txt[0]) {
         '-' => .yaml,
         '+' => .toml,
         else => return error.InvalidFrontMatter,
     };
-    const end_fm = std.mem.indexOfPos(u8, txt, 3, if (kind == .yaml) "---" else if (kind == .toml) "+++" else "") orelse return error.InvalidFrontMatter;
+    const end_fm = std.mem.indexOfPos(u8, txt, 3, if (kind == .yaml) "---" else "+++") orelse
+        return error.InvalidFrontMatter;
     return init(alloc, txt[3..end_fm], kind);
+}
+
+// ── JSON / ZON helpers ───────────────────────────────────────────────────────
+
+/// Return the index one past the `}` that closes the `{` at `txt[0]`.
+/// Accounts for string literals so braces inside strings are ignored.
+/// Returns `null` if the input is malformed or has no matching close.
+fn findBraceEnd(txt: []const u8) ?usize {
+    if (txt.len == 0 or txt[0] != '{') return null;
+    var depth: usize = 0;
+    var in_string = false;
+    var i: usize = 0;
+    while (i < txt.len) : (i += 1) {
+        const c = txt[i];
+        if (in_string) {
+            if (c == '\\') {
+                i += 1; // skip escaped char
+            } else if (c == '"') {
+                in_string = false;
+            }
+        } else switch (c) {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if (depth == 0) return i + 1;
+            },
+            else => {},
+        }
+    }
+    return null;
+}
+
+/// Parse a ZON value from `source` using `alloc`.
+/// Supports: anonymous struct (`.{…}`), array tuple (`.{…}`), strings,
+/// numbers (int/float/hex), booleans, null, and enum literals (`.tag`).
+fn parseZon(alloc: Allocator, source: []const u8) !JsonValue {
+    var p = ZonParser{ .src = source, .pos = 0, .alloc = alloc };
+    p.skipWs();
+    const v = try p.parseValue();
+    return v;
+}
+
+const ZonParser = struct {
+    src: []const u8,
+    pos: usize,
+    alloc: Allocator,
+
+    fn skipWs(p: *ZonParser) void {
+        while (p.pos < p.src.len) {
+            const c = p.src[p.pos];
+            if (c == ' ' or c == '\t' or c == '\n' or c == '\r') {
+                p.pos += 1;
+            } else if (c == '/' and p.pos + 1 < p.src.len and p.src[p.pos + 1] == '/') {
+                while (p.pos < p.src.len and p.src[p.pos] != '\n') p.pos += 1;
+            } else break;
+        }
+    }
+
+    fn peek(p: *ZonParser) ?u8 {
+        return if (p.pos < p.src.len) p.src[p.pos] else null;
+    }
+
+    fn parseValue(p: *ZonParser) anyerror!JsonValue {
+        p.skipWs();
+        const c = p.peek() orelse return error.ZonParseError;
+        return switch (c) {
+            '.' => p.parseDot(),
+            '"' => p.parseString(),
+            '\\' => p.parseMultilineString(),
+            '-', '0'...'9' => p.parseNumber(),
+            't' => p.parseLit("true", JsonValue{ .bool = true }),
+            'f' => p.parseLit("false", JsonValue{ .bool = false }),
+            'n' => p.parseLit("null", JsonValue{ .null = {} }),
+            else => error.ZonParseError,
+        };
+    }
+
+    fn parseLit(p: *ZonParser, literal: []const u8, result: JsonValue) !JsonValue {
+        if (!std.mem.startsWith(u8, p.src[p.pos..], literal)) return error.ZonParseError;
+        p.pos += literal.len;
+        return result;
+    }
+
+    fn parseDot(p: *ZonParser) !JsonValue {
+        p.pos += 1; // consume '.'
+        const next = p.peek() orelse return error.ZonParseError;
+        if (next == '{') return p.parseStructOrArray();
+        // enum literal: .tag_name → string
+        const start = p.pos;
+        while (p.pos < p.src.len and identChar(p.src[p.pos])) p.pos += 1;
+        if (p.pos == start) return error.ZonParseError;
+        const s = try p.alloc.dupe(u8, p.src[start..p.pos]);
+        return JsonValue{ .string = s };
+    }
+
+    fn parseStructOrArray(p: *ZonParser) !JsonValue {
+        p.pos += 1; // consume '{'
+        p.skipWs();
+        if (p.peek() == '}') {
+            p.pos += 1;
+            return JsonValue{ .object = std.json.ObjectMap.init(p.alloc) };
+        }
+        return if (p.isStructField()) p.parseStructBody() else p.parseArrayBody();
+    }
+
+    /// Lookahead: are we at `.identifier =`?
+    fn isStructField(p: *ZonParser) bool {
+        if (p.peek() != '.') return false;
+        var i = p.pos + 1;
+        while (i < p.src.len and identChar(p.src[i])) i += 1;
+        if (i == p.pos + 1) return false; // no ident chars
+        while (i < p.src.len and wsChar(p.src[i])) i += 1;
+        return i < p.src.len and p.src[i] == '=';
+    }
+
+    fn parseStructBody(p: *ZonParser) !JsonValue {
+        var obj = JsonValue{ .object = std.json.ObjectMap.init(p.alloc) };
+        while (true) {
+            p.skipWs();
+            const c = p.peek() orelse return error.ZonParseError;
+            if (c == '}') { p.pos += 1; break; }
+            if (c != '.') return error.ZonParseError;
+            p.pos += 1; // consume '.'
+            const ns = p.pos;
+            while (p.pos < p.src.len and identChar(p.src[p.pos])) p.pos += 1;
+            if (p.pos == ns) return error.ZonParseError;
+            const key = try p.alloc.dupe(u8, p.src[ns..p.pos]);
+            p.skipWs();
+            if (p.peek() != '=') return error.ZonParseError;
+            p.pos += 1; // consume '='
+            const val = try p.parseValue();
+            try obj.object.put(key, val);
+            p.skipWs();
+            if (p.peek() == ',') p.pos += 1;
+        }
+        return obj;
+    }
+
+    fn parseArrayBody(p: *ZonParser) !JsonValue {
+        var arr = JsonValue{ .array = std.json.Array.init(p.alloc) };
+        while (true) {
+            p.skipWs();
+            if (p.peek() == '}') { p.pos += 1; break; }
+            const val = try p.parseValue();
+            try arr.array.append(val);
+            p.skipWs();
+            if (p.peek() == ',') p.pos += 1;
+        }
+        return arr;
+    }
+
+    fn parseString(p: *ZonParser) !JsonValue {
+        p.pos += 1; // consume '"'
+        var buf: std.ArrayListUnmanaged(u8) = .{};
+        while (p.pos < p.src.len) {
+            const c = p.src[p.pos];
+            if (c == '"') { p.pos += 1; break; }
+            if (c == '\\') {
+                p.pos += 1;
+                if (p.pos >= p.src.len) return error.ZonParseError;
+                const esc = p.src[p.pos];
+                p.pos += 1;
+                switch (esc) {
+                    'n' => try buf.append(p.alloc, '\n'),
+                    't' => try buf.append(p.alloc, '\t'),
+                    'r' => try buf.append(p.alloc, '\r'),
+                    '"' => try buf.append(p.alloc, '"'),
+                    '\'' => try buf.append(p.alloc, '\''),
+                    '\\' => try buf.append(p.alloc, '\\'),
+                    'x' => {
+                        if (p.pos + 2 > p.src.len) return error.ZonParseError;
+                        const byte = std.fmt.parseInt(u8, p.src[p.pos .. p.pos + 2], 16) catch
+                            return error.ZonParseError;
+                        p.pos += 2;
+                        try buf.append(p.alloc, byte);
+                    },
+                    'u' => {
+                        if (p.peek() != '{') return error.ZonParseError;
+                        p.pos += 1;
+                        const us = p.pos;
+                        while (p.pos < p.src.len and p.src[p.pos] != '}') p.pos += 1;
+                        const cp = std.fmt.parseInt(u21, p.src[us..p.pos], 16) catch
+                            return error.ZonParseError;
+                        if (p.pos >= p.src.len) return error.ZonParseError;
+                        p.pos += 1; // consume '}'
+                        var ubuf: [4]u8 = undefined;
+                        const ulen = std.unicode.utf8Encode(cp, &ubuf) catch
+                            return error.ZonParseError;
+                        try buf.appendSlice(p.alloc, ubuf[0..ulen]);
+                    },
+                    else => return error.ZonParseError,
+                }
+            } else {
+                try buf.append(p.alloc, c);
+                p.pos += 1;
+            }
+        }
+        return JsonValue{ .string = try buf.toOwnedSlice(p.alloc) };
+    }
+
+    /// ZON multi-line string: consecutive lines each starting with `\\`.
+    fn parseMultilineString(p: *ZonParser) !JsonValue {
+        var buf: std.ArrayListUnmanaged(u8) = .{};
+        while (p.pos + 1 < p.src.len and
+            p.src[p.pos] == '\\' and p.src[p.pos + 1] == '\\')
+        {
+            p.pos += 2;
+            const ls = p.pos;
+            while (p.pos < p.src.len and p.src[p.pos] != '\n') p.pos += 1;
+            try buf.appendSlice(p.alloc, p.src[ls..p.pos]);
+            if (p.pos < p.src.len) { try buf.append(p.alloc, '\n'); p.pos += 1; }
+            // skip indentation before next `\\`
+            while (p.pos < p.src.len and (p.src[p.pos] == ' ' or p.src[p.pos] == '\t'))
+                p.pos += 1;
+        }
+        return JsonValue{ .string = try buf.toOwnedSlice(p.alloc) };
+    }
+
+    fn parseNumber(p: *ZonParser) !JsonValue {
+        const start = p.pos;
+        const neg = p.src[p.pos] == '-';
+        if (neg) p.pos += 1;
+
+        // hex / octal / binary prefix
+        if (p.pos + 1 < p.src.len and p.src[p.pos] == '0') {
+            switch (p.src[p.pos + 1]) {
+                'x', 'X' => {
+                    p.pos += 2;
+                    while (p.pos < p.src.len and std.ascii.isHex(p.src[p.pos])) p.pos += 1;
+                    const n = std.fmt.parseInt(i64, p.src[start..p.pos], 0) catch
+                        return error.ZonParseError;
+                    return JsonValue{ .integer = n };
+                },
+                'o' => {
+                    p.pos += 2;
+                    while (p.pos < p.src.len and p.src[p.pos] >= '0' and p.src[p.pos] <= '7')
+                        p.pos += 1;
+                    const n = std.fmt.parseInt(i64, p.src[start..p.pos], 0) catch
+                        return error.ZonParseError;
+                    return JsonValue{ .integer = n };
+                },
+                'b' => {
+                    p.pos += 2;
+                    while (p.pos < p.src.len and (p.src[p.pos] == '0' or p.src[p.pos] == '1'))
+                        p.pos += 1;
+                    const n = std.fmt.parseInt(i64, p.src[start..p.pos], 0) catch
+                        return error.ZonParseError;
+                    return JsonValue{ .integer = n };
+                },
+                else => {},
+            }
+        }
+
+        while (p.pos < p.src.len and std.ascii.isDigit(p.src[p.pos])) p.pos += 1;
+
+        const is_float = p.pos < p.src.len and
+            (p.src[p.pos] == '.' or p.src[p.pos] == 'e' or p.src[p.pos] == 'E');
+        if (is_float) {
+            if (p.src[p.pos] == '.') {
+                p.pos += 1;
+                while (p.pos < p.src.len and std.ascii.isDigit(p.src[p.pos])) p.pos += 1;
+            }
+            if (p.pos < p.src.len and (p.src[p.pos] == 'e' or p.src[p.pos] == 'E')) {
+                p.pos += 1;
+                if (p.pos < p.src.len and (p.src[p.pos] == '+' or p.src[p.pos] == '-'))
+                    p.pos += 1;
+                while (p.pos < p.src.len and std.ascii.isDigit(p.src[p.pos])) p.pos += 1;
+            }
+            const f = std.fmt.parseFloat(f64, p.src[start..p.pos]) catch
+                return error.ZonParseError;
+            return JsonValue{ .float = f };
+        }
+        const n = std.fmt.parseInt(i64, p.src[start..p.pos], 10) catch
+            return error.ZonParseError;
+        return JsonValue{ .integer = n };
+    }
+};
+
+fn identChar(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '_';
+}
+
+fn wsChar(c: u8) bool {
+    return c == ' ' or c == '\t' or c == '\n' or c == '\r';
 }
 
 test {

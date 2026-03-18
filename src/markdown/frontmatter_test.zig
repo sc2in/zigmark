@@ -338,3 +338,193 @@ test "frontmatter: jsonFindByPath single key" {
     try tst.expect(found != null);
     try tst.expectEqualStrings("value", found.?.string);
 }
+
+// ── JSON frontmatter tests ───────────────────────────────────────────────────
+
+test "frontmatter: JSON basic parsing" {
+    const alloc = tst.allocator;
+    const source =
+        \\{"title": "Hello", "count": 5}
+    ;
+    var fm = try FrontMatter.init(alloc, source, .json);
+    defer fm.deinit();
+
+    const title = fm.get("title");
+    try tst.expect(title != null);
+    try tst.expectEqualStrings("Hello", title.?.string);
+
+    const count = fm.get("count");
+    try tst.expect(count != null);
+    try tst.expectEqual(@as(i64, 5), count.?.integer);
+}
+
+test "frontmatter: JSON nested object" {
+    const alloc = tst.allocator;
+    const source =
+        \\{"site": {"name": "My Site", "url": "https://example.com"}}
+    ;
+    var fm = try FrontMatter.init(alloc, source, .json);
+    defer fm.deinit();
+
+    const name = fm.get("site.name");
+    try tst.expect(name != null);
+    try tst.expectEqualStrings("My Site", name.?.string);
+}
+
+test "frontmatter: JSON arrays" {
+    const alloc = tst.allocator;
+    const source =
+        \\{"tags": ["zig", "wasm", "markdown"]}
+    ;
+    var fm = try FrontMatter.init(alloc, source, .json);
+    defer fm.deinit();
+
+    const tags = fm.get("tags");
+    try tst.expect(tags != null);
+    try tst.expect(tags.? == .array);
+    try tst.expectEqual(@as(usize, 3), tags.?.array.items.len);
+    try tst.expectEqualStrings("zig", tags.?.array.items[0].string);
+}
+
+test "frontmatter: JSON booleans and null" {
+    const alloc = tst.allocator;
+    const source =
+        \\{"draft": true, "published": false, "extra": null}
+    ;
+    var fm = try FrontMatter.init(alloc, source, .json);
+    defer fm.deinit();
+
+    try tst.expectEqualDeep(std.json.Value{ .bool = true }, fm.get("draft").?);
+    try tst.expectEqualDeep(std.json.Value{ .bool = false }, fm.get("published").?);
+    try tst.expectEqualDeep(std.json.Value{ .null = {} }, fm.get("extra").?);
+}
+
+test "frontmatter: initFromMarkdown JSON" {
+    const alloc = tst.allocator;
+    const input =
+        \\{"title": "Test", "weight": 10}
+        \\# Content
+    ;
+    var fm = try FrontMatter.initFromMarkdown(alloc, input);
+    defer fm.deinit();
+
+    try tst.expectEqualStrings("Test", fm.get("title").?.string);
+    try tst.expectEqual(@as(i64, 10), fm.get("weight").?.integer);
+}
+
+// ── ZON frontmatter tests ────────────────────────────────────────────────────
+
+test "frontmatter: ZON basic parsing" {
+    const alloc = tst.allocator;
+    const source =
+        \\.{
+        \\    .title = "Hello World",
+        \\    .count = 42,
+        \\}
+    ;
+    var fm = try FrontMatter.init(alloc, source, .zon);
+    defer fm.deinit();
+
+    const title = fm.get("title");
+    try tst.expect(title != null);
+    try tst.expectEqualStrings("Hello World", title.?.string);
+
+    const count = fm.get("count");
+    try tst.expect(count != null);
+    try tst.expectEqual(@as(i64, 42), count.?.integer);
+}
+
+test "frontmatter: ZON nested struct" {
+    const alloc = tst.allocator;
+    const source =
+        \\.{
+        \\    .site = .{
+        \\        .name = "My Site",
+        \\        .url = "https://example.com",
+        \\    },
+        \\}
+    ;
+    var fm = try FrontMatter.init(alloc, source, .zon);
+    defer fm.deinit();
+
+    const name = fm.get("site.name");
+    try tst.expect(name != null);
+    try tst.expectEqualStrings("My Site", name.?.string);
+}
+
+test "frontmatter: ZON array" {
+    const alloc = tst.allocator;
+    const source =
+        \\.{
+        \\    .tags = .{ "zig", "wasm", "markdown" },
+        \\}
+    ;
+    var fm = try FrontMatter.init(alloc, source, .zon);
+    defer fm.deinit();
+
+    const tags = fm.get("tags");
+    try tst.expect(tags != null);
+    try tst.expect(tags.? == .array);
+    try tst.expectEqual(@as(usize, 3), tags.?.array.items.len);
+    try tst.expectEqualStrings("zig", tags.?.array.items[0].string);
+}
+
+test "frontmatter: ZON booleans and null" {
+    const alloc = tst.allocator;
+    const source =
+        \\.{
+        \\    .draft = true,
+        \\    .published = false,
+        \\    .extra = null,
+        \\}
+    ;
+    var fm = try FrontMatter.init(alloc, source, .zon);
+    defer fm.deinit();
+
+    try tst.expectEqualDeep(std.json.Value{ .bool = true }, fm.get("draft").?);
+    try tst.expectEqualDeep(std.json.Value{ .bool = false }, fm.get("published").?);
+    try tst.expectEqualDeep(std.json.Value{ .null = {} }, fm.get("extra").?);
+}
+
+test "frontmatter: ZON numbers — int, negative, float" {
+    const alloc = tst.allocator;
+    const source =
+        \\.{
+        \\    .weight = 10,
+        \\    .offset = -3,
+        \\    .version = 1.5,
+        \\    .hex = 0xFF,
+        \\}
+    ;
+    var fm = try FrontMatter.init(alloc, source, .zon);
+    defer fm.deinit();
+
+    try tst.expectEqual(@as(i64, 10), fm.get("weight").?.integer);
+    try tst.expectEqual(@as(i64, -3), fm.get("offset").?.integer);
+    try tst.expectApproxEqAbs(@as(f64, 1.5), fm.get("version").?.float, 0.001);
+    try tst.expectEqual(@as(i64, 255), fm.get("hex").?.integer);
+}
+
+test "frontmatter: ZON enum literal becomes string" {
+    const alloc = tst.allocator;
+    const source =
+        \\.{ .status = .published }
+    ;
+    var fm = try FrontMatter.init(alloc, source, .zon);
+    defer fm.deinit();
+
+    try tst.expectEqualStrings("published", fm.get("status").?.string);
+}
+
+test "frontmatter: initFromMarkdown ZON" {
+    const alloc = tst.allocator;
+    const input =
+        \\.{ .title = "Test", .weight = 7 }
+        \\# Content
+    ;
+    var fm = try FrontMatter.initFromMarkdown(alloc, input);
+    defer fm.deinit();
+
+    try tst.expectEqualStrings("Test", fm.get("title").?.string);
+    try tst.expectEqual(@as(i64, 7), fm.get("weight").?.integer);
+}
