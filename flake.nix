@@ -143,7 +143,7 @@
         bench = let
           bench-app = pkgs.writeShellApplication {
             name = "zigmark-bench";
-            runtimeInputs = with pkgs; [hyperfine pandoc discount lowdown cmark cmark-gfm python3 zig];
+            runtimeInputs = with pkgs; [hyperfine pandoc discount lowdown cmark cmark-gfm time python3 zig];
             text = ''
               set -euo pipefail
               REPO="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -174,7 +174,9 @@
               CMARK_GFM_WRAP=$(mktemp /tmp/cmark-gfm-wrap-XXXXXX)
               printf '#!/bin/sh\nexec cmark-gfm "$@" > /dev/null\n' > "$CMARK_GFM_WRAP"
               chmod +x "$CMARK_GFM_WRAP"
-              trap 'rm -f "$RESULT_MD" "$PANDOC_MD" "$CMARK_WRAP" "$CMARK_GFM_WRAP" /tmp/zigmark-safe /tmp/zigmark-small /tmp/zigmark-fast' EXIT
+              MEM_MD=$(mktemp /tmp/bench-mem-XXXXXX.md)
+              TIME_TMP=$(mktemp /tmp/bench-time-XXXXXX)
+              trap 'rm -f "$RESULT_MD" "$PANDOC_MD" "$MEM_MD" "$TIME_TMP" "$CMARK_WRAP" "$CMARK_GFM_WRAP" /tmp/zigmark-safe /tmp/zigmark-small /tmp/zigmark-fast' EXIT
 
               echo "▸ Running hyperfine (fast tools — 500 runs)…"
               hyperfine \
@@ -198,15 +200,32 @@
                 --export-markdown "$PANDOC_MD" \
                 --command-name "pandoc" "pandoc -o /dev/null $BENCH_FILE"
 
+              echo "▸ Measuring peak RSS (one run each)…"
+              # GNU time -v reports "Maximum resident set size (kbytes)" on Linux.
+              # Shell builtin `time` can't be overridden by PATH; use the store path directly.
+              rss() { "${pkgs.time}/bin/time" -v "$@" >/dev/null 2>"$TIME_TMP" || true; grep "Maximum resident" "$TIME_TMP" | awk '{print $NF}'; }
+              {
+                printf "| Command | Peak RSS (KB) |\n|:---|---:|\n"
+                printf "| \`zigmark (ReleaseSafe)\` | %s |\n"  "$(rss /tmp/zigmark-safe  -o /dev/null "$BENCH_FILE")"
+                printf "| \`zigmark (ReleaseSmall)\` | %s |\n" "$(rss /tmp/zigmark-small -o /dev/null "$BENCH_FILE")"
+                printf "| \`zigmark (ReleaseFast)\` | %s |\n"  "$(rss /tmp/zigmark-fast  -o /dev/null "$BENCH_FILE")"
+                printf "| \`cmark\` | %s |\n"                  "$(rss "$CMARK_WRAP"      "$BENCH_FILE")"
+                printf "| \`cmark-gfm\` | %s |\n"              "$(rss "$CMARK_GFM_WRAP"  "$BENCH_FILE")"
+                printf "| \`discount\` | %s |\n"               "$(rss markdown -o /dev/null "$BENCH_FILE")"
+                printf "| \`lowdown\` | %s |\n"                "$(rss lowdown  -o /dev/null "$BENCH_FILE")"
+                printf "| \`pandoc\` | %s |\n"                 "$(rss pandoc   -o /dev/null "$BENCH_FILE")"
+              } > "$MEM_MD"
+
               echo ""
               echo "▸ Updating README.md…"
-              python3 - "$REPO/README.md" "$RESULT_MD" "$PANDOC_MD" "$BENCH_FILE" <<'PYEOF'
+              python3 - "$REPO/README.md" "$RESULT_MD" "$PANDOC_MD" "$BENCH_FILE" "$MEM_MD" <<'PYEOF'
               import re, sys, pathlib, datetime
 
               readme_path = pathlib.Path(sys.argv[1])
               fast_md     = pathlib.Path(sys.argv[2]).read_text()
               pandoc_md   = pathlib.Path(sys.argv[3]).read_text()
               bench_file  = sys.argv[4]
+              mem_md      = pathlib.Path(sys.argv[5]).read_text()
 
               def parse_mean_ms(row):
                   # row cells: | cmd | mean ± sd | min | max | rel |
@@ -239,6 +258,22 @@
               data_rows = [bold_if_zigmark(r) for r in data_rows]
               bench_md = "\n".join([header, sep] + data_rows) + "\n"
 
+              # Build sorted+bolded memory table.
+              def parse_rss(row):
+                  cells = [c.strip() for c in row.strip().strip("|").split("|")]
+                  try:
+                      return int(cells[1])
+                  except (IndexError, ValueError):
+                      return 10**9
+
+              mem_lines   = mem_md.rstrip().splitlines()
+              mem_header  = [l for l in mem_lines if l.startswith("| Command")][0]
+              mem_sep     = [l for l in mem_lines if l.startswith("|:")][0]
+              mem_rows    = [l for l in mem_lines if is_data_row(l)]
+              mem_rows.sort(key=parse_rss)
+              mem_rows    = [bold_if_zigmark(r) for r in mem_rows]
+              mem_table   = "\n".join([mem_header, mem_sep] + mem_rows) + "\n"
+
               bench_size = pathlib.Path(bench_file).stat().st_size
               readme = readme_path.read_text()
               today  = datetime.date.today().isoformat()
@@ -246,7 +281,8 @@
                   f"<!-- bench-start -->\n"
                   f"_Last updated: {today} · input: `{pathlib.Path(bench_file).name}`"
                   f" ({bench_size // 1024} KB) · run `nix run .#bench` to reproduce_\n\n"
-                  f"{bench_md}\n"
+                  f"### Speed\n\n{bench_md}\n"
+                  f"### Memory (peak RSS)\n\n{mem_table}\n"
                   f"<!-- bench-end -->"
               )
 
