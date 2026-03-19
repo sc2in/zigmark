@@ -27,6 +27,8 @@ pub const version = @import("config").version;
 /// Abstract syntax tree types for the parsed Markdown document.
 pub const AST = @import("markdown/ast.zig");
 pub const Frontmatter = @import("markdown/frontmatter.zig");
+/// A queryable collection of parsed Markdown documents with frontmatter.
+pub const Library = @import("markdown/library.zig").Library;
 /// Markdown parser that transforms raw text into an `AST.Document`.
 pub const Parser = @import("markdown/parser.zig");
 const ai = @import("markdown/renderers/ai.zig");

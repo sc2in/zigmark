@@ -242,6 +242,102 @@ var fm = try FrontMatter.init(allocator, source, .zon);
 defer fm.deinit();
 ```
 
+### Library
+
+A `Library` holds a collection of parsed Markdown documents with their frontmatter and lets you query across all of them using an extended dot-syntax.
+
+```zig
+const Library = zigmark.Library;
+
+var lib = Library.init(allocator);
+defer lib.deinit();
+
+// In-memory: path is an optional identifier
+try lib.add(source_a, "policies/access-control.md");
+try lib.add(source_b, null); // anonymous document
+
+// From disk: path is stored as the entry identifier
+try lib.addFromFile("policies/hr.md");
+
+// Recursively load all *.md files under a directory
+try lib.addFromDir("policies/");
+
+// Query returns ?[]Library.Result — null when nothing matches.
+// Caller frees the slice; entry/block pointers are valid while the Library lives.
+const results = try lib.query(allocator, "extra.owner=SC2 @heading") orelse return;
+defer allocator.free(results);
+
+for (results) |r| {
+    std.debug.print("path: {?s}  confidence: {d:.1}\n", .{ r.entry.path, r.confidence });
+    if (r.block) |b| {
+        std.debug.print("  heading level {d}\n", .{b.heading.level});
+    }
+}
+
+// Sort results in-place by a frontmatter field (ascending or descending)
+Library.sortBy(results, "title", true);
+```
+
+#### Query syntax
+
+Tokens are whitespace-separated and may appear in any order.
+
+| Token | Meaning |
+|---|---|
+| `path` | frontmatter field at `path` must exist |
+| `path=value` | frontmatter field at `path` must equal `value` |
+| `@block_type` | select blocks of this type from matching documents |
+
+Multiple `path` / `path=value` tokens are **AND-combined**: a document must satisfy every filter to appear in results.
+
+The dot-path syntax is identical to `Frontmatter` (`"title"`, `"extra.owner"`, `"taxonomies.SCF"`).  Block type names match the `AST.Block` union tags (`heading`, `paragraph`, `code_block`, `fenced_code_block`, `blockquote`, `list`, `table`, …).
+
+Without a `@block_type` token, one result per matching document is returned with `result.block == null`.
+
+#### Examples
+
+```zig
+// All documents that have a title field
+try lib.query(allocator, "title")
+
+// Documents owned by SC2
+try lib.query(allocator, "extra.owner=SC2")
+
+// Documents owned by SC2 in the security category (AND filter)
+try lib.query(allocator, "extra.owner=SC2 extra.category=security")
+
+// Every heading across every document in the library
+try lib.query(allocator, "@heading")
+
+// Headings only from SC2-owned documents
+try lib.query(allocator, "extra.owner=SC2 @heading")
+
+// Fenced code blocks from documents tagged with a specific taxonomy entry
+try lib.query(allocator, "taxonomies.SCF @fenced_code_block")
+```
+
+#### Result fields
+
+| Field | Type | Description |
+|---|---|---|
+| `entry` | `*const Library.Entry` | The matching document (`.document`, `.frontmatter`, `.path`) |
+| `block` | `?*const AST.Block` | The specific block that matched, or `null` for doc-level results |
+| `confidence` | `f32` | Match confidence in `[0.0, 1.0]`; results sorted descending |
+
+Documents without frontmatter are supported — they simply never match frontmatter filters.
+
+#### Sorting
+
+`Library.sortBy` sorts a result slice in-place by a frontmatter field value.  String fields are compared lexicographically; integer and float fields are compared numerically.  Results missing the field sort last.
+
+```zig
+// Sort by title A→Z
+Library.sortBy(results, "title", true);
+
+// Sort by date newest-first
+Library.sortBy(results, "date", false);
+```
+
 ### Custom Renderers
 
 The renderer interface is pluggable — implement a `render(Allocator, AST.Document) ![]u8` function:
@@ -491,6 +587,7 @@ Requires **Zig 0.15.2** or later.
 - **`MarkdownRenderer`** — AST→Markdown normaliser; converts headings to ATX, links to inline, code blocks to fenced
 - **`Renderer`** — Type-erased vtable interface for pluggable output backends
 - **`Frontmatter`** — YAML/TOML/JSON/ZON metadata extraction, mutation (`set`, `delete`, `merge`), and re-serialisation; YAML via [zig-yaml](https://github.com/kubkon/zig-yaml), TOML via [tomlz](https://github.com/tsunaminoai/tomlz), JSON via `std.json`, ZON via a built-in recursive-descent parser
+- **`Library`** — Queryable collection of documents; AND-combined frontmatter filters, block-type selectors (`@heading`, `@code_block`, …), confidence-ranked results, `addFromFile`/`addFromDir` bulk loading, and `sortBy` for in-place result ordering
 - **C ABI** — Opaque-pointer API in `root.zig` exported as `libzigmark.so`
 
 ## Performance
