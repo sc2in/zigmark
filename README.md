@@ -1,6 +1,8 @@
 # zigmark
 
-A CommonMark-compliant Markdown parser and HTML renderer for Zig. Passes **all 652 CommonMark spec tests** and **all 24 GFM extension tests** (100%).
+A CommonMark-compliant Markdown parser and renderer for Zig. Passes **all 652 CommonMark spec tests** and **all 24 GFM extension tests** (100%).
+
+Renders to **HTML**, **Typst** (PDF-ready), **AST**, and more.
 
 Builds as both a **CLI tool** and a **C-callable shared library** (`libzigmark.so`).
 
@@ -60,6 +62,64 @@ Document
         └── Text "italic"
 ```
 
+### Convert Markdown to Typst (PDF)
+
+```bash
+# Body-only Typst markup (embed in your own document)
+echo '# Hello' | zigmark -f typst
+
+# Full document with eisvogel-inspired preamble — pipe straight to typst
+zigmark -f typst report.md | typst compile - report.pdf
+```
+
+YAML frontmatter fields are automatically mapped to document options:
+
+```markdown
+---
+title: "My Report"
+author: Alice
+date: 2026-03-19
+titlepage: true
+toc: true
+numbersections: true
+colorlinks: true
+header-right: "Confidential"
+footer-left: "Alice"
+---
+
+# Introduction
+
+Hello **world**.
+```
+
+Supported frontmatter fields:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `title` | string | — | Document title |
+| `subtitle` | string | — | Subtitle shown on title page |
+| `author` | string or list | — | Author name(s); list uses the first entry |
+| `date` | string | — | Date shown on title page |
+| `lang` | string | `en` | Document language |
+| `paper` | string | `a4` | Paper size (e.g. `a4`, `us-letter`) |
+| `fontsize` | string | `11pt` | Base font size |
+| `titlepage` | bool | `false` | Generate a full-bleed title page |
+| `titlepage-color` | string | `1E3A5F` | Title page background (hex, no `#`) |
+| `titlepage-text-color` | string | `FFFFFF` | Title page text colour |
+| `titlepage-rule-color` | string | `AAAAAA` | Title page rule colour |
+| `titlepage-rule-height` | number | `4` | Title page rule thickness (pt) |
+| `toc` | bool | `false` | Insert a table of contents |
+| `toc-title` | string | `Contents` | TOC heading |
+| `toc-own-page` | bool | `false` | *(reserved, not yet implemented)* |
+| `toc-depth` | number | `3` | TOC depth |
+| `numbersections` | bool | `false` | Number headings |
+| `disable-header-and-footer` | bool | `false` | Suppress page header and footer |
+| `header-left` / `header-center` / `header-right` | string | title / — / date | Header slots |
+| `footer-left` / `footer-center` / `footer-right` | string | author / — / page# | Footer slots |
+| `colorlinks` | bool | `true` | Colour hyperlinks |
+| `linkcolor` | string | `A50000` | Internal link colour (hex) |
+| `urlcolor` | string | `4077C0` | URL link colour (hex) |
+
 ### AI-Friendly Output
 
 ```bash
@@ -118,7 +178,7 @@ Usage: zigmark [OPTIONS] [FILE]
 
   -h, --help            Display this help and exit.
   -v, --version         Print version and exit.
-  -f, --format <str>    Output format: "html" (default), "ast", "ai",
+  -f, --format <str>    Output format: "html" (default), "typst", "ast", "ai",
                         "terminal", "frontmatter", "markdown", or "normalize".
   -o, --output <str>    Write output to FILE instead of stdout.
   -s, --set <str>...    Set a frontmatter field (KEY=VALUE). Repeatable.
@@ -158,6 +218,31 @@ pub fn main() !void {
 
     std.debug.print("{s}\n", .{html});
 }
+```
+
+### Typst Rendering
+
+Generate Typst markup from a parsed document:
+
+```zig
+const zigmark = @import("zigmark");
+
+// Body-only (embed in your own Typst document)
+const markup = try zigmark.TypstRenderer.render(allocator, doc);
+defer allocator.free(markup);
+
+// Full document with eisvogel-inspired preamble
+const opts = zigmark.typst.DocumentOptions{
+    .title          = "My Report",
+    .author         = "Alice",
+    .date           = "2026-03-19",
+    .titlepage      = true,
+    .toc            = true,
+    .numbersections = true,
+    .colorlinks     = true,
+};
+const full = try zigmark.typst.renderDocument(allocator, doc, opts);
+defer allocator.free(full);
 ```
 
 ### AST Query System
@@ -486,6 +571,7 @@ Requires **Zig 0.15.2** or later.
 - **`Parser`** — Block-level + inline two-pass parser built on the [mecha](https://github.com/Hejsil/mecha) parser combinator library
 - **`AST`** — Typed union-based Abstract Syntax Tree (`Document` → `Block` → `Inline`)
 - **`HTMLRenderer`** — CommonMark-compliant HTML serialiser
+- **`TypstRenderer`** — Typst markup renderer; `typst.renderDocument` adds an eisvogel-inspired preamble (title page, TOC, headers/footers, styled code blocks and blockquotes) driven by `DocumentOptions`
 - **`ASTRenderer`** — Human-readable tree diagram with box-drawing characters
 - **`AIRenderer`** — Token-efficient AST representation for LLM consumption
 - **`MarkdownRenderer`** — AST→Markdown normaliser; converts headings to ATX, links to inline, code blocks to fenced
@@ -529,7 +615,7 @@ _Last updated: 2026-03-18 · input: `README.md` (15 KB) · run `nix run .#bench`
 
 ## Future Plans
 
-- Additional renderers (LaTeX, plain text)
+- Additional renderers (plain text)
 - Streaming parser for large documents
 - AST modification API
 
