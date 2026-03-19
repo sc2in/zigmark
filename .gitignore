@@ -5,3 +5,5 @@ result/
 result
 .direnv/
 .claude/
+*.pdf
+*.typ
