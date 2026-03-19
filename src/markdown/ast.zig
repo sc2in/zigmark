@@ -850,4 +850,5 @@ pub const Table = struct {
 
 test {
     _ = @import("query_test.zig");
+    _ = @import("library_test.zig");
 }
