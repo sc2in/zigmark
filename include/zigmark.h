@@ -2,7 +2,7 @@
  * zigmark — C API for the Zig Markdown parser & renderers.
  *
  * Copyright © 2025 Star City Security Consulting, LLC (SC2)
- * SPDX-License-Identifier: AGPL-3.0-or-later
+ * SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
  */
 
 #ifndef ZIGMARK_H

@@ -1,5 +1,5 @@
 //! Copyright © 2025 [Star City Security Consulting, LLC (SC2)](https://sc2.in)
-//! SPDX-License-Identifier: AGPL-3.0-or-later
+//! SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 const std = @import("std");
 
 // Suppress zig-yaml's verbose tokenizer/parser debug tracing so that
