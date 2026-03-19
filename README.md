@@ -1,5 +1,7 @@
 # zigmark
 
+[![CI](https://github.com/sc2in/zigmark/actions/workflows/ci.yml/badge.svg)](https://github.com/sc2in/zigmark/actions/workflows/ci.yml)
+
 A CommonMark-compliant Markdown parser and renderer for Zig. Passes **all 652 CommonMark spec tests** and **all 24 GFM extension tests** (100%).
 
 Renders to **HTML**, **Typst** (PDF-ready), **AST**, and more.
@@ -719,6 +721,12 @@ _Last updated: 2026-03-18 · input: `README.md` (15 KB) · run `nix run .#bench`
 ## License
 
 AGPL-3.0-or-later © 2025 Star City Security Consulting, LLC (SC2)
+
+**AGPL notice for library users:** If you incorporate zigmark into a networked
+service (e.g. a web application that parses or renders Markdown on the server),
+the AGPL requires you to make your application's source code available to users
+of that service.  If that constraint doesn't work for your use case, contact
+**licensing@sc2.in** to discuss a commercial licence.
 
 ## Contributing
 

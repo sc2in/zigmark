@@ -1,43 +1,15 @@
 {
-  "javascript.validate.enable": false,
-  "eslint.nodePath": ".yarn/sdks",
-  "stylelint.stylelintPath": ".yarn/sdks/stylelint/lib/index.js",
-  "search.exclude": {
-    "**/.yarn": true,
-    "**/.pnp.*": true
-  },
-  "prettier.prettierPath": ".yarn/sdks/prettier/index.js",
   "zig.zls.enabled": "on",
-  "zig.zls.additionalOptions": {
-    // UNKNOWN CONFIG OPTIONS WILL BE SILENTLY IGNORED
-    // Here are some examples of config options that have been REMOVED:
-    "zig.zls.enableAutofix": true, // Will set the "enable_autofix" config option
-    "zig.zls.buildOnSaveStep": "foo", // Will set the "build_on_save_step" config option
-  },
-  // You can add more Zig and ZLS options here
-  // Whether to enable build-on-save diagnostics
-  //
-  // Further information about build-on save:
-  // https://zigtools.org/zls/guides/build-on-save/
-  // "zig.buildOnSaveProvider": "zls",
-  // All nested settings will only affect Zig files.
   "[zig]": {
-    // Formatting with ZLS matches `zig fmt`.
-    // "editor.formatOnSave": false,
-    // "editor.inlayHints.enabled": "off",
-    // overwrite words when accepting completions
     "editor.suggest.insertMode": "replace",
     "editor.codeActionsOnSave": {
-      // Run code actions that currently supports adding and removing discards.
       "source.fixAll": "explicit",
-      // Run code actions that sorts @import declarations.
-      "source.organizeImports": "explicit",
+      "source.organizeImports": "explicit"
     }
   },
   "editor.semanticTokenColorCustomizations": {
     "rules": {
       "*.deprecated": {
-        // highlight semantic tokens that are marked as "deprecated"
         "strikethrough": true
       }
     }

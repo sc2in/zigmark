@@ -1,8 +1,5 @@
 {
   "recommendations": [
-    "dbaeumer.vscode-eslint",
-    "stylelint.vscode-stylelint",
-    "arcanis.vscode-zipfs",
-    "esbenp.prettier-vscode"
+    "ziglang.vscode-zig"
   ]
 }
