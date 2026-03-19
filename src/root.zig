@@ -35,6 +35,7 @@ const ast_mod = @import("markdown/renderers/ast_renderer.zig");
 const html = @import("markdown/renderers/html.zig");
 const markdown_mod = @import("markdown/renderers/markdown.zig");
 const terminal = @import("markdown/renderers/terminal.zig");
+const typst_mod = @import("markdown/renderers/typst.zig");
 
 /// Pre-built renderer that serialises an `AST.Document` to CommonMark-compliant HTML.
 pub const HTMLRenderer = Renderer.create(html);
@@ -52,6 +53,17 @@ pub const TerminalRenderer = Renderer.create(terminal);
 /// Pre-built renderer that serialises an `AST.Document` back to normalised
 /// CommonMark+GFM Markdown.  Useful for round-trip normalization passes.
 pub const MarkdownRenderer = Renderer.create(markdown_mod);
+
+/// Pre-built renderer that serialises an `AST.Document` to Typst markup for
+/// PDF generation.  The output is valid as a standalone Typst source file.
+/// For the full Eisvogel-inspired document layout (title page, header/footer,
+/// custom fonts) use `TypstRenderer.renderDocument` directly.
+pub const TypstRenderer = Renderer.create(typst_mod);
+
+/// Options struct and full-document renderer for Typst output.
+/// Use `typst.DocumentOptions` and `typst.renderDocument` when you want
+/// the Eisvogel-inspired preamble with title page, header/footer, etc.
+pub const typst = typst_mod;
 
 /// A type-erased rendering back-end.
 ///

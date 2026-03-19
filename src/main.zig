@@ -23,7 +23,7 @@ pub fn main() !void {
         \\-h, --help               Display this help and exit.
         \\-v, --version            Print version and exit.
         \\-f, --format <str>       Output format: "html" (default), "ast", "ai", "terminal",
-        \\                         "frontmatter", "markdown", or "normalize".
+        \\                         "frontmatter", "markdown", "normalize", or "typst".
         \\-o, --output <str>       Write output to FILE instead of stdout.
         \\-s, --set <str>...       Set a frontmatter field (KEY=VALUE). Repeatable.
         \\                         Applies to: markdown, normalize, frontmatter formats.
@@ -73,6 +73,9 @@ pub fn main() !void {
             \\               frontmatter editing without touching the body.
             \\  normalize    Reconstruct normalized Markdown from the AST. Converts
             \\               headings to ATX, links to inline, code blocks to fenced.
+            \\  typst        Typst markup for PDF generation. Reads YAML frontmatter
+            \\               fields (title, author, date, titlepage, toc, …) to produce
+            \\               a full Eisvogel-inspired document layout.
             \\
             \\{s}
         , .{ version, help_writer.buffered() });
@@ -240,13 +243,101 @@ pub fn main() !void {
         defer alloc.free(term);
         writer.interface.writeAll(term) catch {};
         writer.interface.flush() catch {};
+    } else if (std.mem.eql(u8, format, "typst")) {
+        // Build DocumentOptions from frontmatter (if present), then render.
+        // `fm` must outlive `opts` since DocumentOptions borrows string slices.
+        var fm_opt: ?zigmark.Frontmatter = if (body_start > 0)
+            zigmark.Frontmatter.initFromMarkdown(alloc, input) catch null
+        else
+            null;
+        defer if (fm_opt) |*f| f.deinit();
+        const opts: zigmark.typst.DocumentOptions = if (fm_opt) |*f|
+            frontmatterToTypstOpts(f)
+        else
+            .{};
+        const typ = zigmark.typst.renderDocument(alloc, doc, opts) catch |err| {
+            std.debug.print("error: failed to render Typst: {}\n", .{err});
+            return err;
+        };
+        defer alloc.free(typ);
+        writer.interface.writeAll(typ) catch {};
+        writer.interface.flush() catch {};
     } else {
         std.debug.print(
-            "error: unknown format '{s}'. Use 'html', 'ast', 'ai', 'terminal', 'frontmatter', 'markdown', or 'normalize'.\n",
+            "error: unknown format '{s}'. Use 'html', 'ast', 'ai', 'terminal', 'frontmatter', 'markdown', 'normalize', or 'typst'.\n",
             .{format},
         );
         return error.InvalidArgument;
     }
+}
+
+// ── Typst frontmatter helper ──────────────────────────────────────────────────
+
+/// Coerce a `std.json.Value` to `bool`, handling both native `.bool` values
+/// and string scalars (`"true"` / `"false"`) as produced by the YAML parser.
+fn jsonAsBool(v: std.json.Value) ?bool {
+    return switch (v) {
+        .bool   => |b| b,
+        .string => |s| if (std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "yes"))
+            true
+        else if (std.mem.eql(u8, s, "false") or std.mem.eql(u8, s, "no"))
+            false
+        else
+            null,
+        else => null,
+    };
+}
+
+/// Map YAML/TOML/JSON frontmatter fields to `DocumentOptions`.
+/// String slices borrow from the frontmatter's arena; the caller must ensure
+/// `fm` outlives the returned `DocumentOptions`.
+fn frontmatterToTypstOpts(fm: *const zigmark.Frontmatter) zigmark.typst.DocumentOptions {
+    var opts: zigmark.typst.DocumentOptions = .{};
+
+    if (fm.get("title"))    |v| if (v == .string) { opts.title    = v.string; };
+    if (fm.get("subtitle")) |v| if (v == .string) { opts.subtitle = v.string; };
+    if (fm.get("date"))     |v| if (v == .string) { opts.date     = v.string; };
+    if (fm.get("lang"))     |v| if (v == .string) { opts.lang     = v.string; };
+    if (fm.get("papersize"))|v| if (v == .string) { opts.paper    = v.string; };
+    if (fm.get("fontsize")) |v| if (v == .string) { opts.fontsize = v.string; };
+
+    // `author` may be a plain string or an array — use the first element.
+    if (fm.get("author")) |v| switch (v) {
+        .string => opts.author = v.string,
+        .array  => if (v.array.items.len > 0 and v.array.items[0] == .string) {
+            opts.author = v.array.items[0].string;
+        },
+        else => {},
+    };
+
+    // ── Title page ────────────────────────────────────────────────────────────
+    if (fm.get("titlepage"))            |v| { if (jsonAsBool(v)) |b| opts.titlepage            = b; }
+    if (fm.get("titlepage-color"))      |v| if (v == .string) { opts.titlepage_color      = v.string; };
+    if (fm.get("titlepage-text-color")) |v| if (v == .string) { opts.titlepage_text_color = v.string; };
+    if (fm.get("titlepage-rule-color")) |v| if (v == .string) { opts.titlepage_rule_color = v.string; };
+    if (fm.get("titlepage-rule-height"))|v| if (v == .integer) { opts.titlepage_rule_height = @intCast(v.integer); };
+
+    // ── TOC ───────────────────────────────────────────────────────────────────
+    if (fm.get("toc"))       |v| { if (jsonAsBool(v)) |b| opts.toc       = b; }
+    if (fm.get("toc-title")) |v| if (v == .string)  { opts.toc_title = v.string; };
+    if (fm.get("toc-depth")) |v| if (v == .integer) { opts.toc_depth = @intCast(v.integer); };
+
+    // ── Sections / links ──────────────────────────────────────────────────────
+    if (fm.get("numbersections")) |v| { if (jsonAsBool(v)) |b| opts.numbersections = b; }
+    if (fm.get("colorlinks"))     |v| { if (jsonAsBool(v)) |b| opts.colorlinks     = b; }
+    if (fm.get("linkcolor"))      |v| if (v == .string) { opts.linkcolor = v.string; };
+    if (fm.get("urlcolor"))       |v| if (v == .string) { opts.urlcolor  = v.string; };
+
+    // ── Header / footer ───────────────────────────────────────────────────────
+    if (fm.get("disable-header-and-footer")) |v| { if (jsonAsBool(v)) |b| opts.disable_header_and_footer = b; }
+    if (fm.get("header-left"))   |v| if (v == .string) { opts.header_left   = v.string; };
+    if (fm.get("header-center")) |v| if (v == .string) { opts.header_center = v.string; };
+    if (fm.get("header-right"))  |v| if (v == .string) { opts.header_right  = v.string; };
+    if (fm.get("footer-left"))   |v| if (v == .string) { opts.footer_left   = v.string; };
+    if (fm.get("footer-center")) |v| if (v == .string) { opts.footer_center = v.string; };
+    if (fm.get("footer-right"))  |v| if (v == .string) { opts.footer_right  = v.string; };
+
+    return opts;
 }
 
 // ── Frontmatter modification helper ──────────────────────────────────────────
