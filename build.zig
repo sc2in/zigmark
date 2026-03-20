@@ -144,7 +144,7 @@ pub fn build(b: *std.Build) void {
 
     // ── Fuzz tests ────────────────────────────────────────────────────────────
     // Run once (smoke test):          zig build fuzz
-    // Coverage-guided fuzzing:        zig build fuzz -- --fuzz
+    // Coverage-guided fuzzing:        zig build fuzz --fuzz
     const fuzz_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/fuzz.zig"),
@@ -154,6 +154,10 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "zigmark", .module = zigmark },
             },
         }),
+        // The self-hosted backend omits sanitizer-coverage sections, leaving
+        // the pcs array empty and causing a panic in Build/Fuzz.zig:429.
+        // LLVM emits the required __sancov_pcs1/__sancov_cntrs sections.
+        .use_llvm = true,
     });
     const run_fuzz = b.addRunArtifact(fuzz_tests);
     const fuzz_step = b.step("fuzz", "Run fuzz tests (append --fuzz to activate coverage-guided fuzzing)");
