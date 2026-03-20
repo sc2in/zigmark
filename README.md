@@ -425,13 +425,45 @@ Library.sortBy(results, "title", true);
 Library.sortBy(results, "date", false);
 ```
 
-### Custom Renderers
+### Streaming / Large Documents
 
-The renderer interface is pluggable — implement a `render(Allocator, AST.Document) ![]u8` function:
+For large documents, avoid building a full output string with `renderToWriter`, which writes directly to any `*std.Io.Writer`:
 
 ```zig
+var out_buf: [8192]u8 = undefined;
+var writer = file.writer(&out_buf);
+
+// Render directly to a file — no intermediate allocation
+try zigmark.HTMLRenderer.renderToWriter(allocator, &writer.interface, doc);
+try writer.interface.flush();
+```
+
+All six built-in renderers (`HTMLRenderer`, `ASTRenderer`, `AIRenderer`, `TerminalRenderer`, `MarkdownRenderer`, `TypstRenderer`) expose `renderToWriter`.  The Typst full-document variant is `zigmark.typst.renderDocumentToWriter`.
+
+To parse from a stream (file, stdin, pipe, socket) without a `readToEndAlloc` call:
+
+```zig
+var read_buf: [4096]u8 = undefined;
+var reader = file.reader(&read_buf);
+
+var parser = zigmark.Parser.init();
+var doc = try parser.parseFromReader(allocator, &reader.interface);
+defer doc.deinit(allocator);
+```
+
+The returned `AST.Document` is fully self-contained — no external buffer needs to outlive it.
+
+### Custom Renderers
+
+Implement both `render` and `renderToWriter` to satisfy the `Renderer` interface:
+
+```zig
+pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 { ... }
+pub fn renderToWriter(allocator: Allocator, writer: *std.Io.Writer, doc: AST.Document) !void { ... }
+
 const MyRenderer = zigmark.Renderer.create(my_backend);
 const output = try MyRenderer.render(allocator, doc);
+try MyRenderer.renderToWriter(allocator, &writer.interface, doc);
 ```
 
 ## C Shared Library
@@ -666,14 +698,14 @@ Requires **Zig 0.15.2** or later.
 
 ## Architecture
 
-- **`Parser`** — Block-level + inline two-pass parser built on the [mecha](https://github.com/Hejsil/mecha) parser combinator library
+- **`Parser`** — Block-level + inline two-pass parser built on the [mecha](https://github.com/Hejsil/mecha) parser combinator library; accepts a `[]const u8` via `parseMarkdown` or any `*std.Io.Reader` via `parseFromReader`
 - **`AST`** — Typed union-based Abstract Syntax Tree (`Document` → `Block` → `Inline`)
 - **`HTMLRenderer`** — CommonMark-compliant HTML serialiser
 - **`TypstRenderer`** — Typst markup renderer; `typst.renderDocument` adds an eisvogel-inspired preamble (title page, TOC, headers/footers, styled code blocks and blockquotes) driven by `DocumentOptions`
 - **`ASTRenderer`** — Human-readable tree diagram with box-drawing characters
 - **`AIRenderer`** — Token-efficient AST representation for LLM consumption
 - **`MarkdownRenderer`** — AST→Markdown normaliser; converts headings to ATX, links to inline, code blocks to fenced
-- **`Renderer`** — Type-erased vtable interface for pluggable output backends
+- **`Renderer`** — Type-erased vtable interface for pluggable output backends; exposes both `render → []u8` and `renderToWriter → void` paths
 - **`Frontmatter`** — YAML/TOML/JSON/ZON metadata extraction, mutation (`set`, `delete`, `merge`), and re-serialisation; YAML via [zig-yaml](https://github.com/kubkon/zig-yaml), TOML via [tomlz](https://github.com/tsunaminoai/tomlz), JSON via `std.json`, ZON via a built-in recursive-descent parser
 - **`Library`** — Queryable collection of documents; AND-combined frontmatter filters, block-type selectors (`@heading`, `@code_block`, …), confidence-ranked results, `addFromFile`/`addFromDir` bulk loading, and `sortBy` for in-place result ordering
 - **C ABI** — Opaque-pointer API in `root.zig` exported as `libzigmark.so`
@@ -681,33 +713,33 @@ Requires **Zig 0.15.2** or later.
 ## Performance
 
 <!-- bench-start -->
-_Last updated: 2026-03-18 · input: `README.md` (15 KB) · run `nix run .#bench` to reproduce_
+_Last updated: 2026-03-20 · input: `README.md` (23 KB) · run `nix run .#bench` to reproduce_
 
 ### Speed
 
 | Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
 |:---|---:|---:|---:|---:|
-| `discount` | 1.9 ± 0.7 | 1.2 | 9.9 | 1.00 |
-| `lowdown` | 1.9 ± 1.0 | 1.0 | 7.9 | 1.00 ± 0.64 |
-| **`zigmark (ReleaseFast)`** | 2.6 ± 1.3 | 1.5 | 11.3 | 1.36 ± 0.84 |
-| **`zigmark (ReleaseSafe)`** | 2.7 ± 1.3 | 1.6 | 11.1 | 1.41 ± 0.85 |
-| **`zigmark (ReleaseSmall)`** | 2.7 ± 0.9 | 1.6 | 8.2 | 1.41 ± 0.72 |
-| `cmark` | 5.5 ± 1.5 | 3.3 | 14.3 | 2.85 ± 1.34 |
-| `cmark-gfm` | 5.6 ± 1.8 | 3.6 | 29.6 | 2.91 ± 1.44 |
-| `pandoc` | 137.1 ± 10.3 | 120.2 | 160.8 | 1.00 |
+| `lowdown` | 2.2 ± 1.3 | 1.2 | 15.5 | 1.00 |
+| `discount` | 2.4 ± 1.3 | 1.4 | 17.0 | 1.08 ± 0.86 |
+| **`zigmark (ReleaseSafe)`** | 2.5 ± 0.7 | 1.8 | 8.5 | 1.14 ± 0.74 |
+| **`zigmark (ReleaseFast)`** | 2.5 ± 0.8 | 1.7 | 10.6 | 1.11 ± 0.74 |
+| **`zigmark (ReleaseSmall)`** | 3.2 ± 1.5 | 2.0 | 15.4 | 1.45 ± 1.09 |
+| `cmark-gfm` | 4.9 ± 1.7 | 3.0 | 18.1 | 2.23 ± 1.51 |
+| `cmark` | 5.2 ± 1.6 | 3.0 | 15.5 | 2.34 ± 1.54 |
+| `pandoc` | 154.2 ± 15.5 | 131.0 | 200.7 | 1.00 |
 
 ### Memory (peak RSS)
 
 | Command | Peak RSS (KB) |
 |:---|---:|
-| **`zigmark (ReleaseSmall)`** | 1168 |
-| **`zigmark (ReleaseFast)`** | 1516 |
-| **`zigmark (ReleaseSafe)`** | 1576 |
-| `discount` | 1968 |
-| `lowdown` | 2880 |
-| `cmark` | 4200 |
-| `cmark-gfm` | 4224 |
-| `pandoc` | 124504 |
+| **`zigmark (ReleaseSmall)`** | 1436 |
+| **`zigmark (ReleaseSafe)`** | 1852 |
+| **`zigmark (ReleaseFast)`** | 1872 |
+| `discount` | 2040 |
+| `lowdown` | 3164 |
+| `cmark-gfm` | 4168 |
+| `cmark` | 4220 |
+| `pandoc` | 127148 |
 
 <!-- bench-end -->
 
@@ -715,7 +747,6 @@ _Last updated: 2026-03-18 · input: `README.md` (15 KB) · run `nix run .#bench`
 ## Future Plans
 
 - Additional renderers (plain text)
-- Streaming parser for large documents
 - AST modification API
 
 ## License

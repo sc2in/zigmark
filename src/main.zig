@@ -200,48 +200,38 @@ pub fn main() !void {
                 }
             }
         }
-        const md = zigmark.MarkdownRenderer.render(alloc, doc) catch |err| {
+        zigmark.MarkdownRenderer.renderToWriter(alloc, &writer.interface, doc) catch |err| {
             std.debug.print("error: failed to render normalized markdown: {}\n", .{err});
             return err;
         };
-        defer alloc.free(md);
-        writer.interface.writeAll(md) catch {};
         writer.interface.flush() catch {};
         return;
     }
 
     // ── HTML ─────────────────────────────────────────────────────────────────
     if (std.mem.eql(u8, format, "html")) {
-        const h = zigmark.HTMLRenderer.render(alloc, doc) catch |err| {
+        zigmark.HTMLRenderer.renderToWriter(alloc, &writer.interface, doc) catch |err| {
             std.debug.print("error: failed to render HTML: {}\n", .{err});
             return err;
         };
-        defer alloc.free(h);
-        writer.interface.writeAll(h) catch {};
         writer.interface.flush() catch {};
     } else if (std.mem.eql(u8, format, "ast")) {
-        const ast_output = zigmark.ASTRenderer.render(alloc, doc) catch |err| {
+        zigmark.ASTRenderer.renderToWriter(alloc, &writer.interface, doc) catch |err| {
             std.debug.print("error: failed to render AST: {}\n", .{err});
             return err;
         };
-        defer alloc.free(ast_output);
-        writer.interface.writeAll(ast_output) catch {};
         writer.interface.flush() catch {};
     } else if (std.mem.eql(u8, format, "ai")) {
-        const a = zigmark.AIRenderer.render(alloc, doc) catch |err| {
+        zigmark.AIRenderer.renderToWriter(alloc, &writer.interface, doc) catch |err| {
             std.debug.print("error: failed to render AI AST: {}\n", .{err});
             return err;
         };
-        defer alloc.free(a);
-        writer.interface.writeAll(a) catch {};
         writer.interface.flush() catch {};
     } else if (std.mem.eql(u8, format, "terminal")) {
-        const term = zigmark.TerminalRenderer.render(alloc, doc) catch |err| {
+        zigmark.TerminalRenderer.renderToWriter(alloc, &writer.interface, doc) catch |err| {
             std.debug.print("error: failed to render terminal output: {}\n", .{err});
             return err;
         };
-        defer alloc.free(term);
-        writer.interface.writeAll(term) catch {};
         writer.interface.flush() catch {};
     } else if (std.mem.eql(u8, format, "typst")) {
         // Build DocumentOptions from frontmatter (if present), then render.
@@ -255,12 +245,10 @@ pub fn main() !void {
             frontmatterToTypstOpts(f)
         else
             .{};
-        const typ = zigmark.typst.renderDocument(alloc, doc, opts) catch |err| {
+        zigmark.typst.renderDocumentToWriter(alloc, &writer.interface, doc, opts) catch |err| {
             std.debug.print("error: failed to render Typst: {}\n", .{err});
             return err;
         };
-        defer alloc.free(typ);
-        writer.interface.writeAll(typ) catch {};
         writer.interface.flush() catch {};
     } else {
         std.debug.print(

@@ -434,10 +434,15 @@ fn renderInline(w: anytype, inl: AST.Inline, depth: usize, allocator: Allocator)
 
 // ── Top-level render ─────────────────────────────────────────────────────────
 
+/// Render `doc` to a writer in token-efficient AI representation.
+pub fn renderToWriter(allocator: Allocator, writer: *std.Io.Writer, doc: AST.Document) !void {
+    for (doc.children.items) |block| try renderBlock(writer, block, 0, allocator);
+}
+
 pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-    for (doc.children.items) |block| try renderBlock(&aw.writer, block, 0, allocator);
+    try renderToWriter(allocator, &aw.writer, doc);
     return aw.toOwnedSlice();
 }
 

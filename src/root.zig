@@ -70,10 +70,12 @@ pub const typst = typst_mod;
 /// A type-erased rendering back-end.
 ///
 /// Create concrete instances with `Renderer.create`, passing any struct that
-/// exposes a `pub fn render(Allocator, AST.Document) ![]u8`.
+/// exposes `pub fn render(Allocator, AST.Document) ![]u8` and
+/// `pub fn renderToWriter(Allocator, *std.Io.Writer, AST.Document) !void`.
 pub const Renderer = struct {
     vtable: struct {
         render: *const fn (Allocator, AST.Document) anyerror![]u8,
+        render_to_writer: *const fn (Allocator, *std.Io.Writer, AST.Document) anyerror!void,
     },
 
     /// Build a `Renderer` vtable from a concrete back-end type `T`.
@@ -81,6 +83,7 @@ pub const Renderer = struct {
         return Renderer{
             .vtable = .{
                 .render = @field(T, "render"),
+                .render_to_writer = @field(T, "renderToWriter"),
             },
         };
     }
@@ -89,6 +92,12 @@ pub const Renderer = struct {
     /// The caller is responsible for freeing the returned slice.
     pub fn render(self: Renderer, alloc: Allocator, doc: AST.Document) ![]u8 {
         return try self.vtable.render(alloc, doc);
+    }
+
+    /// Render `doc` directly to `writer`, avoiding an intermediate allocation.
+    /// Ideal for large documents or when writing directly to a file or socket.
+    pub fn renderToWriter(self: Renderer, alloc: Allocator, writer: *std.Io.Writer, doc: AST.Document) !void {
+        return try self.vtable.render_to_writer(alloc, writer, doc);
     }
 };
 

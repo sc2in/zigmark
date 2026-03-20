@@ -440,6 +440,14 @@ fn renderBlock(alloc: Allocator, writer: anytype, block: AST.Block) !void {
 
 // ── Top-level render ──────────────────────────────────────────────────────────
 
+/// Render `doc` to a writer as normalised CommonMark + GFM Markdown.
+pub fn renderToWriter(allocator: Allocator, writer: *std.Io.Writer, doc: AST.Document) !void {
+    for (doc.children.items, 0..) |block, idx| {
+        if (idx > 0) try writer.writeByte('\n');
+        try renderBlock(allocator, writer, block);
+    }
+}
+
 /// Render `doc` to an allocator-owned Markdown byte slice.
 ///
 /// The output is normalised CommonMark + GFM Markdown: ATX headings, fenced
@@ -449,13 +457,7 @@ fn renderBlock(alloc: Allocator, writer: anytype, block: AST.Block) !void {
 pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-    const w = &aw.writer;
-
-    for (doc.children.items, 0..) |block, idx| {
-        if (idx > 0) try w.writeByte('\n');
-        try renderBlock(allocator, w, block);
-    }
-
+    try renderToWriter(allocator, &aw.writer, doc);
     return aw.toOwnedSlice();
 }
 

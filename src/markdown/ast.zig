@@ -368,6 +368,7 @@ pub const FencedCodeBlock = struct {
     }
     pub fn deinit(self: *FencedCodeBlock, allocator: Allocator) void {
         if (self.content.len > 0) allocator.free(self.content);
+        if (self.language) |lang| if (lang.len > 0) allocator.free(lang);
     }
 };
 
@@ -506,6 +507,7 @@ pub const FootnoteDefinition = struct {
             child.deinit(allocator);
         }
         self.children.deinit(allocator);
+        if (self.label.len > 0) allocator.free(self.label);
     }
 };
 

@@ -17,10 +17,11 @@
 //!   - Extended autolinks (bare `www.`, `http(s)://`, `ftp://`, email)
 //!   - Disallowed raw HTML (dangerous tags have `<` escaped to `&lt;`)
 //!
-//! The public entry point is `parseMarkdown`.  All slice references in
-//! the returned AST point into `input` or into owned buffers allocated
-//! with the supplied allocator.  Calling `doc.deinit(allocator)` frees
-//! every allocation the parser made.
+//! The public entry points are `parseMarkdown` (accepts a `[]const u8`)
+//! and `parseFromReader` (accepts any `*std.Io.Reader`).  All content
+//! in the returned AST is held in owned allocations; the input buffer
+//! does not need to outlive the document.  Calling `doc.deinit(allocator)`
+//! frees every allocation the parser made.
 //!
 //! Block-level recognition is driven by the combinators and convenience
 //! wrappers in the public `parsers` namespace.  Inline-level parsing uses
@@ -285,6 +286,21 @@ pub fn parseMarkdown(self: Self, allocator: Allocator, input: []const u8) !AST.D
     }
     try collectLinkRefDefs(allocator, input, &ref_map);
     return self.parseMarkdownWithRefs(allocator, input, &ref_map);
+}
+
+/// Parse Markdown from any reader.
+///
+/// Reads all remaining bytes from `reader` into a temporary buffer, parses
+/// them, then frees the buffer.  The returned `AST.Document` is fully
+/// self-contained — no external buffer needs to outlive it.  Accepts any
+/// source: files, stdin pipes, network sockets, in-memory slices, etc.
+///
+/// The caller must call `doc.deinit(allocator)` when done.
+pub fn parseFromReader(self: Self, allocator: Allocator, reader: *std.Io.Reader) !AST.Document {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
+    try reader.appendRemainingUnlimited(allocator, &buf);
+    return self.parseMarkdown(allocator, buf.items);
 }
 
 /// Split input into lines, normalising CRLF/CR to LF.
@@ -984,7 +1000,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
                 i += 1;
             }
             // Process info string: apply backslash escapes
-            const lang: ?[]const u8 = if (fence.info.len > 0) fence.info else null;
+            const lang: ?[]const u8 = if (fence.info.len > 0) try allocator.dupe(u8, fence.info) else null;
             try doc.children.append(allocator, .{ .fenced_code_block = AST.FencedCodeBlock.init(try buf.toOwnedSlice(allocator), lang, fence.char, fence.len) });
             continue;
         }
@@ -1106,7 +1122,8 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
 
         // Footnote definition
         if (parsers.tryFootnoteDef(allocator, t)) |fd| {
-            var fn_def = AST.FootnoteDefinition.init(allocator, fd.label);
+            const owned_label = try allocator.dupe(u8, fd.label);
+            var fn_def = AST.FootnoteDefinition.init(allocator, owned_label);
             var para = AST.Paragraph.init(allocator);
             const fn_pc = try allocator.dupe(u8, fd.content);
             para.inline_source = fn_pc;

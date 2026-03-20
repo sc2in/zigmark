@@ -696,21 +696,35 @@ fn collectFootnotes(doc: AST.Document, ctx: *Ctx) !void {
 /// `renderDocument`.
 ///
 /// The caller owns the returned memory and must free it when done.
-pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
+/// Render `doc` to a writer as Typst markup (body only, no preamble).
+pub fn renderToWriter(allocator: Allocator, writer: *std.Io.Writer, doc: AST.Document) !void {
     var ctx = Ctx.init(allocator);
     defer ctx.deinit();
     try collectFootnotes(doc, &ctx);
+    for (doc.children.items) |child| {
+        if (child == .footnote_definition) continue;
+        try renderBlock(writer, child, &ctx);
+    }
+}
 
+pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-
-    for (doc.children.items) |child| {
-        // Footnote definitions are expanded at the reference site.
-        if (child == .footnote_definition) continue;
-        try renderBlock(&aw.writer, child, &ctx);
-    }
-
+    try renderToWriter(allocator, &aw.writer, doc);
     return aw.toOwnedSlice();
+}
+
+/// Render `doc` to a writer as a complete Typst document with an
+/// Eisvogel-inspired preamble derived from `opts`.
+pub fn renderDocumentToWriter(allocator: Allocator, writer: *std.Io.Writer, doc: AST.Document, opts: DocumentOptions) !void {
+    var ctx = Ctx.init(allocator);
+    defer ctx.deinit();
+    try collectFootnotes(doc, &ctx);
+    try writePreamble(writer, opts);
+    for (doc.children.items) |child| {
+        if (child == .footnote_definition) continue;
+        try renderBlock(writer, child, &ctx);
+    }
 }
 
 /// Render `doc` as a complete Typst document with an Eisvogel-inspired
@@ -718,20 +732,9 @@ pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
 ///
 /// The caller owns the returned memory and must free it when done.
 pub fn renderDocument(allocator: Allocator, doc: AST.Document, opts: DocumentOptions) ![]u8 {
-    var ctx = Ctx.init(allocator);
-    defer ctx.deinit();
-    try collectFootnotes(doc, &ctx);
-
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-
-    try writePreamble(&aw.writer, opts);
-
-    for (doc.children.items) |child| {
-        if (child == .footnote_definition) continue;
-        try renderBlock(&aw.writer, child, &ctx);
-    }
-
+    try renderDocumentToWriter(allocator, &aw.writer, doc, opts);
     return aw.toOwnedSlice();
 }
 

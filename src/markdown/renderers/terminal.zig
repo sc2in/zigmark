@@ -734,20 +734,25 @@ fn renderInlinePlain(allocator: Allocator, items: []const AST.Inline) ![]const u
 
 // ── Top-level render ─────────────────────────────────────────────────────────
 
+/// Render `doc` to a writer with ANSI terminal styling.
+pub fn renderToWriter(allocator: Allocator, writer: *std.Io.Writer, doc: AST.Document) !void {
+    for (doc.children.items, 0..) |block, i| {
+        try renderBlock(writer, block, 0, 0, allocator);
+        // Add blank line between top-level blocks for readability
+        if (i + 1 < doc.children.items.len) {
+            // Don't double-space after thematic breaks
+            if (block != .thematic_break) try writer.writeByte('\n');
+        }
+    }
+}
+
 /// Render `doc` to an allocator-owned byte slice with ANSI terminal styling.
 ///
 /// The caller owns the returned memory and must free it when done.
 pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-    for (doc.children.items, 0..) |block, i| {
-        try renderBlock(&aw.writer, block, 0, 0, allocator);
-        // Add blank line between top-level blocks for readability
-        if (i + 1 < doc.children.items.len) {
-            // Don't double-space after thematic breaks
-            if (block != .thematic_break) try aw.writer.writeByte('\n');
-        }
-    }
+    try renderToWriter(allocator, &aw.writer, doc);
     return aw.toOwnedSlice();
 }
 
