@@ -38,22 +38,26 @@
             ./include
           ];
         };
+        # Helper: build zigmark at a given optimization level (null = default).
+        mkZigmark = optimize:
+          env.package {
+            pname = "zigmark";
+            inherit version;
+            src = buildSrc;
+            zigBuildFlags =
+              ["-Dversion=${version}"]
+              ++ lib.optional (optimize != null) "-Doptimize=${optimize}";
+            # If your project has zig dependencies listed in build.zig.zon,
+            # generate the lock file first:
+            # nix run github:Cloudef/zig2nix -- zon2lock build.zig.zon
+            # Then uncomment the line below:
+            zigBuildZonLock = ./build.zig.zon2json-lock;
+          };
       in rec {
-        default = env.package {
-          pname = "zigmark";
-          inherit version;
-          src = buildSrc;
-
-          zigBuildFlags = [
-            "-Dversion=${version}"
-          ];
-
-          # If your project has zig dependencies listed in build.zig.zon,
-          # generate the lock file first:
-          # nix run github:Cloudef/zig2nix -- zon2lock build.zig.zon
-          # Then uncomment the line below:
-          zigBuildZonLock = ./build.zig.zon2json-lock;
-        };
+        default       = mkZigmark null;
+        zigmark-safe  = mkZigmark "ReleaseSafe";
+        zigmark-small = mkZigmark "ReleaseSmall";
+        zigmark-fast  = mkZigmark "ReleaseFast";
       }
     );
 
@@ -137,17 +141,24 @@
 
         # CLI performance benchmark vs cmark:  nix run .#bench
         #
-        # Builds zigmark (ReleaseFast), then runs hyperfine comparing zigmark
-        # and cmark on the CommonMark spec file.  Results are written back into
-        # the README.md <!-- bench-start / bench-end --> section.
+        # Uses pre-built flake packages (zigmark-safe/small/fast) so no Zig
+        # compiler is needed at runtime.  Results are written back into the
+        # README.md <!-- bench-start / bench-end --> section via zigmark's own
+        # --section-start/--section-end AST mutation API.
         bench = let
           bench-app = pkgs.writeShellApplication {
             name = "zigmark-bench";
-            runtimeInputs = with pkgs; [hyperfine pandoc discount lowdown cmark cmark-gfm time python3 zig];
+            runtimeInputs = with pkgs; [hyperfine pandoc discount lowdown cmark cmark-gfm time python3];
             text = ''
               set -euo pipefail
               REPO="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
               cd "$REPO"
+
+              # Binaries baked in at build time from the flake's packages —
+              # no compiler required at benchmark runtime.
+              ZIGMARK_SAFE="${self.packages.${system}.zigmark-safe}/bin/zigmark"
+              ZIGMARK_SMALL="${self.packages.${system}.zigmark-small}/bin/zigmark"
+              ZIGMARK_FAST="${self.packages.${system}.zigmark-fast}/bin/zigmark"
 
               # Use the CommonMark spec as a large representative input.
               # Fall back to README.md if the dependency cache is unavailable.
@@ -160,11 +171,6 @@
               fi
               echo "  Benchmark file: $BENCH_FILE ($(wc -c < "$BENCH_FILE") bytes)"
 
-              echo "▸ Building zigmark (ReleaseSafe, ReleaseSmall, ReleaseFast)…"
-              zig build -Doptimize=ReleaseSafe  && cp zig-out/bin/zigmark /tmp/zigmark-safe
-              zig build -Doptimize=ReleaseSmall && cp zig-out/bin/zigmark /tmp/zigmark-small
-              zig build -Doptimize=ReleaseFast  && cp zig-out/bin/zigmark /tmp/zigmark-fast
-
               RESULT_MD=$(mktemp /tmp/bench-result-XXXXXX.md)
               PANDOC_MD=$(mktemp /tmp/bench-pandoc-XXXXXX.md)
               # cmark and cmark-gfm write to stdout; wrap them so -N (no-shell) mode can discard output.
@@ -176,7 +182,8 @@
               chmod +x "$CMARK_GFM_WRAP"
               MEM_MD=$(mktemp /tmp/bench-mem-XXXXXX.md)
               TIME_TMP=$(mktemp /tmp/bench-time-XXXXXX)
-              trap 'rm -f "$RESULT_MD" "$PANDOC_MD" "$MEM_MD" "$TIME_TMP" "$CMARK_WRAP" "$CMARK_GFM_WRAP" /tmp/zigmark-safe /tmp/zigmark-small /tmp/zigmark-fast' EXIT
+              NEW_SECTION_MD=$(mktemp /tmp/bench-new-section-XXXXXX.md)
+              trap 'rm -f "$RESULT_MD" "$PANDOC_MD" "$MEM_MD" "$TIME_TMP" "$NEW_SECTION_MD" "$CMARK_WRAP" "$CMARK_GFM_WRAP"' EXIT
 
               echo "▸ Running hyperfine (fast tools — 500 runs)…"
               hyperfine \
@@ -184,9 +191,9 @@
                 --warmup 50 \
                 --runs 500 \
                 --export-markdown "$RESULT_MD" \
-                --command-name "zigmark (ReleaseSafe)"  "/tmp/zigmark-safe  -o /dev/null $BENCH_FILE" \
-                --command-name "zigmark (ReleaseSmall)" "/tmp/zigmark-small -o /dev/null $BENCH_FILE" \
-                --command-name "zigmark (ReleaseFast)"  "/tmp/zigmark-fast  -o /dev/null $BENCH_FILE" \
+                --command-name "zigmark (ReleaseSafe)"  "$ZIGMARK_SAFE  -o /dev/null $BENCH_FILE" \
+                --command-name "zigmark (ReleaseSmall)" "$ZIGMARK_SMALL -o /dev/null $BENCH_FILE" \
+                --command-name "zigmark (ReleaseFast)"  "$ZIGMARK_FAST  -o /dev/null $BENCH_FILE" \
                 --command-name "cmark"                   "$CMARK_WRAP $BENCH_FILE" \
                 --command-name "cmark-gfm"              "$CMARK_GFM_WRAP $BENCH_FILE" \
                 --command-name "discount"               "markdown -o /dev/null $BENCH_FILE" \
@@ -206,9 +213,9 @@
               rss() { "${pkgs.time}/bin/time" -v "$@" >/dev/null 2>"$TIME_TMP" || true; grep "Maximum resident" "$TIME_TMP" | awk '{print $NF}'; }
               {
                 printf "| Command | Peak RSS (KB) |\n|:---|---:|\n"
-                printf "| \`zigmark (ReleaseSafe)\` | %s |\n"  "$(rss /tmp/zigmark-safe  -o /dev/null "$BENCH_FILE")"
-                printf "| \`zigmark (ReleaseSmall)\` | %s |\n" "$(rss /tmp/zigmark-small -o /dev/null "$BENCH_FILE")"
-                printf "| \`zigmark (ReleaseFast)\` | %s |\n"  "$(rss /tmp/zigmark-fast  -o /dev/null "$BENCH_FILE")"
+                printf "| \`zigmark (ReleaseSafe)\` | %s |\n"  "$(rss "$ZIGMARK_SAFE"  -o /dev/null "$BENCH_FILE")"
+                printf "| \`zigmark (ReleaseSmall)\` | %s |\n" "$(rss "$ZIGMARK_SMALL" -o /dev/null "$BENCH_FILE")"
+                printf "| \`zigmark (ReleaseFast)\` | %s |\n"  "$(rss "$ZIGMARK_FAST"  -o /dev/null "$BENCH_FILE")"
                 printf "| \`cmark\` | %s |\n"                  "$(rss "$CMARK_WRAP"      "$BENCH_FILE")"
                 printf "| \`cmark-gfm\` | %s |\n"              "$(rss "$CMARK_GFM_WRAP"  "$BENCH_FILE")"
                 printf "| \`discount\` | %s |\n"               "$(rss markdown -o /dev/null "$BENCH_FILE")"
@@ -217,15 +224,18 @@
               } > "$MEM_MD"
 
               echo ""
-              echo "▸ Updating README.md…"
-              python3 - "$REPO/README.md" "$RESULT_MD" "$PANDOC_MD" "$BENCH_FILE" "$MEM_MD" <<'PYEOF'
+              echo "▸ Preparing bench section content…"
+              # Python handles the data-processing only: sort rows, bold zigmark
+              # entries, and write the new section body to $NEW_SECTION_MD.
+              # README.md is updated below by zigmark via its AST mutation API.
+              python3 - "$RESULT_MD" "$PANDOC_MD" "$BENCH_FILE" "$MEM_MD" "$NEW_SECTION_MD" <<'PYEOF'
               import re, sys, pathlib, datetime
 
-              readme_path = pathlib.Path(sys.argv[1])
-              fast_md     = pathlib.Path(sys.argv[2]).read_text()
-              pandoc_md   = pathlib.Path(sys.argv[3]).read_text()
-              bench_file  = sys.argv[4]
-              mem_md      = pathlib.Path(sys.argv[5]).read_text()
+              fast_md     = pathlib.Path(sys.argv[1]).read_text()
+              pandoc_md   = pathlib.Path(sys.argv[2]).read_text()
+              bench_file  = sys.argv[3]
+              mem_md      = pathlib.Path(sys.argv[4]).read_text()
+              out_path    = pathlib.Path(sys.argv[5])
 
               def parse_mean_ms(row):
                   # row cells: | cmd | mean ± sd | min | max | rel |
@@ -252,7 +262,6 @@
               def bold_if_zigmark(row):
                   if "zigmark" not in row:
                       return row
-                  # Replace the backtick-quoted command name with a bolded version.
                   return re.sub(r"(`[^`]+`)", r"**\1**", row, count=1)
 
               data_rows = [bold_if_zigmark(r) for r in data_rows]
@@ -275,31 +284,30 @@
               mem_table   = "\n".join([mem_header, mem_sep] + mem_rows) + "\n"
 
               bench_size = pathlib.Path(bench_file).stat().st_size
-              readme = readme_path.read_text()
-              today  = datetime.date.today().isoformat()
-              new_section = (
-                  f"<!-- bench-start -->\n"
+              today      = datetime.date.today().isoformat()
+
+              # Write just the section body (without the bench-start/bench-end
+              # markers themselves — zigmark preserves those as anchor blocks).
+              section_body = (
                   f"_Last updated: {today} · input: `{pathlib.Path(bench_file).name}`"
                   f" ({bench_size // 1024} KB) · run `nix run .#bench` to reproduce_\n\n"
                   f"### Speed\n\n{bench_md}\n"
                   f"### Memory (peak RSS)\n\n{mem_table}\n"
-                  f"<!-- bench-end -->"
               )
-
-              updated = re.sub(
-                  r"<!-- bench-start -->.*?<!-- bench-end -->",
-                  new_section,
-                  readme,
-                  flags=re.DOTALL,
-              )
-
-              if updated == readme:
-                  print("  WARNING: bench markers not found in README.md — appending.")
-                  updated = readme.rstrip() + "\n\n" + new_section + "\n"
-
-              readme_path.write_text(updated)
-              print(f"  README.md updated.")
+              out_path.write_text(section_body)
               PYEOF
+
+              echo "▸ Updating README.md…"
+              # zigmark parses README.md, removes the blocks between the
+              # <!-- bench-start --> and <!-- bench-end --> markers, inserts the
+              # new content parsed from $NEW_SECTION_MD, then normalizes back to
+              # Markdown — exercising the Document.Mutate API end-to-end.
+              "$ZIGMARK_FAST" -f normalize \
+                --section-start "bench-start" \
+                --section-end   "bench-end"   \
+                "$REPO/README.md"             \
+                -o "$REPO/README.md"          \
+                < "$NEW_SECTION_MD"
 
               echo "✓ Done. Benchmark results written to README.md."
             '';

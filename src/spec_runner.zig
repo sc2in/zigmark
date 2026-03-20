@@ -138,50 +138,92 @@ fn quietCheck(allocator: std.mem.Allocator, spec_path: []const u8, gfm: bool) !u
 
 fn printGfmSummary(allocator: std.mem.Allocator, spec_path: []const u8) !usize {
     const summary = try zigmark.runGfmSpecSummary(allocator, spec_path);
-
-    print("\n{s:<50} {s:>6} {s:>6} {s:>6} {s:>10}\n", .{ "GFM Extension", "Pass", "Fail", "Total", "Time (ms)" });
-    print("{s:-<76}\n", .{""});
-
-    for (summary.sections) |s| {
-        const t = s.result.total();
-        if (t > 0) {
-            const ms: f64 = @as(f64, @floatFromInt(s.result.time_ns)) / @as(f64, @floatFromInt(std.time.ns_per_ms));
-            print(
-                "{s:<50} {d:>6} {d:>6} {d:>6} {d:>10.2}\n",
-                .{ s.section, s.result.passed, s.result.failed, t, ms },
-            );
-        }
-    }
-
-    const total_ms: f64 = @as(f64, @floatFromInt(summary.total_time_ns)) / @as(f64, @floatFromInt(std.time.ns_per_ms));
-    print("{s:-<76}\n", .{""});
-    print("{s:<50} {d:>6} {d:>6} {d:>6} {d:>10.2}\n", .{
-        "TOTAL", summary.all.passed, summary.all.failed, summary.all.total(), total_ms,
-    });
+    try printResultsTable(allocator, "GFM Extension", summary.sections[0..], summary.all, summary.total_time_ns);
     return summary.all.failed;
 }
 
 fn printSummary(allocator: std.mem.Allocator, spec_path: []const u8) !usize {
     const summary = try zigmark.runSpecSummary(allocator, spec_path);
+    try printResultsTable(allocator, "Section", summary.sections[0..], summary.all, summary.total_time_ns);
+    return summary.all.failed;
+}
 
-    print("\n{s:<40} {s:>6} {s:>6} {s:>6} {s:>10}\n", .{ "Section", "Pass", "Fail", "Total", "Time (ms)" });
-    print("{s:-<66}\n", .{""});
+/// Build a GFM table from spec results using the AST API and render it to
+/// stdout with the Markdown renderer.  This dog-foods `Document.Mutate`,
+/// `TableRow.fromStrings`, and `MarkdownRenderer` end-to-end.
+fn printResultsTable(
+    allocator: std.mem.Allocator,
+    section_label: []const u8,
+    sections: []const zigmark.SectionResult,
+    all: zigmark.TestResult,
+    total_time_ns: i128,
+) !void {
+    var doc = zigmark.AST.Document.init(allocator);
+    defer doc.deinit(allocator);
+    const m = doc.edit();
 
-    for (summary.sections) |s| {
+    // Build the GFM table.
+    var table = zigmark.AST.Table.init(allocator);
+    errdefer table.deinit(allocator);
+
+    // Column alignments: section label (left), Pass/Fail/Total (right), Time ms (right).
+    try table.alignments.append(allocator, .left);
+    try table.alignments.append(allocator, .right);
+    try table.alignments.append(allocator, .right);
+    try table.alignments.append(allocator, .right);
+    try table.alignments.append(allocator, .right);
+
+    // Header row.
+    table.header.deinit(allocator);
+    table.header = try zigmark.AST.TableRow.fromStrings(
+        allocator,
+        &.{ section_label, "Pass", "Fail", "Total", "Time (ms)" },
+    );
+
+    // One row per non-empty section.
+    for (sections) |s| {
         const t = s.result.total();
-        if (t > 0) {
-            const ms: f64 = @as(f64, @floatFromInt(s.result.time_ns)) / @as(f64, @floatFromInt(std.time.ns_per_ms));
-            print(
-                "{s:<40} {d:>6} {d:>6} {d:>6} {d:>10.2}\n",
-                .{ s.section, s.result.passed, s.result.failed, t, ms },
-            );
-        }
+        if (t == 0) continue;
+        const ms: f64 = @as(f64, @floatFromInt(s.result.time_ns)) / @as(f64, @floatFromInt(std.time.ns_per_ms));
+
+        const pass_s  = try std.fmt.allocPrint(allocator, "{d}", .{s.result.passed});
+        defer allocator.free(pass_s);
+        const fail_s  = try std.fmt.allocPrint(allocator, "{d}", .{s.result.failed});
+        defer allocator.free(fail_s);
+        const total_s = try std.fmt.allocPrint(allocator, "{d}", .{t});
+        defer allocator.free(total_s);
+        const ms_s    = try std.fmt.allocPrint(allocator, "{d:.2}", .{ms});
+        defer allocator.free(ms_s);
+
+        const row = try zigmark.AST.TableRow.fromStrings(
+            allocator,
+            &.{ s.section, pass_s, fail_s, total_s, ms_s },
+        );
+        try table.body.append(allocator, row);
     }
 
-    const total_ms: f64 = @as(f64, @floatFromInt(summary.total_time_ns)) / @as(f64, @floatFromInt(std.time.ns_per_ms));
-    print("{s:-<66}\n", .{""});
-    print("{s:<40} {d:>6} {d:>6} {d:>6} {d:>10.2}\n", .{
-        "TOTAL", summary.all.passed, summary.all.failed, summary.all.total(), total_ms,
-    });
-    return summary.all.failed;
+    // TOTAL row (bold via inline Markdown in the cell text).
+    {
+        const total_ms: f64 = @as(f64, @floatFromInt(total_time_ns)) / @as(f64, @floatFromInt(std.time.ns_per_ms));
+        const pass_s  = try std.fmt.allocPrint(allocator, "{d}", .{all.passed});
+        defer allocator.free(pass_s);
+        const fail_s  = try std.fmt.allocPrint(allocator, "{d}", .{all.failed});
+        defer allocator.free(fail_s);
+        const total_s = try std.fmt.allocPrint(allocator, "{d}", .{all.total()});
+        defer allocator.free(total_s);
+        const ms_s    = try std.fmt.allocPrint(allocator, "{d:.2}", .{total_ms});
+        defer allocator.free(ms_s);
+
+        const row = try zigmark.AST.TableRow.fromStrings(
+            allocator,
+            &.{ "TOTAL", pass_s, fail_s, total_s, ms_s },
+        );
+        try table.body.append(allocator, row);
+    }
+
+    try m.appendBlock(allocator, .{ .table = table });
+
+    const rendered = try zigmark.MarkdownRenderer.render(allocator, doc);
+    defer allocator.free(rendered);
+    print("\n{s}\n", .{rendered});
 }
