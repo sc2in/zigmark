@@ -8,7 +8,6 @@ Renders to **HTML**, **Typst** (PDF-ready), **AST**, and more.
 
 Builds as both a **CLI tool** and a **C-callable shared library** (`libzigmark.so`).
 
-
 ## Installation
 
 Add `zigmark` as a dependency in your `build.zig.zon`:
@@ -97,7 +96,7 @@ Hello **world**.
 Supported frontmatter fields:
 
 | Field | Type | Default | Description |
-|-------|------|---------|-------------|
+|---|---|---|---|
 | `title` | string | — | Document title |
 | `subtitle` | string | — | Subtitle shown on title page |
 | `author` | string or list | — | Author name(s); list uses the first entry |
@@ -117,7 +116,7 @@ Supported frontmatter fields:
 | `numbersections` | bool | `false` | Number headings |
 | `disable-header-and-footer` | bool | `false` | Suppress page header and footer |
 | `header-left` / `header-center` / `header-right` | string | title / — / date | Header slots |
-| `footer-left` / `footer-center` / `footer-right` | string | author / — / page# | Footer slots |
+| `footer-left` / `footer-center` / `footer-right` | string | author / — / page\# | Footer slots |
 | `colorlinks` | bool | `true` | Colour hyperlinks |
 | `linkcolor` | string | `A50000` | Internal link colour (hex) |
 | `urlcolor` | string | `4077C0` | URL link colour (hex) |
@@ -173,20 +172,68 @@ inline, and code blocks to fenced:
 zigmark -f normalize --set title="Clean" post.md
 ```
 
+### Edit Body Blocks
+
+`--set-block` replaces a single block in the document body using a
+`type[N]` selector — the same bracket syntax used by the AST query API.
+`type` is any block tag (`block`, `heading`, `paragraph`, `table`, …);
+`N` is a zero-based index.  The right-hand side is parsed as Markdown and
+its first block becomes the replacement.  Applies to `normalize` format.
+
+```bash
+# Replace the first heading
+zigmark -f normalize --set-block 'heading[0]=# New Title' post.md
+
+# Replace a block at an absolute index (any type)
+zigmark -f normalize --set-block 'block[3]=Updated paragraph text.' post.md
+
+# Replace the second table
+zigmark -f normalize --set-block 'table[1]=| A | B |\n|---|---|\n| 1 | 2 |' post.md
+
+# Combine with frontmatter edits
+zigmark -f normalize --set title="Clean" --set-block 'heading[0]=# Clean' post.md -o post.md
+```
+
+`--section-start` and `--section-end` replace every block *between* two
+HTML comment markers (the markers themselves are preserved).  Replacement
+Markdown is read from stdin; the document file must be given as a
+positional argument.  Applies to `normalize` format.
+
+```bash
+# Replace the content between <!-- bench-start --> and <!-- bench-end -->
+cat new-perf-tables.md | zigmark -f normalize \
+  --section-start bench-start \
+  --section-end   bench-end   \
+  README.md -o README.md
+```
+
+This is how `nix run .#bench` updates the performance section of this
+README — it generates the new table Markdown, then uses zigmark's own AST
+mutation API to splice it in, replacing the Python regex that did the same
+job before.
+
 ### Options
 
 ```
 Usage: zigmark [OPTIONS] [FILE]
 
-  -h, --help            Display this help and exit.
-  -v, --version         Print version and exit.
-  -f, --format <str>    Output format: "html" (default), "typst", "ast", "ai",
-                        "terminal", "frontmatter", "markdown", or "normalize".
-  -o, --output <str>    Write output to FILE instead of stdout.
-  -s, --set <str>...    Set a frontmatter field (KEY=VALUE). Repeatable.
-                        Applies to: markdown, normalize, frontmatter formats.
-  -d, --delete <str>... Delete a frontmatter field (dot-path). Repeatable.
-                        Applies to: markdown, normalize, frontmatter formats.
+  -h, --help                  Display this help and exit.
+  -v, --version               Print version and exit.
+  -f, --format <str>          Output format: "html" (default), "typst", "ast",
+                              "ai", "terminal", "frontmatter", "markdown", or
+                              "normalize".
+  -o, --output <str>          Write output to FILE instead of stdout.
+  -s, --set <str>...          Set a frontmatter field (KEY=VALUE). Repeatable.
+                              Applies to: markdown, normalize, frontmatter.
+  -d, --delete <str>...       Delete a frontmatter field (dot-path). Repeatable.
+                              Applies to: markdown, normalize, frontmatter.
+  -e, --set-block <str>...    Edit a body block (SELECTOR=CONTENT). Selectors:
+                              block[N], heading[N], paragraph[N], table[N].
+                              First block of CONTENT replaces the target.
+                              Repeatable. Applies to: normalize.
+      --section-start <str>   ) Replace document body between two HTML comment
+      --section-end   <str>   ) markers with Markdown from stdin. FILE required.
+                                Applies to: normalize.
 ```
 
 ## Zig Library Usage
@@ -270,11 +317,11 @@ const para_count = query.count(.paragraph);
 Extract and query structured metadata from the top of a Markdown file.  All four formats are normalised to `std.json.Value` for uniform access.
 
 | Format | Opening marker | Example |
-|--------|---------------|---------|
-| YAML   | `---`          | `--- \ntitle: Hello\n---` |
-| TOML   | `+++`          | `+++\ntitle = "Hello"\n+++` |
-| JSON   | `{`            | `{"title": "Hello"}` |
-| ZON    | `.{`           | `.{ .title = "Hello" }` |
+|---|---|---|
+| YAML | `---` | `--- \ntitle: Hello\n---` |
+| TOML | `+++` | `+++\ntitle = "Hello"\n+++` |
+| JSON | `{` | `{"title": "Hello"}` |
+| ZON | `.{` | `.{ .title = "Hello" }` |
 
 ```zig
 const FrontMatter = zigmark.FrontMatter;
@@ -530,7 +577,7 @@ LD_LIBRARY_PATH=zig-out/lib ./example
 Every section of the [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) spec passes:
 
 | Section | Tests |
-|---------|-------|
+|---|---|
 | Tabs | 11 |
 | Backslash escapes | 13 |
 | Entity and numeric character references | 17 |
@@ -561,13 +608,13 @@ Every section of the [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) sp
 
 All [GitHub Flavored Markdown](https://github.github.com/gfm/) extensions pass.
 
-| GFM Extension          | Tests   |
-|------------------------|---------|
-| Tables                 | 8/8 ✅  |
-| Task list items        | 2/2 ✅  |
-| Strikethrough          | 2/2 ✅  |
-| Autolinks (extended)   | 11/11 ✅ |
-| Disallowed raw HTML    | 1/1 ✅  |
+| GFM Extension | Tests |
+|---|---|
+| Tables | 8/8 ✅ |
+| Task list items | 2/2 ✅ |
+| Strikethrough | 2/2 ✅ |
+| Autolinks (extended) | 11/11 ✅ |
+| Disallowed raw HTML | 1/1 ✅ |
 
 **Tables** — pipe-delimited with column alignment (`---`, `:---`, `---:`, `:---:`):
 
@@ -611,7 +658,7 @@ Run the GFM suite with `zig build gfm`.
 - **GFM Extended autolinks** — bare `www.`, `http(s)://`, `ftp://`, and email autolinks
 - **GFM Disallowed raw HTML** — dangerous tags escaped at render time
 
-## Building & Testing
+## Building \& Testing
 
 ```bash
 # Build CLI + shared library + docs
@@ -654,7 +701,7 @@ zig-out/
 
 ### WASM
 
-Build the WebAssembly module (~81 KiB):
+Build the WebAssembly module (\~81 KiB):
 
 ```bash
 zig build wasm
@@ -713,36 +760,36 @@ Requires **Zig 0.15.2** or later.
 ## Performance
 
 <!-- bench-start -->
-_Last updated: 2026-03-20 · input: `README.md` (23 KB) · run `nix run .#bench` to reproduce_
+
+_Last updated: 2026-03-20 · input: `README.md` (26 KB) · run `nix run .#bench` to reproduce_
 
 ### Speed
 
-| Command | Mean [ms] | Min [ms] | Max [ms] | Relative |
+| Command | Mean \[ms\] | Min \[ms\] | Max \[ms\] | Relative |
 |:---|---:|---:|---:|---:|
-| `lowdown` | 2.2 ± 1.3 | 1.2 | 15.5 | 1.00 |
-| `discount` | 2.4 ± 1.3 | 1.4 | 17.0 | 1.08 ± 0.86 |
-| **`zigmark (ReleaseSafe)`** | 2.5 ± 0.7 | 1.8 | 8.5 | 1.14 ± 0.74 |
-| **`zigmark (ReleaseFast)`** | 2.5 ± 0.8 | 1.7 | 10.6 | 1.11 ± 0.74 |
-| **`zigmark (ReleaseSmall)`** | 3.2 ± 1.5 | 2.0 | 15.4 | 1.45 ± 1.09 |
-| `cmark-gfm` | 4.9 ± 1.7 | 3.0 | 18.1 | 2.23 ± 1.51 |
-| `cmark` | 5.2 ± 1.6 | 3.0 | 15.5 | 2.34 ± 1.54 |
-| `pandoc` | 154.2 ± 15.5 | 131.0 | 200.7 | 1.00 |
+| `lowdown` | 1.9 ± 0.7 | 1.2 | 5.5 | 1.00 |
+| `discount` | 2.3 ± 0.8 | 1.5 | 7.7 | 1.20 ± 0.61 |
+| **`zigmark (ReleaseFast)`** | 2.6 ± 0.7 | 1.9 | 7.2 | 1.36 ± 0.61 |
+| **`zigmark (ReleaseSmall)`** | 3.2 ± 0.8 | 2.3 | 9.1 | 1.65 ± 0.71 |
+| **`zigmark (ReleaseSafe)`** | 3.3 ± 1.4 | 2.1 | 18.0 | 1.71 ± 0.93 |
+| `cmark-gfm` | 5.2 ± 1.8 | 3.2 | 17.1 | 2.74 ± 1.32 |
+| `cmark` | 5.3 ± 2.7 | 3.0 | 29.4 | 2.78 ± 1.69 |
+| `pandoc` | 155.3 ± 19.4 | 135.1 | 206.5 | 1.00 |
 
 ### Memory (peak RSS)
 
 | Command | Peak RSS (KB) |
 |:---|---:|
-| **`zigmark (ReleaseSmall)`** | 1436 |
-| **`zigmark (ReleaseSafe)`** | 1852 |
-| **`zigmark (ReleaseFast)`** | 1872 |
+| **`zigmark (ReleaseSmall)`** | 1536 |
+| **`zigmark (ReleaseFast)`** | 2000 |
 | `discount` | 2040 |
-| `lowdown` | 3164 |
-| `cmark-gfm` | 4168 |
-| `cmark` | 4220 |
-| `pandoc` | 127148 |
+| **`zigmark (ReleaseSafe)`** | 2084 |
+| `lowdown` | 3024 |
+| `cmark` | 4172 |
+| `cmark-gfm` | 4172 |
+| `pandoc` | 128988 |
 
 <!-- bench-end -->
-
 
 ## Future Plans
 
@@ -758,7 +805,7 @@ education, nonprofits, and government institutions are all welcome.
 
 **Commercial use requires a separate licence.** If you or your organisation
 intend to profit from zigmark (products, SaaS, consulting work billed to a
-client, etc.) contact **licensing@sc2.in**.  Commercial licensees also get
+client, etc.) contact <**licensing@sc2.in>\*\*.  Commercial licensees also get
 priority support and the option to sponsor features.
 
 **Solo practitioners and independent consultants** using zigmark as a tool in
@@ -776,7 +823,7 @@ this project.
 **Do not open a public issue for security vulnerabilities.**
 
 If you discover a security issue, please report it responsibly by emailing
-**security@sc2.in** with a description of the vulnerability, steps to
+<**security@sc2.in>\*\* with a description of the vulnerability, steps to
 reproduce, and any relevant details. You will receive acknowledgement within 72
 hours and we will work with you on a fix before any public disclosure.
 

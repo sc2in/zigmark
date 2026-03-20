@@ -20,16 +20,23 @@ pub fn main() !void {
 
     // ── CLI definition ───────────────────────────────────────────────────────
     const params = comptime clap.parseParamsComptime(
-        \\-h, --help               Display this help and exit.
-        \\-v, --version            Print version and exit.
-        \\-f, --format <str>       Output format: "html" (default), "ast", "ai", "terminal",
-        \\                         "frontmatter", "markdown", "normalize", or "typst".
-        \\-o, --output <str>       Write output to FILE instead of stdout.
-        \\-s, --set <str>...       Set a frontmatter field (KEY=VALUE). Repeatable.
-        \\                         Applies to: markdown, normalize, frontmatter formats.
-        \\-d, --delete <str>...    Delete a frontmatter field (dot-path). Repeatable.
-        \\                         Applies to: markdown, normalize, frontmatter formats.
-        \\<str>                    Input markdown file (reads stdin if omitted).
+        \\-h, --help                Display this help and exit.
+        \\-v, --version             Print version and exit.
+        \\-f, --format <str>        Output format: "html" (default), "ast", "ai", "terminal",
+        \\                          "frontmatter", "markdown", "normalize", or "typst".
+        \\-o, --output <str>        Write output to FILE instead of stdout.
+        \\-s, --set <str>...        Set a frontmatter field (KEY=VALUE). Repeatable.
+        \\                          Applies to: markdown, normalize, frontmatter formats.
+        \\-d, --delete <str>...     Delete a frontmatter field (dot-path). Repeatable.
+        \\                          Applies to: markdown, normalize, frontmatter formats.
+        \\-e, --set-block <str>...  Edit a body block (SELECTOR=CONTENT). Selectors: block[N],
+        \\                          heading[N], paragraph[N], table[N]. The first block parsed
+        \\                          from CONTENT replaces the selected block. Repeatable.
+        \\                          Applies to: normalize format.
+        \\--section-start <str>     ) Replace document body between two HTML comment markers
+        \\--section-end <str>       ) with Markdown read from stdin. FILE arg required.
+        \\                            Applies to: normalize format.
+        \\<str>                     Input markdown file (reads stdin if omitted).
         \\
     );
 
@@ -52,6 +59,20 @@ pub fn main() !void {
     };
     defer res.deinit();
 
+    // ── Early validation ─────────────────────────────────────────────────────
+    {
+        const has_start = res.args.@"section-start" != null;
+        const has_end = res.args.@"section-end" != null;
+        if (has_start != has_end) {
+            std.debug.print("error: --section-start and --section-end must be used together\n", .{});
+            return error.InvalidArgument;
+        }
+        if (has_start and res.positionals[0] == null) {
+            std.debug.print("error: --section-start/--section-end requires a FILE positional argument (stdin is used for replacement content)\n", .{});
+            return error.InvalidArgument;
+        }
+    }
+
     // ── Help ─────────────────────────────────────────────────────────────────
     if (res.args.help != 0) {
         var buf: [4096]u8 = undefined;
@@ -73,9 +94,20 @@ pub fn main() !void {
             \\               frontmatter editing without touching the body.
             \\  normalize    Reconstruct normalized Markdown from the AST. Converts
             \\               headings to ATX, links to inline, code blocks to fenced.
+            \\               Supports --set-block and --section-start/--section-end
+            \\               for body mutation.
             \\  typst        Typst markup for PDF generation. Reads YAML frontmatter
             \\               fields (title, author, date, titlepage, toc, …) to produce
             \\               a full Eisvogel-inspired document layout.
+            \\
+            \\Body mutation (normalize format only):
+            \\  --set-block heading[0]="# New Title"   Replace the first heading.
+            \\  --set-block block[3]="paragraph text"  Replace block at absolute index 3.
+            \\  --section-start bench-start \
+            \\  --section-end   bench-end   \
+            \\  < new-content.md FILE -o FILE          Replace content between
+            \\                                         <!-- bench-start --> and
+            \\                                         <!-- bench-end --> markers.
             \\
             \\{s}
         , .{ version, help_writer.buffered() });
@@ -200,6 +232,31 @@ pub fn main() !void {
                 }
             }
         }
+
+        // ── Body block mutations ──────────────────────────────────────────────
+
+        // --set-block "heading[0]=# New Title"
+        for (res.args.@"set-block") |arg| {
+            applySetBlock(alloc, &doc, arg) catch |err| {
+                std.debug.print("warning: --set-block '{s}': {}\n", .{ arg, err });
+            };
+        }
+
+        // --section-start / --section-end  (reads replacement from stdin)
+        if (res.args.@"section-start") |start_marker| {
+            const end_marker = res.args.@"section-end".?;
+            const stdin = std.fs.File.stdin();
+            const replacement_src = stdin.readToEndAlloc(alloc, std.math.maxInt(usize)) catch |err| {
+                std.debug.print("error: failed to read replacement content from stdin: {}\n", .{err});
+                return err;
+            };
+            defer alloc.free(replacement_src);
+            applyReplaceSection(alloc, &doc, start_marker, end_marker, replacement_src) catch |err| {
+                std.debug.print("error: --section-start/--section-end: {}\n", .{err});
+                return err;
+            };
+        }
+
         zigmark.MarkdownRenderer.renderToWriter(alloc, &writer.interface, doc) catch |err| {
             std.debug.print("error: failed to render normalized markdown: {}\n", .{err});
             return err;
@@ -342,6 +399,118 @@ fn applyFrontmatterMods(
         fm.set(fa.path, fa.value) catch continue;
     }
     for (deletes) |key| _ = fm.delete(key);
+}
+
+// ── Body block mutation helpers ───────────────────────────────────────────────
+
+/// Apply one `--set-block "selector=content"` argument to `doc`.
+/// The first block parsed from `content` replaces the selected block.
+fn applySetBlock(alloc: std.mem.Allocator, doc: *AST.Document, arg: []const u8) !void {
+    const eq_pos = std.mem.indexOf(u8, arg, "=") orelse return error.MissingEquals;
+    const selector = arg[0..eq_pos];
+    const content = arg[eq_pos + 1 ..];
+
+    const doc_idx = resolveBlockSelector(doc.*, selector) orelse return error.SelectorNotFound;
+    const new_block = try parseFirstBlock(alloc, content);
+    doc.edit().replaceBlock(alloc, doc_idx, new_block);
+}
+
+/// Resolve a selector like `"block[3]"` or `"heading[0]"` to an absolute
+/// index into `doc.children`.  Returns `null` if out of range or not found.
+fn resolveBlockSelector(doc: AST.Document, selector: []const u8) ?usize {
+    const bracket = std.mem.indexOf(u8, selector, "[") orelse return null;
+    const close_pos = std.mem.indexOf(u8, selector[bracket..], "]") orelse return null;
+    const type_name = selector[0..bracket];
+    const index_num = std.fmt.parseInt(usize, selector[bracket + 1 .. bracket + close_pos], 10) catch return null;
+
+    if (std.mem.eql(u8, type_name, "block")) {
+        return if (index_num < doc.children.items.len) index_num else null;
+    }
+
+    var counter: usize = 0;
+    for (doc.children.items, 0..) |block, i| {
+        if (std.mem.eql(u8, @tagName(std.meta.activeTag(block)), type_name)) {
+            if (counter == index_num) return i;
+            counter += 1;
+        }
+    }
+    return null;
+}
+
+/// Parse `content` as Markdown and return (taking ownership of) the first
+/// block.  The rest of the parsed document is deinit'd.
+/// Returns `error.EmptyContent` if `content` parses to zero blocks.
+fn parseFirstBlock(alloc: std.mem.Allocator, content: []const u8) !AST.Block {
+    var parser = zigmark.Parser.init();
+    var content_doc = try parser.parseMarkdown(alloc, content);
+
+    if (content_doc.children.items.len == 0) {
+        content_doc.deinit(alloc);
+        return error.EmptyContent;
+    }
+
+    // Steal the first block: remove it from the list without freeing it,
+    // then deinit the rest.
+    const first_block = content_doc.children.items[0];
+    const remaining = content_doc.children.items.len - 1;
+    std.mem.copyForwards(AST.Block, content_doc.children.items[0..remaining], content_doc.children.items[1..]);
+    content_doc.children.items.len = remaining;
+    content_doc.deinit(alloc);
+
+    return first_block;
+}
+
+/// Replace the body content between two HTML comment markers with blocks
+/// parsed from `replacement_src`.  The marker blocks themselves are kept;
+/// everything between them is removed and the new blocks are inserted there.
+fn applyReplaceSection(
+    alloc: std.mem.Allocator,
+    doc: *AST.Document,
+    start_marker: []const u8,
+    end_marker: []const u8,
+    replacement_src: []const u8,
+) !void {
+    const start_idx = findHtmlCommentBlock(doc.*, start_marker) orelse return error.StartMarkerNotFound;
+    const end_idx = findHtmlCommentBlock(doc.*, end_marker) orelse return error.EndMarkerNotFound;
+    if (start_idx >= end_idx) return error.InvalidMarkerOrder;
+
+    // Parse replacement content.
+    var rep_parser = zigmark.Parser.init();
+    var rep_doc = try rep_parser.parseMarkdown(alloc, replacement_src);
+    // We will steal rep_doc's blocks, so do NOT call rep_doc.deinit() normally.
+
+    // Remove blocks between the markers (exclusive), highest index first so
+    // that lower indices stay stable.
+    if (end_idx > start_idx + 1) {
+        var i: usize = end_idx - 1;
+        while (i > start_idx) {
+            doc.edit().removeBlock(alloc, i);
+            i -= 1;
+        }
+    }
+    // Now start_idx + 1 is where end_marker sits.  Insert new blocks there.
+    const insert_pos = start_idx + 1;
+    for (rep_doc.children.items, 0..) |block, j| {
+        try doc.edit().insertBlock(alloc, insert_pos + j, block);
+    }
+
+    // Blocks are now owned by doc; just free the ArrayList backing array.
+    rep_doc.children.items.len = 0;
+    rep_doc.deinit(alloc);
+}
+
+/// Return the index of the first `html_block` in `doc.children` whose
+/// content contains `marker`, or `null` if none is found.
+fn findHtmlCommentBlock(doc: AST.Document, marker: []const u8) ?usize {
+    for (doc.children.items, 0..) |block, i| {
+        switch (block) {
+            .html_block => |hb| {
+                if (std.mem.indexOf(u8, hb.content, marker) != null) return i;
+            },
+            else => {},
+        }
+    }
+    return null;
 }
 
 // ── Output helpers ───────────────────────────────────────────────────────────

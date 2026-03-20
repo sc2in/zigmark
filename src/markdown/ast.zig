@@ -212,6 +212,52 @@ pub const Document = struct {
     pub fn get(self: *const Document) Query {
         return Query.init(self);
     }
+
+    /// Return a `Mutate` handle for this document.
+    ///
+    /// Usage: `const m = doc.edit(); try m.appendBlock(alloc, block);`
+    pub fn edit(self: *Document) Mutate {
+        return Mutate.init(self);
+    }
+
+    /// Mutation API for adding, removing, and replacing blocks in a `Document`.
+    ///
+    /// Obtain a handle with `doc.edit()` and then call the helper methods.
+    /// All operations take an allocator consistent with the one used to build
+    /// the document so that memory ownership is correctly maintained.
+    pub const Mutate = struct {
+        document: *Document,
+
+        /// Wrap `document` in a mutation handle.
+        pub fn init(document: *Document) Mutate {
+            return Mutate{ .document = document };
+        }
+
+        /// Append `block` at the end of the document.
+        pub fn appendBlock(self: Mutate, alloc: Allocator, block: Block) !void {
+            try self.document.children.append(alloc, block);
+        }
+
+        /// Insert `block` at `index`, shifting all later blocks one position to
+        /// the right.  `index` must be ≤ `document.children.items.len`.
+        pub fn insertBlock(self: Mutate, alloc: Allocator, index: usize, block: Block) !void {
+            try self.document.children.insert(alloc, index, block);
+        }
+
+        /// Remove and deinit the block at `index`.  Later blocks shift left.
+        pub fn removeBlock(self: Mutate, alloc: Allocator, index: usize) void {
+            var block = self.document.children.orderedRemove(index);
+            block.deinit(alloc);
+        }
+
+        /// Replace the block at `index` with `block`, deiniting the previous
+        /// value.  `block` must be freshly owned and not aliased elsewhere in
+        /// the document.
+        pub fn replaceBlock(self: Mutate, alloc: Allocator, index: usize, block: Block) void {
+            self.document.children.items[index].deinit(alloc);
+            self.document.children.items[index] = block;
+        }
+    };
 };
 
 /// A block-level element (CommonMark §4).
@@ -290,6 +336,18 @@ pub const Paragraph = struct {
         };
     }
 
+    /// Create a paragraph containing a single plain-text inline.
+    ///
+    /// The returned paragraph owns a copy of `text`; it is freed by `deinit`.
+    pub fn fromText(alloc: Allocator, text: []const u8) !Paragraph {
+        var p = Paragraph.init(alloc);
+        errdefer p.deinit(alloc);
+        const duped = try alloc.dupe(u8, text);
+        p.inline_source = duped;
+        try p.children.append(alloc, .{ .text = Text.init(duped) });
+        return p;
+    }
+
     pub fn deinit(self: *Paragraph, allocator: std.mem.Allocator) void {
         for (self.children.items) |*child| {
             child.deinit(allocator);
@@ -318,6 +376,18 @@ pub const Heading = struct {
             .level = level,
             .children = std.ArrayList(Inline){},
         };
+    }
+
+    /// Create a heading at `level` containing a single plain-text inline.
+    ///
+    /// The returned heading owns a copy of `text`; it is freed by `deinit`.
+    pub fn fromText(alloc: Allocator, level: u8, text: []const u8) !Heading {
+        var h = Heading.init(alloc, level);
+        errdefer h.deinit(alloc);
+        const duped = try alloc.dupe(u8, text);
+        h.inline_source = duped;
+        try h.children.append(alloc, .{ .text = Text.init(duped) });
+        return h;
     }
 
     pub fn deinit(self: *Heading, allocator: std.mem.Allocator) void {
@@ -786,6 +856,18 @@ pub const TableCell = struct {
         };
     }
 
+    /// Create a table cell containing a single plain-text inline.
+    ///
+    /// The returned cell owns a copy of `text`; it is freed by `deinit`.
+    pub fn fromText(alloc: Allocator, text: []const u8) !TableCell {
+        var cell = TableCell.init(alloc);
+        errdefer cell.deinit(alloc);
+        const duped = try alloc.dupe(u8, text);
+        cell.inline_source = duped;
+        try cell.children.append(alloc, .{ .text = Text.init(duped) });
+        return cell;
+    }
+
     pub fn deinit(self: *TableCell, allocator: std.mem.Allocator) void {
         for (self.children.items) |*child| {
             child.deinit(allocator);
@@ -808,6 +890,20 @@ pub const TableRow = struct {
         return TableRow{
             .cells = std.ArrayList(TableCell){},
         };
+    }
+
+    /// Create a table row from a slice of string values.
+    ///
+    /// Each string is copied into an owned `TableCell`; the caller owns the
+    /// returned row and must call `deinit` when done.
+    pub fn fromStrings(alloc: Allocator, strings: []const []const u8) !TableRow {
+        var row = TableRow.init(alloc);
+        errdefer row.deinit(alloc);
+        for (strings) |s| {
+            const cell = try TableCell.fromText(alloc, s);
+            try row.cells.append(alloc, cell);
+        }
+        return row;
     }
 
     pub fn deinit(self: *TableRow, allocator: std.mem.Allocator) void {
@@ -853,4 +949,5 @@ pub const Table = struct {
 test {
     _ = @import("query_test.zig");
     _ = @import("library_test.zig");
+    _ = @import("mutation_test.zig");
 }
