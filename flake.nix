@@ -53,14 +53,15 @@
             # Then uncomment the line below:
             zigBuildZonLock = ./build.zig.zon2json-lock;
           };
-        withDesc = drv: desc: drv.overrideAttrs (old: {
-          meta = (old.meta or {}) // { description = desc; };
-        });
+        withDesc = drv: desc:
+          drv.overrideAttrs (old: {
+            meta = (old.meta or {}) // {description = desc;};
+          });
       in {
-        default       = withDesc (mkZigmark null)          "zigmark — CommonMark + GFM markdown parser and renderer";
-        zigmark-safe  = withDesc (mkZigmark "ReleaseSafe")  "zigmark (ReleaseSafe)";
+        default = withDesc (mkZigmark null) "zigmark — CommonMark + GFM markdown parser and renderer";
+        zigmark-safe = withDesc (mkZigmark "ReleaseSafe") "zigmark (ReleaseSafe)";
         zigmark-small = withDesc (mkZigmark "ReleaseSmall") "zigmark (ReleaseSmall)";
-        zigmark-fast  = withDesc (mkZigmark "ReleaseFast")  "zigmark (ReleaseFast)";
+        zigmark-fast = withDesc (mkZigmark "ReleaseFast") "zigmark (ReleaseFast)";
       }
     );
 
@@ -70,7 +71,7 @@
         pname = "zigmark-test";
         buildPhase = "zig build test -Dversion=${version}";
         installPhase = "touch $out";
-        meta = (old.meta or {}) // { description = "Run zig build test — unit tests + CommonMark spec + GFM spec"; };
+        meta = (old.meta or {}) // {description = "Run zig build test — unit tests + CommonMark spec + GFM spec";};
       });
     });
 
@@ -94,7 +95,7 @@
           text = ''
             PORT="''${1:-8080}"
             echo "▸ Starting fuzzer — web UI at http://127.0.0.1:$PORT"
-            exec zig build fuzz --fuzz --webui="127.0.0.1:$PORT"
+            zig build  --listen fuzz--fuzz --webui="127.0.0.1:$PORT"
           '';
         };
       in {
