@@ -718,13 +718,19 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, gfm: bool) !void {
 
 // ── Top-level render ──────────────────────────────────────────────────────────
 
+/// Render `doc` to a writer with CommonMark-compliant HTML.
+pub fn renderToWriter(allocator: Allocator, writer: *std.Io.Writer, doc: AST.Document) !void {
+    _ = allocator;
+    for (doc.children.items) |child| try renderBlock(writer, child, doc.gfm);
+}
+
 /// Render `doc` to an allocator-owned HTML byte slice.
 ///
 /// The caller owns the returned memory and must free it when done.
 pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-    for (doc.children.items) |child| try renderBlock(&aw.writer, child, doc.gfm);
+    try renderToWriter(allocator, &aw.writer, doc);
     return aw.toOwnedSlice();
 }
 

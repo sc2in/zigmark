@@ -236,6 +236,14 @@ fn renderInline(writer: anytype, inl: AST.Inline, prefix: []const u8, is_last: b
 
 // ── Top-level render ──────────────────────────────────────────────────────────
 
+/// Render `doc` to a writer as a human-readable AST tree diagram.
+pub fn renderToWriter(allocator: Allocator, writer: *std.Io.Writer, doc: AST.Document) !void {
+    try writer.writeAll("Document\n");
+    for (doc.children.items, 0..) |block, i| {
+        try renderBlock(writer, block, "", i == doc.children.items.len - 1, allocator);
+    }
+}
+
 /// Render `doc` to an allocator-owned AST tree diagram byte slice.
 ///
 /// The caller owns the returned memory and must free it when done.
@@ -243,10 +251,7 @@ fn renderInline(writer: anytype, inl: AST.Inline, prefix: []const u8, is_last: b
 pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
     var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
-    try aw.writer.writeAll("Document\n");
-    for (doc.children.items, 0..) |block, i| {
-        try renderBlock(&aw.writer, block, "", i == doc.children.items.len - 1, allocator);
-    }
+    try renderToWriter(allocator, &aw.writer, doc);
     return aw.toOwnedSlice();
 }
 
