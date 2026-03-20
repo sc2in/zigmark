@@ -142,6 +142,23 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
 
+    // ── Fuzz tests ────────────────────────────────────────────────────────────
+    // Run once (smoke test):          zig build fuzz
+    // Coverage-guided fuzzing:        zig build fuzz -- --fuzz
+    const fuzz_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/fuzz.zig"),
+            .target = target,
+            .optimize = .Debug,
+            .imports = &.{
+                .{ .name = "zigmark", .module = zigmark },
+            },
+        }),
+    });
+    const run_fuzz = b.addRunArtifact(fuzz_tests);
+    const fuzz_step = b.step("fuzz", "Run fuzz tests (append --fuzz to activate coverage-guided fuzzing)");
+    fuzz_step.dependOn(&run_fuzz.step);
+
     // ── Spec runner ──────────────────────────────────────────────────────────
 
     const spec_exe = b.addExecutable(.{

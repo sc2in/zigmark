@@ -59,6 +59,7 @@ pub fn init(alloc: Allocator, source: []const u8, input_kind: Kind) !FrontMatter
                 },
                 else => return err,
             };
+            if (y.docs.items.len == 0) return error.EmptyDocument;
             orig = .{ .yaml = y };
             const doc = y.docs.items[0];
             break :blk try yamlNodeToJson(alloc, doc);

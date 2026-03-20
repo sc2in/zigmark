@@ -53,20 +53,24 @@
             # Then uncomment the line below:
             zigBuildZonLock = ./build.zig.zon2json-lock;
           };
-      in rec {
-        default       = mkZigmark null;
-        zigmark-safe  = mkZigmark "ReleaseSafe";
-        zigmark-small = mkZigmark "ReleaseSmall";
-        zigmark-fast  = mkZigmark "ReleaseFast";
+        withDesc = drv: desc: drv.overrideAttrs (old: {
+          meta = (old.meta or {}) // { description = desc; };
+        });
+      in {
+        default       = withDesc (mkZigmark null)          "zigmark — CommonMark + GFM markdown parser and renderer";
+        zigmark-safe  = withDesc (mkZigmark "ReleaseSafe")  "zigmark (ReleaseSafe)";
+        zigmark-small = withDesc (mkZigmark "ReleaseSmall") "zigmark (ReleaseSmall)";
+        zigmark-fast  = withDesc (mkZigmark "ReleaseFast")  "zigmark (ReleaseFast)";
       }
     );
 
     # `nix flake check` / omnix ci — runs `zig build test` (unit + cmark + gfm spec)
     checks = forAllSystems (system: {
-      test = self.packages.${system}.default.overrideAttrs (_: {
+      test = self.packages.${system}.default.overrideAttrs (old: {
         pname = "zigmark-test";
         buildPhase = "zig build test -Dversion=${version}";
         installPhase = "touch $out";
+        meta = (old.meta or {}) // { description = "Run zig build test — unit tests + CommonMark spec + GFM spec"; };
       });
     });
 
@@ -76,6 +80,7 @@
         env = zig2nix.outputs.zig-env.${system} {zig = pkgs.zig;};
         benchmark = pkgs.writeShellApplication {
           name = "benchmark";
+          meta.description = "Quick hyperfine benchmark of zigmark across all release modes";
           runtimeInputs = with pkgs; [
             hyperfine
           ];
@@ -83,11 +88,21 @@
             hyperfine -N --warmup 100 -m 1000 --export-markdown benchmark.md -L mode "Safe,Small,Fast" --setup "zig build -Doptimize=Release{mode}"  "./zig-out/bin/zigmark ./Readme.md > /dev/null"
           '';
         };
+        fuzz = pkgs.writeShellApplication {
+          name = "fuzz";
+          meta.description = "Run coverage-guided fuzz tests with the Zig web UI (optional port argument, default 8080)";
+          text = ''
+            PORT="''${1:-8080}"
+            echo "▸ Starting fuzzer — web UI at http://127.0.0.1:$PORT"
+            exec zig build fuzz --fuzz --webui="127.0.0.1:$PORT"
+          '';
+        };
       in {
         default = env.mkShell {
           nativeBuildInputs = [
             pkgs.zls
             pkgs.bash
+            fuzz
             (pkgs.writeShellScriptBin "update-zon" ''
               set -euo pipefail
               if ! command -v zig &>/dev/null; then
@@ -104,6 +119,7 @@
           shellHook = ''
             export ZIG_GLOBAL_CACHE_DIR=.zig-cache
             echo "To update Zig dependencies, run: update-zon"
+            echo "To run the fuzzer, run: fuzz [port]  (default port: 8080)"
             # Auto-generate/update zon2json-lock when entering the dev shell.
             # This requires network access, which the dev shell has but nix build does not.
             if [ -f build.zig.zon ]; then
@@ -123,20 +139,31 @@
         pkgs = nixpkgs.legacyPackages.${system};
         env = zig2nix.outputs.zig-env.${system} {zig = pkgs.zig;};
       in {
-        default = env.app [] "zig build run -- \"$@\"";
+        default = {
+          type = "app";
+          program = "${self.packages.${system}.zigmark-safe}/bin/zigmark";
+          meta.description = "Run zigmark (ReleaseSafe)";
+        };
 
         # Serve the WASM live-preview demo:  nix run .#wasm-demo
-        wasm-demo = {
+        wasm-demo = let
+          wasm-demo-app = pkgs.writeShellApplication {
+            name = "zigmark-wasm-demo";
+            meta.description = "Build the WASM module and serve the live-preview demo locally (optional port argument, default 8080)";
+            runtimeInputs = [pkgs.git pkgs.python3];
+            text = ''
+              cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
+              echo "▸ Building WASM module…"
+              zig build wasm
+              PORT="''${1:-8080}"
+              echo "✓ Serving zig-out/wasm/ on http://localhost:$PORT"
+              python3 -m http.server "$PORT" -d zig-out/wasm
+            '';
+          };
+        in {
           type = "app";
-          program = "${pkgs.writeShellScript "zigmark-wasm-demo" ''
-            set -euo pipefail
-            cd "$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || echo .)"
-            echo "▸ Building WASM module…"
-            zig build wasm
-            PORT="''${1:-8080}"
-            echo "✓ Serving zig-out/wasm/ on http://localhost:$PORT"
-            ${pkgs.python3}/bin/python3 -m http.server "$PORT" -d zig-out/wasm
-          ''}";
+          program = "${wasm-demo-app}/bin/zigmark-wasm-demo";
+          meta.description = "Build the WASM module and serve the live-preview demo locally (optional port argument, default 8080)";
         };
 
         # CLI performance benchmark vs cmark:  nix run .#bench
@@ -148,6 +175,7 @@
         bench = let
           bench-app = pkgs.writeShellApplication {
             name = "zigmark-bench";
+            meta.description = "Benchmark zigmark against cmark, cmark-gfm, pandoc, discount, and lowdown; updates README.md with results";
             runtimeInputs = with pkgs; [hyperfine pandoc discount lowdown cmark cmark-gfm time python3];
             text = ''
               set -euo pipefail
@@ -315,6 +343,7 @@
         in {
           type = "app";
           program = "${bench-app}/bin/zigmark-bench";
+          meta.description = "Benchmark zigmark against cmark, cmark-gfm, pandoc, discount, and lowdown; updates README.md with results";
         };
       }
     );
