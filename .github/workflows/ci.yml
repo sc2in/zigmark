@@ -7,9 +7,18 @@ on:
 concurrency:
   group: ${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-latest
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     permissions:
       id-token: "write"
       contents: "read"
@@ -31,22 +40,19 @@ jobs:
         run: nix --accept-flake-config profile add nixpkgs#omnix
 
       - name: Configure permissions
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Run CI
-        run: om ci run
+        run: om ci run --systems ${{ matrix.system }}
 
-      - name: Collect artifacts
-        if: ${{ success() }}
-        run: |
-          mkdir -p artifacts
-          cp -rL "$(jq -r '.result.ROOT.build.byName.zigmark' result)"/* artifacts/
+      - name: Build release artifact
+        if: success()
+        run: nix build .#zigmark-safe -o zigmark-release
 
-      - name: Upload artifacts
-        if: ${{ success() }}
+      - name: Upload artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: zigmark
-          path: artifacts/
+          name: zigmark-${{ matrix.system }}
+          path: zigmark-release/
           retention-days: 7
-
