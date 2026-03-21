@@ -273,7 +273,7 @@ pub fn build(b: *std.Build) void {
 
     const wasm_target = b.resolveTargetQuery(.{
         .cpu_arch = .wasm32,
-        .os_tag = .freestanding,
+        .os_tag = .wasi,
     });
     const wasm_optimize = .ReleaseSmall;
 

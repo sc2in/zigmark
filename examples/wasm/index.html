@@ -234,11 +234,28 @@ let wasm;
 async function initWasm() {
   const resp = await fetch(WASM_PATH);
   const bytes = await resp.arrayBuffer();
+  const wasiImport = {
+    args_get: () => 0,
+    args_sizes_get: () => 0,
+    environ_get: () => 0,
+    environ_sizes_get: () => 0,
+    fd_close: () => 0,
+    fd_fdstat_get: () => 0,
+    fd_filestat_get: () => 0,
+    fd_read: () => 0,
+    fd_seek: () => 0,
+    fd_write: () => 0,
+    fd_pwrite: () => 0,
+    proc_exit: (code) => { throw new Error(`WASI proc_exit(${code})`); },
+    clock_time_get: () => 0,
+  };
+
   const { instance } = await WebAssembly.instantiate(bytes, {
     env: {
       // zigmark with page_allocator on wasm32-freestanding needs no imports,
       // but keep this object here so future additions don't break.
     },
+    wasi_snapshot_preview1: wasiImport,
   });
   wasm = instance.exports;
 }
