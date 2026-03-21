@@ -95,31 +95,31 @@ Hello **world**.
 
 Supported frontmatter fields:
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `title` | string | — | Document title |
-| `subtitle` | string | — | Subtitle shown on title page |
-| `author` | string or list | — | Author name(s); list uses the first entry |
-| `date` | string | — | Date shown on title page |
-| `lang` | string | `en` | Document language |
-| `paper` | string | `a4` | Paper size (e.g. `a4`, `us-letter`) |
-| `fontsize` | string | `11pt` | Base font size |
-| `titlepage` | bool | `false` | Generate a full-bleed title page |
-| `titlepage-color` | string | `1E3A5F` | Title page background (hex, no `#`) |
-| `titlepage-text-color` | string | `FFFFFF` | Title page text colour |
-| `titlepage-rule-color` | string | `AAAAAA` | Title page rule colour |
-| `titlepage-rule-height` | number | `4` | Title page rule thickness (pt) |
-| `toc` | bool | `false` | Insert a table of contents |
-| `toc-title` | string | `Contents` | TOC heading |
-| `toc-own-page` | bool | `false` | *(reserved, not yet implemented)* |
-| `toc-depth` | number | `3` | TOC depth |
-| `numbersections` | bool | `false` | Number headings |
-| `disable-header-and-footer` | bool | `false` | Suppress page header and footer |
-| `header-left` / `header-center` / `header-right` | string | title / — / date | Header slots |
-| `footer-left` / `footer-center` / `footer-right` | string | author / — / page\# | Footer slots |
-| `colorlinks` | bool | `true` | Colour hyperlinks |
-| `linkcolor` | string | `A50000` | Internal link colour (hex) |
-| `urlcolor` | string | `4077C0` | URL link colour (hex) |
+| Field                                            | Type           | Default             | Description                               |
+| ------------------------------------------------ | -------------- | ------------------- | ----------------------------------------- |
+| `title`                                          | string         | —                   | Document title                            |
+| `subtitle`                                       | string         | —                   | Subtitle shown on title page              |
+| `author`                                         | string or list | —                   | Author name(s); list uses the first entry |
+| `date`                                           | string         | —                   | Date shown on title page                  |
+| `lang`                                           | string         | `en`                | Document language                         |
+| `paper`                                          | string         | `a4`                | Paper size (e.g. `a4`, `us-letter`)       |
+| `fontsize`                                       | string         | `11pt`              | Base font size                            |
+| `titlepage`                                      | bool           | `false`             | Generate a full-bleed title page          |
+| `titlepage-color`                                | string         | `1E3A5F`            | Title page background (hex, no `#`)       |
+| `titlepage-text-color`                           | string         | `FFFFFF`            | Title page text colour                    |
+| `titlepage-rule-color`                           | string         | `AAAAAA`            | Title page rule colour                    |
+| `titlepage-rule-height`                          | number         | `4`                 | Title page rule thickness (pt)            |
+| `toc`                                            | bool           | `false`             | Insert a table of contents                |
+| `toc-title`                                      | string         | `Contents`          | TOC heading                               |
+| `toc-own-page`                                   | bool           | `false`             | _(reserved, not yet implemented)_         |
+| `toc-depth`                                      | number         | `3`                 | TOC depth                                 |
+| `numbersections`                                 | bool           | `false`             | Number headings                           |
+| `disable-header-and-footer`                      | bool           | `false`             | Suppress page header and footer           |
+| `header-left` / `header-center` / `header-right` | string         | title / — / date    | Header slots                              |
+| `footer-left` / `footer-center` / `footer-right` | string         | author / — / page\# | Footer slots                              |
+| `colorlinks`                                     | bool           | `true`              | Colour hyperlinks                         |
+| `linkcolor`                                      | string         | `A50000`            | Internal link colour (hex)                |
+| `urlcolor`                                       | string         | `4077C0`            | URL link colour (hex)                     |
 
 ### AI-Friendly Output
 
@@ -136,7 +136,7 @@ zigmark -f frontmatter post.md
 ```
 
 Parses the frontmatter block (YAML `---`, TOML `+++`, JSON `{`, or ZON `.{`) and
-emits it as pretty-printed JSON.  Outputs `{}` when no frontmatter is present,
+emits it as pretty-printed JSON. Outputs `{}` when no frontmatter is present,
 so the output is always valid JSON and safe to pipe.
 
 ```bash
@@ -150,7 +150,7 @@ zigmark -f frontmatter post.md | jq '.extra.author'
 ### Edit Frontmatter
 
 `--format markdown` re-serialises the frontmatter (in its original format) and
-passes the body through verbatim.  Use `--set` and `--delete` to mutate fields
+passes the body through verbatim. Use `--set` and `--delete` to mutate fields
 before writing:
 
 ```bash
@@ -177,8 +177,8 @@ zigmark -f normalize --set title="Clean" post.md
 `--set-block` replaces a single block in the document body using a
 `type[N]` selector — the same bracket syntax used by the AST query API.
 `type` is any block tag (`block`, `heading`, `paragraph`, `table`, …);
-`N` is a zero-based index.  The right-hand side is parsed as Markdown and
-its first block becomes the replacement.  Applies to `normalize` format.
+`N` is a zero-based index. The right-hand side is parsed as Markdown and
+its first block becomes the replacement. Applies to `normalize` format.
 
 ```bash
 # Replace the first heading
@@ -194,10 +194,10 @@ zigmark -f normalize --set-block 'table[1]=| A | B |\n|---|---|\n| 1 | 2 |' post
 zigmark -f normalize --set title="Clean" --set-block 'heading[0]=# Clean' post.md -o post.md
 ```
 
-`--section-start` and `--section-end` replace every block *between* two
-HTML comment markers (the markers themselves are preserved).  Replacement
+`--section-start` and `--section-end` replace every block _between_ two
+HTML comment markers (the markers themselves are preserved). Replacement
 Markdown is read from stdin; the document file must be given as a
-positional argument.  Applies to `normalize` format.
+positional argument. Applies to `normalize` format.
 
 ```bash
 # Replace the content between <!-- bench-start --> and <!-- bench-end -->
@@ -314,14 +314,14 @@ const para_count = query.count(.paragraph);
 
 ### Frontmatter
 
-Extract and query structured metadata from the top of a Markdown file.  All four formats are normalised to `std.json.Value` for uniform access.
+Extract and query structured metadata from the top of a Markdown file. All four formats are normalised to `std.json.Value` for uniform access.
 
-| Format | Opening marker | Example |
-|---|---|---|
-| YAML | `---` | `--- \ntitle: Hello\n---` |
-| TOML | `+++` | `+++\ntitle = "Hello"\n+++` |
-| JSON | `{` | `{"title": "Hello"}` |
-| ZON | `.{` | `.{ .title = "Hello" }` |
+| Format | Opening marker | Example                     |
+| ------ | -------------- | --------------------------- |
+| YAML   | `---`          | `--- \ntitle: Hello\n---`   |
+| TOML   | `+++`          | `+++\ntitle = "Hello"\n+++` |
+| JSON   | `{`            | `{"title": "Hello"}`        |
+| ZON    | `.{`           | `.{ .title = "Hello" }`     |
 
 ```zig
 const FrontMatter = zigmark.FrontMatter;
@@ -416,15 +416,15 @@ Library.sortBy(results, "title", true);
 
 Tokens are whitespace-separated and may appear in any order.
 
-| Token | Meaning |
-|---|---|
-| `path` | frontmatter field at `path` must exist |
-| `path=value` | frontmatter field at `path` must equal `value` |
+| Token         | Meaning                                            |
+| ------------- | -------------------------------------------------- |
+| `path`        | frontmatter field at `path` must exist             |
+| `path=value`  | frontmatter field at `path` must equal `value`     |
 | `@block_type` | select blocks of this type from matching documents |
 
 Multiple `path` / `path=value` tokens are **AND-combined**: a document must satisfy every filter to appear in results.
 
-The dot-path syntax is identical to `Frontmatter` (`"title"`, `"extra.owner"`, `"taxonomies.SCF"`).  Block type names match the `AST.Block` union tags (`heading`, `paragraph`, `code_block`, `fenced_code_block`, `blockquote`, `list`, `table`, …).
+The dot-path syntax is identical to `Frontmatter` (`"title"`, `"extra.owner"`, `"taxonomies.SCF"`). Block type names match the `AST.Block` union tags (`heading`, `paragraph`, `code_block`, `fenced_code_block`, `blockquote`, `list`, `table`, …).
 
 Without a `@block_type` token, one result per matching document is returned with `result.block == null`.
 
@@ -452,17 +452,17 @@ try lib.query(allocator, "taxonomies.SCF @fenced_code_block")
 
 #### Result fields
 
-| Field | Type | Description |
-|---|---|---|
-| `entry` | `*const Library.Entry` | The matching document (`.document`, `.frontmatter`, `.path`) |
-| `block` | `?*const AST.Block` | The specific block that matched, or `null` for doc-level results |
-| `confidence` | `f32` | Match confidence in `[0.0, 1.0]`; results sorted descending |
+| Field        | Type                   | Description                                                      |
+| ------------ | ---------------------- | ---------------------------------------------------------------- |
+| `entry`      | `*const Library.Entry` | The matching document (`.document`, `.frontmatter`, `.path`)     |
+| `block`      | `?*const AST.Block`    | The specific block that matched, or `null` for doc-level results |
+| `confidence` | `f32`                  | Match confidence in `[0.0, 1.0]`; results sorted descending      |
 
 Documents without frontmatter are supported — they simply never match frontmatter filters.
 
 #### Sorting
 
-`Library.sortBy` sorts a result slice in-place by a frontmatter field value.  String fields are compared lexicographically; integer and float fields are compared numerically.  Results missing the field sort last.
+`Library.sortBy` sorts a result slice in-place by a frontmatter field value. String fields are compared lexicographically; integer and float fields are compared numerically. Results missing the field sort last.
 
 ```zig
 // Sort by title A→Z
@@ -485,7 +485,7 @@ try zigmark.HTMLRenderer.renderToWriter(allocator, &writer.interface, doc);
 try writer.interface.flush();
 ```
 
-All six built-in renderers (`HTMLRenderer`, `ASTRenderer`, `AIRenderer`, `TerminalRenderer`, `MarkdownRenderer`, `TypstRenderer`) expose `renderToWriter`.  The Typst full-document variant is `zigmark.typst.renderDocumentToWriter`.
+All six built-in renderers (`HTMLRenderer`, `ASTRenderer`, `AIRenderer`, `TerminalRenderer`, `MarkdownRenderer`, `TypstRenderer`) expose `renderToWriter`. The Typst full-document variant is `zigmark.typst.renderDocumentToWriter`.
 
 To parse from a stream (file, stdin, pipe, socket) without a `readToEndAlloc` call:
 
@@ -576,53 +576,53 @@ LD_LIBRARY_PATH=zig-out/lib ./example
 
 Every section of the [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) spec passes:
 
-| Section | Tests |
-|---|---|
-| Tabs | 11 |
-| Backslash escapes | 13 |
-| Entity and numeric character references | 17 |
-| Precedence | 1 |
-| Thematic breaks | 19 |
-| ATX headings | 18 |
-| Setext headings | 27 |
-| Indented code blocks | 12 |
-| Fenced code blocks | 29 |
-| HTML blocks | 44 |
-| Link reference definitions | 27 |
-| Paragraphs | 8 |
-| Blank lines | 1 |
-| Block quotes | 25 |
-| List items | 48 |
-| Lists | 27 |
-| Code spans | 22 |
-| Emphasis and strong emphasis | 132 |
-| Links | 90 |
-| Images | 22 |
-| Autolinks | 19 |
-| Raw HTML | 20 |
-| Hard line breaks | 15 |
-| Soft line breaks | 2 |
-| Textual content | 3 |
+| Section                                 | Tests |
+| --------------------------------------- | ----- |
+| Tabs                                    | 11    |
+| Backslash escapes                       | 13    |
+| Entity and numeric character references | 17    |
+| Precedence                              | 1     |
+| Thematic breaks                         | 19    |
+| ATX headings                            | 18    |
+| Setext headings                         | 27    |
+| Indented code blocks                    | 12    |
+| Fenced code blocks                      | 29    |
+| HTML blocks                             | 44    |
+| Link reference definitions              | 27    |
+| Paragraphs                              | 8     |
+| Blank lines                             | 1     |
+| Block quotes                            | 25    |
+| List items                              | 48    |
+| Lists                                   | 27    |
+| Code spans                              | 22    |
+| Emphasis and strong emphasis            | 132   |
+| Links                                   | 90    |
+| Images                                  | 22    |
+| Autolinks                               | 19    |
+| Raw HTML                                | 20    |
+| Hard line breaks                        | 15    |
+| Soft line breaks                        | 2     |
+| Textual content                         | 3     |
 
 ### GFM Extensions — 24/24 ✅
 
 All [GitHub Flavored Markdown](https://github.github.com/gfm/) extensions pass.
 
-| GFM Extension | Tests |
-|---|---|
-| Tables | 8/8 ✅ |
-| Task list items | 2/2 ✅ |
-| Strikethrough | 2/2 ✅ |
+| GFM Extension        | Tests    |
+| -------------------- | -------- |
+| Tables               | 8/8 ✅   |
+| Task list items      | 2/2 ✅   |
+| Strikethrough        | 2/2 ✅   |
 | Autolinks (extended) | 11/11 ✅ |
-| Disallowed raw HTML | 1/1 ✅ |
+| Disallowed raw HTML  | 1/1 ✅   |
 
 **Tables** — pipe-delimited with column alignment (`---`, `:---`, `---:`, `:---:`):
 
 ```markdown
-| Name    | Role     | Score |
-| ------- | -------- | ----: |
-| Alice   | Engineer |    42 |
-| Bob     | Designer |    37 |
+| Name  | Role     | Score |
+| ----- | -------- | ----: |
+| Alice | Engineer |    42 |
+| Bob   | Designer |    37 |
 ```
 
 **Task lists** — checked and unchecked items render as disabled checkboxes:
@@ -765,29 +765,29 @@ _Last updated: 2026-03-21 · input: `README.md` (26 KB) · run `nix run .#bench`
 
 ### Speed
 
-| Command | Mean \[ms\] | Min \[ms\] | Max \[ms\] | Relative |
-|:---|---:|---:|---:|---:|
-| `lowdown` | 3.5 ± 0.5 | 2.4 | 5.3 | 1.00 |
-| `discount` | 3.7 ± 0.6 | 2.6 | 6.2 | 1.08 ± 0.25 |
-| **`zigmark (ReleaseFast)`** | 4.8 ± 0.7 | 3.4 | 8.0 | 1.39 ± 0.29 |
-| **`zigmark (ReleaseSafe)`** | 5.1 ± 0.8 | 3.7 | 12.9 | 1.47 ± 0.32 |
-| **`zigmark (ReleaseSmall)`** | 5.3 ± 0.7 | 3.8 | 7.6 | 1.54 ± 0.32 |
-| `cmark` | 7.0 ± 1.1 | 5.1 | 10.3 | 2.02 ± 0.45 |
-| `cmark-gfm` | 8.1 ± 1.2 | 5.9 | 20.0 | 2.35 ± 0.51 |
-| `pandoc` | 197.8 ± 15.3 | 176.9 | 234.2 | 1.00 |
+| Command                      |  Mean \[ms\] | Min \[ms\] | Max \[ms\] |    Relative |
+| :--------------------------- | -----------: | ---------: | ---------: | ----------: |
+| `lowdown`                    |    3.5 ± 0.5 |        2.4 |        5.3 |        1.00 |
+| `discount`                   |    3.7 ± 0.6 |        2.6 |        6.2 | 1.08 ± 0.25 |
+| **`zigmark (ReleaseFast)`**  |    4.8 ± 0.7 |        3.4 |        8.0 | 1.39 ± 0.29 |
+| **`zigmark (ReleaseSafe)`**  |    5.1 ± 0.8 |        3.7 |       12.9 | 1.47 ± 0.32 |
+| **`zigmark (ReleaseSmall)`** |    5.3 ± 0.7 |        3.8 |        7.6 | 1.54 ± 0.32 |
+| `cmark`                      |    7.0 ± 1.1 |        5.1 |       10.3 | 2.02 ± 0.45 |
+| `cmark-gfm`                  |    8.1 ± 1.2 |        5.9 |       20.0 | 2.35 ± 0.51 |
+| `pandoc`                     | 197.8 ± 15.3 |      176.9 |      234.2 |        1.00 |
 
 ### Memory (peak RSS)
 
-| Command | Peak RSS (KB) |
-|:---|---:|
-| **`zigmark (ReleaseSmall)`** | 1540 |
-| **`zigmark (ReleaseFast)`** | 2000 |
-| `discount` | 2072 |
-| **`zigmark (ReleaseSafe)`** | 2084 |
-| `lowdown` | 3112 |
-| `cmark-gfm` | 4256 |
-| `cmark` | 4264 |
-| `pandoc` | 132208 |
+| Command                      | Peak RSS (KB) |
+| :--------------------------- | ------------: |
+| **`zigmark (ReleaseSmall)`** |          1540 |
+| **`zigmark (ReleaseFast)`**  |          2000 |
+| `discount`                   |          2072 |
+| **`zigmark (ReleaseSafe)`**  |          2084 |
+| `lowdown`                    |          3112 |
+| `cmark-gfm`                  |          4256 |
+| `cmark`                      |          4264 |
+| `pandoc`                     |        132208 |
 
 <!-- bench-end -->
 
@@ -805,7 +805,7 @@ education, nonprofits, and government institutions are all welcome.
 
 **Commercial use requires a separate licence.** If you or your organisation
 intend to profit from zigmark (products, SaaS, consulting work billed to a
-client, etc.) contact <**licensing@sc2.in>\*\*.  Commercial licensees also get
+client, etc.) contact **<inquiries@sc2.in>**. Commercial licensees also get
 priority support and the option to sponsor features.
 
 **Solo practitioners and independent consultants** using zigmark as a tool in
@@ -815,7 +815,7 @@ welcome to use it without a commercial licence.
 ## Contributing
 
 Contributions are welcome. By submitting a pull request you agree that your
-contribution is licensed under the same AGPL-3.0-or-later terms as the rest of
+contribution is licensed under the same terms as the rest of
 this project.
 
 ### Security
@@ -823,7 +823,7 @@ this project.
 **Do not open a public issue for security vulnerabilities.**
 
 If you discover a security issue, please report it responsibly by emailing
-<**security@sc2.in>\*\* with a description of the vulnerability, steps to
+**<security@sc2.in>** with a description of the vulnerability, steps to
 reproduce, and any relevant details. You will receive acknowledgement within 72
 hours and we will work with you on a fix before any public disclosure.
 
