@@ -27,6 +27,7 @@ nix run .#bench   # optional performance checks
 - Rebase or merge `main` before final review.
 - Include test coverage or update tests for behavior changes.
 - Use existing style in Zig code and no trailing whitespace.
+- AI-assisted contributions are allowed, but every AI-generated suggestion must be reviewed and approved by a human maintainer before merge. No slop: the final code must be correct, secure, and idiomatic, with all edge cases covered.
 
 ## Testing
 
