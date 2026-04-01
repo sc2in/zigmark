@@ -30,9 +30,10 @@ set_arena: ?std.heap.ArenaAllocator = null,
 
 const YamlOrigin = struct {
     yaml: Yaml,
-    /// Arena owning all JsonValue container and string memory produced by
-    /// `treeNodeToJson`.  Must NOT call `deinitJsonValue` on `.root` for
-    /// this variant — the arena frees everything at once.
+    /// Arena owning all JsonValue container memory produced by `treeNodeToJson`.
+    /// Some string values may alias `yaml` / `source` memory instead of being
+    /// duplicated into this arena. Must NOT call `deinitJsonValue` on `.root`
+    /// for this variant — the arena frees all container allocations at once.
     arena: std.heap.ArenaAllocator,
 };
 
