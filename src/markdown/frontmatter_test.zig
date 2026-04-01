@@ -71,13 +71,39 @@ test "frontmatter: YAML integer and negative values" {
 
     const count = fm.get("count");
     try tst.expect(count != null);
-    try tst.expect(count.? == .float);
-    try tst.expectApproxEqAbs(@as(f64, 42), count.?.float, 0.001);
+    try tst.expect(count.? == .integer);
+    try tst.expectEqual(@as(i64, 42), count.?.integer);
 
     const neg = fm.get("negative");
     try tst.expect(neg != null);
-    try tst.expect(neg.? == .float);
-    try tst.expectApproxEqAbs(@as(f64, -7), neg.?.float, 0.001);
+    try tst.expect(neg.? == .integer);
+    try tst.expectEqual(@as(i64, -7), neg.?.integer);
+}
+
+test "frontmatter: YAML quoted numeric strings stay as strings" {
+    const alloc = tst.allocator;
+    const source =
+        \\version: "1"
+        \\weight: "42"
+        \\tag: "007"
+    ;
+    var fm = try FrontMatter.init(alloc, source, .yaml);
+    defer fm.deinit();
+
+    const version = fm.get("version");
+    try tst.expect(version != null);
+    try tst.expect(version.? == .string);
+    try tst.expectEqualStrings("1", version.?.string);
+
+    const weight = fm.get("weight");
+    try tst.expect(weight != null);
+    try tst.expect(weight.? == .string);
+    try tst.expectEqualStrings("42", weight.?.string);
+
+    const tag = fm.get("tag");
+    try tst.expect(tag != null);
+    try tst.expect(tag.? == .string);
+    try tst.expectEqualStrings("007", tag.?.string);
 }
 
 test "frontmatter: YAML boolean values" {
@@ -563,6 +589,36 @@ test "frontmatter: serialize YAML round-trip" {
         .float => |f| try tst.expectApproxEqAbs(@as(f64, 5.0), f, 0.001),
         else => return error.UnexpectedType,
     }
+}
+
+test "frontmatter: YAML quoted numeric string survives round-trip" {
+    const alloc = tst.allocator;
+    const input =
+        \\---
+        \\tag: "007"
+        \\version: "1"
+        \\sci: "1e3"
+        \\---
+        \\# Content
+    ;
+    var fm = try FrontMatter.initFromMarkdown(alloc, input);
+    defer fm.deinit();
+
+    // Quoted numerics must arrive as strings before serialization.
+    try tst.expectEqualStrings("007", fm.get("tag").?.string);
+    try tst.expectEqualStrings("1", fm.get("version").?.string);
+    try tst.expectEqualStrings("1e3", fm.get("sci").?.string);
+
+    const out = try fm.serialize(alloc);
+    defer alloc.free(out);
+
+    var fm2 = try FrontMatter.initFromMarkdown(alloc, out);
+    defer fm2.deinit();
+
+    // Must still be strings after serialization + re-parse.
+    try tst.expectEqualStrings("007", fm2.get("tag").?.string);
+    try tst.expectEqualStrings("1", fm2.get("version").?.string);
+    try tst.expectEqualStrings("1e3", fm2.get("sci").?.string);
 }
 
 test "frontmatter: serialize YAML nested and array" {

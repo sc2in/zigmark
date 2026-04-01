@@ -14,6 +14,7 @@ const JsonValue = std.json.Value;
 
 const tomlz = @import("tomlz");
 const Yaml = @import("yaml").Yaml;
+const Tree = @import("yaml").Tree;
 
 const FrontMatter = @This();
 
@@ -27,8 +28,17 @@ original: Origin,
 /// Lazily initialised on first mutation; freed by `deinit()`.
 set_arena: ?std.heap.ArenaAllocator = null,
 
-const Origin = union(Kind) {
+const YamlOrigin = struct {
     yaml: Yaml,
+    /// Arena owning all JsonValue container memory produced by `treeNodeToJson`.
+    /// Some string values may alias `yaml` / `source` memory instead of being
+    /// duplicated into this arena. Must NOT call `deinitJsonValue` on `.root`
+    /// for this variant — the arena frees all container allocations at once.
+    arena: std.heap.ArenaAllocator,
+};
+
+const Origin = union(Kind) {
+    yaml: YamlOrigin,
     toml: tomlz.Table,
     /// `std.json.Parsed` owns all json memory in an arena; we must NOT call
     /// `deinitJsonValue` on `.root` for this variant.
@@ -60,9 +70,12 @@ pub fn init(alloc: Allocator, source: []const u8, input_kind: Kind) !FrontMatter
                 else => return err,
             };
             if (y.docs.items.len == 0) return error.EmptyDocument;
-            orig = .{ .yaml = y };
-            const doc = y.docs.items[0];
-            break :blk try yamlNodeToJson(alloc, doc);
+            var arena = std.heap.ArenaAllocator.init(alloc);
+            errdefer arena.deinit();
+            const tree = y.tree.?;
+            const value = try treeNodeToJson(arena.allocator(), tree, tree.docs[0]);
+            orig = .{ .yaml = .{ .yaml = y, .arena = arena } };
+            break :blk value;
         },
         .toml => blk: {
             const doc = try tomlz.parser.parse(alloc, source);
@@ -94,8 +107,9 @@ pub fn init(alloc: Allocator, source: []const u8, input_kind: Kind) !FrontMatter
 pub fn deinit(self: *FrontMatter) void {
     switch (self.original) {
         .yaml => |*o| {
-            deinitJsonValue(self.allocator, &self.root);
-            o.deinit(self.allocator);
+            // Arena owns all JsonValue memory — no deinitJsonValue needed.
+            o.arena.deinit();
+            o.yaml.deinit(self.allocator);
         },
         .toml => |*o| {
             deinitJsonValue(self.allocator, &self.root);
@@ -492,9 +506,11 @@ test {
     defer y.deinit(alloc);
 
     try y.load(alloc);
-    const doc = y.docs.items[0];
-    var json_value = try yamlNodeToJson(alloc, doc);
-    defer deinitJsonValue(alloc, &json_value);
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const tree = y.tree.?;
+    const json_value = try treeNodeToJson(arena.allocator(), tree, tree.docs[0]);
+    _ = json_value;
 
     // var buf: [1024]u8 = undefined;
     // var fbs = std.io.fixedBufferStream(&buf);
@@ -570,48 +586,91 @@ fn mergeJsonValue(alloc: Allocator, base: *std.json.Value, overlay: std.json.Val
     }
 }
 
-/// Recursively convert a `zig-yaml` value tree into `std.json.Value`.
-pub fn yamlNodeToJson(allocator: std.mem.Allocator, node: Yaml.Value) !JsonValue {
-    switch (node) {
-        .map => |m| {
+/// Recursively convert a `zig-yaml` Tree node into `std.json.Value`,
+/// preserving quoting information: `.string_value` (quoted) nodes always
+/// produce `.string`; `.value` (unquoted) nodes are coerced to int/float
+/// where possible.
+fn treeNodeToJson(allocator: Allocator, tree: Tree, node_index: Tree.Node.Index) !JsonValue {
+    switch (tree.nodeTag(node_index)) {
+        .doc => {
+            const inner = tree.nodeData(node_index).maybe_node.unwrap() orelse
+                return JsonValue{ .null = {} };
+            return treeNodeToJson(allocator, tree, inner);
+        },
+        .doc_with_directive => {
+            const inner = tree.nodeData(node_index).doc_with_directive.maybe_node.unwrap() orelse
+                return JsonValue{ .null = {} };
+            return treeNodeToJson(allocator, tree, inner);
+        },
+        .map_single => {
             var object = JsonValue{ .object = .init(allocator) };
-            var iter = m.iterator();
-            while (iter.next()) |entry| {
-                const key = entry.key_ptr;
-                const value = try yamlNodeToJson(allocator, entry.value_ptr.*);
-                try object.object.put(key.*, value);
+            const entry = tree.nodeData(node_index).map;
+            const key = try allocator.dupe(u8, tree.rawString(entry.key, entry.key));
+            const val = if (entry.maybe_node.unwrap()) |vn|
+                try treeNodeToJson(allocator, tree, vn)
+            else
+                JsonValue{ .null = {} };
+            try object.object.put(key, val);
+            return object;
+        },
+        .map_many => {
+            var object = JsonValue{ .object = .init(allocator) };
+            const extra_index = tree.nodeData(node_index).extra;
+            const map = tree.extraData(Tree.Map, extra_index);
+            var extra_end = map.end;
+            for (0..map.data.map_len) |_| {
+                const entry = tree.extraData(Tree.Map.Entry, extra_end);
+                extra_end = entry.end;
+                const key = try allocator.dupe(u8, tree.rawString(entry.data.key, entry.data.key));
+                const val = if (entry.data.maybe_node.unwrap()) |vn|
+                    try treeNodeToJson(allocator, tree, vn)
+                else
+                    JsonValue{ .null = {} };
+                try object.object.put(key, val);
             }
             return object;
         },
-        .list => |l| {
+        .list_empty => return JsonValue{ .array = .init(allocator) },
+        .list_one => {
             var list = JsonValue{ .array = .init(allocator) };
-            for (l) |val| {
-                const value = try yamlNodeToJson(allocator, val);
-                try list.array.append(value);
+            const idx = tree.nodeData(node_index).node;
+            try list.array.append(try treeNodeToJson(allocator, tree, idx));
+            return list;
+        },
+        .list_two => {
+            var list = JsonValue{ .array = .init(allocator) };
+            const l = tree.nodeData(node_index).list;
+            try list.array.append(try treeNodeToJson(allocator, tree, l.el1));
+            try list.array.append(try treeNodeToJson(allocator, tree, l.el2));
+            return list;
+        },
+        .list_many => {
+            var list = JsonValue{ .array = .init(allocator) };
+            const extra_index = tree.nodeData(node_index).extra;
+            const l = tree.extraData(Tree.List, extra_index);
+            var extra_end = l.end;
+            for (0..l.data.list_len) |_| {
+                const elem = tree.extraData(Tree.List.Entry, extra_end);
+                extra_end = elem.end;
+                try list.array.append(try treeNodeToJson(allocator, tree, elem.data.node));
             }
             return list;
         },
-        .scalar => |s| {
-            const value = blk: {
-                break :blk JsonValue{ .float = std.fmt.parseFloat(f32, s) catch {
-                    break :blk JsonValue{ .integer = std.fmt.parseInt(u32, s, 10) catch {
-                        break :blk JsonValue{ .string = s };
-                    } };
+        .string_value => {
+            // Quoted scalar — always a string, never coerced to a number.
+            const raw = tree.nodeData(node_index).string.slice(tree);
+            return JsonValue{ .string = raw };
+        },
+        .value => {
+            // Unquoted scalar — coerce to int, float, or keep as string.
+            const raw = tree.nodeScope(node_index).rawString(tree);
+            if (raw.len == 0) return JsonValue{ .null = {} };
+            return JsonValue{ .integer = std.fmt.parseInt(i64, raw, 10) catch {
+                return JsonValue{ .float = std.fmt.parseFloat(f64, raw) catch {
+                    return JsonValue{ .string = try allocator.dupe(u8, raw) };
                 } };
-            };
-            return value;
+            } };
         },
-
-        .boolean => |b| {
-            return JsonValue{ .bool = b };
-        },
-        .empty => {
-            return JsonValue{ .null = {} };
-        },
-        // else => |u| {
-        //     std.debug.print("Unsuported type: {}\n", .{u});
-        //     return error.UnsupportedYamlType;
-        // },
     }
 }
 
@@ -799,21 +858,19 @@ pub const FieldArg = struct {
 
 /// Infer the JSON type of a raw string value (no allocation required).
 ///
-/// Type precedence:
+/// Type precedence (numeric coercion mirrors `treeNodeToJson`; bool/null
+/// handling is additional and not present in `treeNodeToJson`):
 ///   1. `"true"` / `"false"` → `.bool`
 ///   2. `"null"` → `.null`
-///   3. Valid integer (no `.` in string) → `.integer`
-///   4. Valid float (has `.` and parses) → `.float`
+///   3. Valid integer → `.integer`
+///   4. Valid float (including scientific notation such as `1e3`) → `.float`
 ///   5. Everything else → `.string` (aliases `raw`)
 pub fn inferValue(raw: []const u8) std.json.Value {
     if (std.mem.eql(u8, raw, "true")) return .{ .bool = true };
     if (std.mem.eql(u8, raw, "false")) return .{ .bool = false };
     if (std.mem.eql(u8, raw, "null")) return .{ .null = {} };
-    if (std.mem.indexOfScalar(u8, raw, '.') == null) {
-        if (std.fmt.parseInt(i64, raw, 10)) |n| return .{ .integer = n } else |_| {}
-    } else {
-        if (std.fmt.parseFloat(f64, raw)) |f| return .{ .float = f } else |_| {}
-    }
+    if (std.fmt.parseInt(i64, raw, 10)) |n| return .{ .integer = n } else |_| {}
+    if (std.fmt.parseFloat(f64, raw)) |f| return .{ .float = f } else |_| {}
     return .{ .string = raw };
 }
 
@@ -959,6 +1016,11 @@ fn yamlNeedsQuote(s: []const u8) bool {
         }
     }
     if (s[s.len - 1] == ':') return true;
+    // Quote strings that would be coerced to a non-string type on re-read.
+    switch (inferValue(s)) {
+        .integer, .float => return true,
+        else => {},
+    }
     return false;
 }
 
