@@ -858,21 +858,18 @@ pub const FieldArg = struct {
 
 /// Infer the JSON type of a raw string value (no allocation required).
 ///
-/// Type precedence:
+/// Type precedence (mirrors `treeNodeToJson` unquoted-scalar coercion):
 ///   1. `"true"` / `"false"` → `.bool`
 ///   2. `"null"` → `.null`
-///   3. Valid integer (no `.` in string) → `.integer`
-///   4. Valid float (has `.` and parses) → `.float`
+///   3. Valid integer → `.integer`
+///   4. Valid float (including scientific notation such as `1e3`) → `.float`
 ///   5. Everything else → `.string` (aliases `raw`)
 pub fn inferValue(raw: []const u8) std.json.Value {
     if (std.mem.eql(u8, raw, "true")) return .{ .bool = true };
     if (std.mem.eql(u8, raw, "false")) return .{ .bool = false };
     if (std.mem.eql(u8, raw, "null")) return .{ .null = {} };
-    if (std.mem.indexOfScalar(u8, raw, '.') == null) {
-        if (std.fmt.parseInt(i64, raw, 10)) |n| return .{ .integer = n } else |_| {}
-    } else {
-        if (std.fmt.parseFloat(f64, raw)) |f| return .{ .float = f } else |_| {}
-    }
+    if (std.fmt.parseInt(i64, raw, 10)) |n| return .{ .integer = n } else |_| {}
+    if (std.fmt.parseFloat(f64, raw)) |f| return .{ .float = f } else |_| {}
     return .{ .string = raw };
 }
 

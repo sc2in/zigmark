@@ -597,6 +597,7 @@ test "frontmatter: YAML quoted numeric string survives round-trip" {
         \\---
         \\tag: "007"
         \\version: "1"
+        \\sci: "1e3"
         \\---
         \\# Content
     ;
@@ -606,6 +607,7 @@ test "frontmatter: YAML quoted numeric string survives round-trip" {
     // Quoted numerics must arrive as strings before serialization.
     try tst.expectEqualStrings("007", fm.get("tag").?.string);
     try tst.expectEqualStrings("1", fm.get("version").?.string);
+    try tst.expectEqualStrings("1e3", fm.get("sci").?.string);
 
     const out = try fm.serialize(alloc);
     defer alloc.free(out);
@@ -616,6 +618,7 @@ test "frontmatter: YAML quoted numeric string survives round-trip" {
     // Must still be strings after serialization + re-parse.
     try tst.expectEqualStrings("007", fm2.get("tag").?.string);
     try tst.expectEqualStrings("1", fm2.get("version").?.string);
+    try tst.expectEqualStrings("1e3", fm2.get("sci").?.string);
 }
 
 test "frontmatter: serialize YAML nested and array" {
