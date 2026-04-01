@@ -858,7 +858,8 @@ pub const FieldArg = struct {
 
 /// Infer the JSON type of a raw string value (no allocation required).
 ///
-/// Type precedence (mirrors `treeNodeToJson` unquoted-scalar coercion):
+/// Type precedence (numeric coercion mirrors `treeNodeToJson`; bool/null
+/// handling is additional and not present in `treeNodeToJson`):
 ///   1. `"true"` / `"false"` → `.bool`
 ///   2. `"null"` → `.null`
 ///   3. Valid integer → `.integer`
