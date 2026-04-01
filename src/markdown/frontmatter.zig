@@ -664,6 +664,7 @@ fn treeNodeToJson(allocator: Allocator, tree: Tree, node_index: Tree.Node.Index)
         .value => {
             // Unquoted scalar — coerce to int, float, or keep as string.
             const raw = tree.nodeScope(node_index).rawString(tree);
+            if (raw.len == 0) return JsonValue{ .null = {} };
             return JsonValue{ .integer = std.fmt.parseInt(i64, raw, 10) catch {
                 return JsonValue{ .float = std.fmt.parseFloat(f64, raw) catch {
                     return JsonValue{ .string = try allocator.dupe(u8, raw) };
@@ -1017,6 +1018,11 @@ fn yamlNeedsQuote(s: []const u8) bool {
         }
     }
     if (s[s.len - 1] == ':') return true;
+    // Quote strings that would be coerced to a non-string type on re-read.
+    switch (inferValue(s)) {
+        .integer, .float => return true,
+        else => {},
+    }
     return false;
 }
 

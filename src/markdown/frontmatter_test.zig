@@ -591,6 +591,33 @@ test "frontmatter: serialize YAML round-trip" {
     }
 }
 
+test "frontmatter: YAML quoted numeric string survives round-trip" {
+    const alloc = tst.allocator;
+    const input =
+        \\---
+        \\tag: "007"
+        \\version: "1"
+        \\---
+        \\# Content
+    ;
+    var fm = try FrontMatter.initFromMarkdown(alloc, input);
+    defer fm.deinit();
+
+    // Quoted numerics must arrive as strings before serialization.
+    try tst.expectEqualStrings("007", fm.get("tag").?.string);
+    try tst.expectEqualStrings("1", fm.get("version").?.string);
+
+    const out = try fm.serialize(alloc);
+    defer alloc.free(out);
+
+    var fm2 = try FrontMatter.initFromMarkdown(alloc, out);
+    defer fm2.deinit();
+
+    // Must still be strings after serialization + re-parse.
+    try tst.expectEqualStrings("007", fm2.get("tag").?.string);
+    try tst.expectEqualStrings("1", fm2.get("version").?.string);
+}
+
 test "frontmatter: serialize YAML nested and array" {
     const alloc = tst.allocator;
     const source =
