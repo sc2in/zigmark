@@ -35,10 +35,16 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    const pozeiden_dep = b.dependency("pozeiden", .{
+    const pozeiden_dep = b.lazyDependency("pozeiden", .{
         .target = target,
         .optimize = optimize,
     });
+    const pozeiden_module = if (pozeiden_dep) |dep|
+        dep.module("pozeiden")
+    else
+        b.addModule("pozeiden-stub", .{
+            .root_source_file = b.path("src/noop_mermaid.zig"),
+        });
     const options = b.addOptions();
     // Version priority: -Dversion flag > git describe > build.zig.zon
     // The flag lets Nix (and other sandboxed builds) inject the version
@@ -104,7 +110,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "zigmark", .module = zigmark },
                 .{ .name = "clap", .module = clap_dep.module("clap") },
-                .{ .name = "pozeiden", .module = pozeiden_dep.module("pozeiden") },
+                .{ .name = "pozeiden", .module = pozeiden_module },
             },
         }),
     });

@@ -110,9 +110,9 @@
                 echo "zig is not installed or not in PATH" >&2
                 exit 1
               fi
-              echo "Updating build.zig.zon dependencies..."
-              zig fetch --save .
-              echo "build.zig.zon updated."
+              echo "Regenerating build.zig.zon2json-lock..."
+              env -u ZIG_GLOBAL_CACHE_DIR zig2nix zon2lock
+              echo "build.zig.zon2json-lock updated."
             '')
             benchmark
           ];
@@ -126,7 +126,7 @@
             if [ -f build.zig.zon ]; then
               if [ ! -f build.zig.zon2json-lock ] || [ build.zig.zon -nt build.zig.zon2json-lock ]; then
                 echo "zig2nix: regenerating build.zig.zon2json-lock..."
-                zig2nix zon2lock
+                env -u ZIG_GLOBAL_CACHE_DIR zig2nix zon2lock
               fi
             fi
           '';

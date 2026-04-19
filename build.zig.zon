@@ -67,7 +67,8 @@
             .hash = "N-V-__8AACaGFwDmjLKFjd0jlhijuVlTuOCGoRVvp406CsLD",
         },
         .pozeiden = .{
-            .path = "../pozeiden",
+            .url = "https://github.com/sc2in/pozeiden/archive/refs/tags/v0.1.0.tar.gz",
+            .hash = "pozeiden-0.1.0-NAqiXThiCgCKuU61t_p5Nw2YP7ZHK6JMFfGcMXIX3HLN",
         },
     },
     // Specifies the set of files and directories that are included in this package.

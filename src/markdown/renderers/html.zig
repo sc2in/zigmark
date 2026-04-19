@@ -1063,3 +1063,65 @@ test "gfm table basic" {
             "</table>\n",
     );
 }
+
+fn okMermaid(src: []const u8, mfn: ?*const fn (std.mem.Allocator, []const u8) anyerror![]const u8, expected: []const u8) !void {
+    const allocator = tst.allocator;
+    var parser = Parser.init();
+    defer parser.deinit(allocator);
+    var res = try parser.parseMarkdown(allocator, src);
+    defer res.deinit(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    try renderToWriterWithMermaid(allocator, &aw.writer, res, mfn);
+    const out = try aw.toOwnedSlice();
+    defer allocator.free(out);
+    try tst.expectEqualStrings(expected, out);
+}
+
+fn stubSvg(alloc: std.mem.Allocator, _: []const u8) anyerror![]const u8 {
+    return alloc.dupe(u8, "<svg>mock</svg>");
+}
+
+fn stubSvgError(_: std.mem.Allocator, _: []const u8) anyerror![]const u8 {
+    return error.RenderFailed;
+}
+
+test "mermaid block renders as figure" {
+    try okMermaid(
+        "```mermaid\ngraph LR\nA-->B\n```",
+        stubSvg,
+        "<figure class=\"mermaid-diagram\">\n<svg>mock</svg></figure>\n",
+    );
+}
+
+test "mermaidjs block renders as figure" {
+    try okMermaid(
+        "```mermaidjs\ngraph LR\nA-->B\n```",
+        stubSvg,
+        "<figure class=\"mermaid-diagram\">\n<svg>mock</svg></figure>\n",
+    );
+}
+
+test "mermaid renderer error falls back to code block" {
+    try okMermaid(
+        "```mermaid\ngraph LR\nA-->B\n```",
+        stubSvgError,
+        "<pre><code class=\"language-mermaid\">graph LR\nA--&gt;B\n</code></pre>\n",
+    );
+}
+
+test "mermaid null renderer falls back to code block" {
+    try okMermaid(
+        "```mermaid\ngraph LR\nA-->B\n```",
+        null,
+        "<pre><code class=\"language-mermaid\">graph LR\nA--&gt;B\n</code></pre>\n",
+    );
+}
+
+test "non-mermaid lang unaffected by mermaid renderer" {
+    try okMermaid(
+        "```zig\nconst x = 1;\n```",
+        stubSvg,
+        "<pre><code class=\"language-zig\">const x = 1;\n</code></pre>\n",
+    );
+}

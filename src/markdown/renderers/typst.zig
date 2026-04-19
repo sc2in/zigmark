@@ -860,6 +860,71 @@ test "special char escaping" {
     try ok("a $ b", "a \\$ b\n\n");
 }
 
+fn okMermaid(src: []const u8, mfn: ?*const fn (std.mem.Allocator, []const u8) anyerror![]const u8, expected: []const u8) !void {
+    const allocator = tst.allocator;
+    var parser = Parser.init();
+    defer parser.deinit(allocator);
+    var res = try parser.parseMarkdown(allocator, src);
+    defer res.deinit(allocator);
+    var ctx = Ctx.init(allocator);
+    ctx.mermaid = mfn;
+    defer ctx.deinit();
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    for (res.children.items) |child| try renderBlock(&aw.writer, child, &ctx);
+    const out = try aw.toOwnedSlice();
+    defer allocator.free(out);
+    try tst.expectEqualStrings(expected, out);
+}
+
+fn stubSvg(alloc: std.mem.Allocator, _: []const u8) anyerror![]const u8 {
+    return alloc.dupe(u8, "<svg>mock</svg>");
+}
+
+fn stubSvgError(_: std.mem.Allocator, _: []const u8) anyerror![]const u8 {
+    return error.RenderFailed;
+}
+
+test "mermaid block renders as image.decode" {
+    try okMermaid(
+        "```mermaid\ngraph LR\nA-->B\n```",
+        stubSvg,
+        "#image.decode(bytes.fromBase64(\"PHN2Zz5tb2NrPC9zdmc+\"), format: \"svg\", width: 100%)\n\n",
+    );
+}
+
+test "mermaidjs block renders as image.decode" {
+    try okMermaid(
+        "```mermaidjs\ngraph LR\nA-->B\n```",
+        stubSvg,
+        "#image.decode(bytes.fromBase64(\"PHN2Zz5tb2NrPC9zdmc+\"), format: \"svg\", width: 100%)\n\n",
+    );
+}
+
+test "mermaid renderer error falls back to code block" {
+    try okMermaid(
+        "```mermaid\ngraph LR\nA-->B\n```",
+        stubSvgError,
+        "```mermaid\ngraph LR\nA-->B\n```\n\n",
+    );
+}
+
+test "mermaid null renderer falls back to code block" {
+    try okMermaid(
+        "```mermaid\ngraph LR\nA-->B\n```",
+        null,
+        "```mermaid\ngraph LR\nA-->B\n```\n\n",
+    );
+}
+
+test "non-mermaid lang unaffected by mermaid renderer" {
+    try okMermaid(
+        "```zig\nconst x = 1;\n```",
+        stubSvg,
+        "```zig\nconst x = 1;\n```\n\n",
+    );
+}
+
 test "renderDocument smoke test" {
     const allocator = tst.allocator;
     var parser = Parser.init();
