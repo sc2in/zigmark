@@ -619,7 +619,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, ctx: *const RenderCtx) 
         .fenced_code_block => |fcb| {
             mermaid: {
                 if (ctx.mermaid) |mfn| {
-                    const is_mermaid = if (fcb.language) |l| std.mem.eql(u8, l, "mermaid") else false;
+                    const is_mermaid = if (fcb.language) |l| std.mem.eql(u8, l, "mermaid") or std.mem.eql(u8, l, "mermaidjs") else false;
                     if (!is_mermaid) break :mermaid;
                     const svg = mfn(ctx.allocator, fcb.content) catch break :mermaid;
                     defer ctx.allocator.free(svg);
