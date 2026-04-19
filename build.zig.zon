@@ -66,6 +66,9 @@
             .url = "git+https://github.com/github/cmark-gfm.git#587a12bb54d95ac37241377e6ddc93ea0e45439b",
             .hash = "N-V-__8AACaGFwDmjLKFjd0jlhijuVlTuOCGoRVvp406CsLD",
         },
+        .pozeiden = .{
+            .path = "../pozeiden",
+        },
     },
     // Specifies the set of files and directories that are included in this package.
     // Only files and directories listed here are included in the `hash` that

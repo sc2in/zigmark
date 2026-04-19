@@ -9,6 +9,7 @@ pub const std_options: std.Options = .{
 
 const clap = @import("clap");
 const zigmark = @import("zigmark");
+const pozeiden = @import("pozeiden");
 const AST = zigmark.AST;
 const version = zigmark.version;
 
@@ -267,7 +268,7 @@ pub fn main() !void {
 
     // ── HTML ─────────────────────────────────────────────────────────────────
     if (std.mem.eql(u8, format, "html")) {
-        zigmark.HTMLRenderer.renderToWriter(alloc, &writer.interface, doc) catch |err| {
+        zigmark.renderHtmlWithMermaid(alloc, &writer.interface, doc, &pozeiden.render) catch |err| {
             std.debug.print("error: failed to render HTML: {}\n", .{err});
             return err;
         };
@@ -302,7 +303,7 @@ pub fn main() !void {
             frontmatterToTypstOpts(f)
         else
             .{};
-        zigmark.typst.renderDocumentToWriter(alloc, &writer.interface, doc, opts) catch |err| {
+        zigmark.renderTypstDocWithMermaid(alloc, &writer.interface, doc, opts, &pozeiden.render) catch |err| {
             std.debug.print("error: failed to render Typst: {}\n", .{err});
             return err;
         };

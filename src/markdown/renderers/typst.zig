@@ -127,9 +127,14 @@ fn writeStringLiteral(writer: anytype, s: []const u8) !void {
 const Ctx = struct {
     /// label → definition node (borrowed references; lifetime == the AST).
     footnotes: std.StringHashMap(*const AST.FootnoteDefinition),
+    allocator: Allocator,
+    mermaid: ?*const fn (Allocator, []const u8) anyerror![]const u8 = null,
 
     fn init(allocator: Allocator) Ctx {
-        return .{ .footnotes = std.StringHashMap(*const AST.FootnoteDefinition).init(allocator) };
+        return .{
+            .footnotes = std.StringHashMap(*const AST.FootnoteDefinition).init(allocator),
+            .allocator = allocator,
+        };
     }
 
     fn deinit(self: *Ctx) void {
@@ -284,6 +289,22 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, ctx: *const Ctx) anyerr
         },
 
         .fenced_code_block => |fcb| {
+            mermaid: {
+                if (ctx.mermaid) |mfn| {
+                    const is_mermaid = if (fcb.language) |l| std.mem.eql(u8, l, "mermaid") else false;
+                    if (!is_mermaid) break :mermaid;
+                    const svg = mfn(ctx.allocator, fcb.content) catch break :mermaid;
+                    defer ctx.allocator.free(svg);
+                    const encoded_len = std.base64.standard.Encoder.calcSize(svg.len);
+                    const encoded = try ctx.allocator.alloc(u8, encoded_len);
+                    defer ctx.allocator.free(encoded);
+                    _ = std.base64.standard.Encoder.encode(encoded, svg);
+                    try writer.writeAll("#image.decode(bytes.fromBase64(\"");
+                    try writer.writeAll(encoded);
+                    try writer.writeAll("\"), format: \"svg\", width: 100%)\n\n");
+                    return;
+                }
+            }
             try writer.writeAll("```");
             if (fcb.language) |lang| try writer.writeAll(lang);
             try writer.writeByte('\n');
@@ -718,6 +739,26 @@ pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
 /// Eisvogel-inspired preamble derived from `opts`.
 pub fn renderDocumentToWriter(allocator: Allocator, writer: *std.Io.Writer, doc: AST.Document, opts: DocumentOptions) !void {
     var ctx = Ctx.init(allocator);
+    defer ctx.deinit();
+    try collectFootnotes(doc, &ctx);
+    try writePreamble(writer, opts);
+    for (doc.children.items) |child| {
+        if (child == .footnote_definition) continue;
+        try renderBlock(writer, child, &ctx);
+    }
+}
+
+/// Render `doc` to a writer as a complete Typst document, converting mermaid
+/// fenced blocks to `#image.decode` calls using the provided renderer.
+pub fn renderDocumentToWriterWithMermaid(
+    allocator: Allocator,
+    writer: *std.Io.Writer,
+    doc: AST.Document,
+    opts: DocumentOptions,
+    mermaid: ?*const fn (Allocator, []const u8) anyerror![]const u8,
+) !void {
+    var ctx = Ctx.init(allocator);
+    ctx.mermaid = mermaid;
     defer ctx.deinit();
     try collectFootnotes(doc, &ctx);
     try writePreamble(writer, opts);

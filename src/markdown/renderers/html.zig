@@ -552,7 +552,13 @@ fn renderInline(writer: anytype, item: AST.Inline, gfm: bool) !void {
 
 // ── Block renderer ────────────────────────────────────────────────────────────
 
-fn renderBlock(writer: *std.Io.Writer, block: AST.Block, gfm: bool) !void {
+const RenderCtx = struct {
+    gfm: bool,
+    allocator: Allocator,
+    mermaid: ?*const fn (Allocator, []const u8) anyerror![]const u8 = null,
+};
+
+fn renderBlock(writer: *std.Io.Writer, block: AST.Block, ctx: *const RenderCtx) !void {
     switch (block) {
         .table => |tbl| {
             try writer.writeAll("<table>\n");
@@ -566,7 +572,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, gfm: bool) !void {
                     .center => try writer.writeAll("<th align=\"center\">"),
                     .right => try writer.writeAll("<th align=\"right\">"),
                 }
-                for (cell.children.items) |inl| try renderInline(writer, inl, gfm);
+                for (cell.children.items) |inl| try renderInline(writer, inl, ctx.gfm);
                 try writer.writeAll("</th>\n");
             }
             try writer.writeAll("</tr>\n</thead>\n");
@@ -583,7 +589,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, gfm: bool) !void {
                             .center => try writer.writeAll("<td align=\"center\">"),
                             .right => try writer.writeAll("<td align=\"right\">"),
                         }
-                        for (cell.children.items) |inl| try renderInline(writer, inl, gfm);
+                        for (cell.children.items) |inl| try renderInline(writer, inl, ctx.gfm);
                         try writer.writeAll("</td>\n");
                     }
                     try writer.writeAll("</tr>\n");
@@ -596,12 +602,12 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, gfm: bool) !void {
 
         .heading => |h| {
             try writer.print("<h{d}>", .{h.level});
-            for (h.children.items) |item| try renderInline(writer, item, gfm);
+            for (h.children.items) |item| try renderInline(writer, item, ctx.gfm);
             try writer.print("</h{d}>\n", .{h.level});
         },
         .paragraph => |p| {
             try writer.writeAll("<p>");
-            for (p.children.items) |item| try renderInline(writer, item, gfm);
+            for (p.children.items) |item| try renderInline(writer, item, ctx.gfm);
             try writer.writeAll("</p>\n");
         },
         .thematic_break => try writer.writeAll("<hr />\n"),
@@ -611,6 +617,18 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, gfm: bool) !void {
             try writer.writeAll("\n</code></pre>\n");
         },
         .fenced_code_block => |fcb| {
+            mermaid: {
+                if (ctx.mermaid) |mfn| {
+                    const is_mermaid = if (fcb.language) |l| std.mem.eql(u8, l, "mermaid") else false;
+                    if (!is_mermaid) break :mermaid;
+                    const svg = mfn(ctx.allocator, fcb.content) catch break :mermaid;
+                    defer ctx.allocator.free(svg);
+                    try writer.writeAll("<figure class=\"mermaid-diagram\">\n");
+                    try writer.writeAll(svg);
+                    try writer.writeAll("</figure>\n");
+                    return;
+                }
+            }
             if (fcb.language) |lang| {
                 try writer.writeAll("<pre><code class=\"language-");
                 try writeEscapedTitleWithEntities(writer, lang);
@@ -626,7 +644,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, gfm: bool) !void {
         },
         .blockquote => |bq| {
             try writer.writeAll("<blockquote>\n");
-            for (bq.children.items) |child| try renderBlock(writer, child, gfm);
+            for (bq.children.items) |child| try renderBlock(writer, child, ctx);
             try writer.writeAll("</blockquote>\n");
         },
         .list => |lst| {
@@ -671,7 +689,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, gfm: bool) !void {
                     for (item.children.items) |child| {
                         switch (child) {
                             .paragraph => |p| {
-                                for (p.children.items) |inl| try renderInline(writer, inl, gfm);
+                                for (p.children.items) |inl| try renderInline(writer, inl, ctx.gfm);
                                 wrote_inline = true;
                             },
                             else => {
@@ -680,7 +698,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, gfm: bool) !void {
                                     try writer.writeByte('\n');
                                 }
                                 wrote_inline = false;
-                                try renderBlock(writer, child, gfm);
+                                try renderBlock(writer, child, ctx);
                             },
                         }
                     }
@@ -691,7 +709,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, gfm: bool) !void {
                         try writer.writeAll("<li>");
                     } else {
                         try writer.writeAll("<li>\n");
-                        for (item.children.items) |child| try renderBlock(writer, child, gfm);
+                        for (item.children.items) |child| try renderBlock(writer, child, ctx);
                     }
                     try writer.writeAll("</li>\n");
                 }
@@ -704,15 +722,15 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, gfm: bool) !void {
                 switch (child) {
                     .paragraph => |p| {
                         try writer.print("<p><b>{s}</b>: ", .{fd.label});
-                        for (p.children.items) |inl| try renderInline(writer, inl, gfm);
+                        for (p.children.items) |inl| try renderInline(writer, inl, ctx.gfm);
                         try writer.writeAll("</p>\n");
                     },
-                    else => try renderBlock(writer, child, gfm),
+                    else => try renderBlock(writer, child, ctx),
                 }
             }
             try writer.writeAll("</div>\n");
         },
-        .html_block => |hb| try writeHtmlFiltered(writer, hb.content, gfm),
+        .html_block => |hb| try writeHtmlFiltered(writer, hb.content, ctx.gfm),
     }
 }
 
@@ -720,8 +738,20 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, gfm: bool) !void {
 
 /// Render `doc` to a writer with CommonMark-compliant HTML.
 pub fn renderToWriter(allocator: Allocator, writer: *std.Io.Writer, doc: AST.Document) !void {
-    _ = allocator;
-    for (doc.children.items) |child| try renderBlock(writer, child, doc.gfm);
+    const ctx: RenderCtx = .{ .gfm = doc.gfm, .allocator = allocator };
+    for (doc.children.items) |child| try renderBlock(writer, child, &ctx);
+}
+
+/// Render `doc` to a writer, converting mermaid fenced blocks to inline SVG
+/// using the provided renderer function.
+pub fn renderToWriterWithMermaid(
+    allocator: Allocator,
+    writer: *std.Io.Writer,
+    doc: AST.Document,
+    mermaid: ?*const fn (Allocator, []const u8) anyerror![]const u8,
+) !void {
+    const ctx: RenderCtx = .{ .gfm = doc.gfm, .allocator = allocator, .mermaid = mermaid };
+    for (doc.children.items) |child| try renderBlock(writer, child, &ctx);
 }
 
 /// Render `doc` to an allocator-owned HTML byte slice.

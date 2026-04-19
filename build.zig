@@ -35,6 +35,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const pozeiden_dep = b.dependency("pozeiden", .{
+        .target = target,
+        .optimize = optimize,
+    });
     const options = b.addOptions();
     // Version priority: -Dversion flag > git describe > build.zig.zon
     // The flag lets Nix (and other sandboxed builds) inject the version
@@ -100,6 +104,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "zigmark", .module = zigmark },
                 .{ .name = "clap", .module = clap_dep.module("clap") },
+                .{ .name = "pozeiden", .module = pozeiden_dep.module("pozeiden") },
             },
         }),
     });
