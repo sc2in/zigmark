@@ -128,7 +128,10 @@ Mermaid diagrams are rendered natively via [pozeiden](https://github.com/sc2in/p
 
 ```mermaid
 flowchart LR
-    MD[Markdown] --> Parser --> AST --> HTML & Typst & AI
+    MD[Markdown] --> Parser --> AST
+    AST --> HTML
+    AST --> Typst
+    AST --> AI
 ```
 
 ```mermaid
