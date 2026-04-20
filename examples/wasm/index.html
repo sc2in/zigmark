@@ -122,6 +122,32 @@
 
 ---
 
+## Mermaid Diagrams
+
+Mermaid diagrams are rendered natively via [pozeiden](https://github.com/sc2in/pozeiden) — no JavaScript library required.
+
+```mermaid
+flowchart LR
+    MD[Markdown] --> Parser --> AST --> HTML & Typst & AI
+```
+
+```mermaid
+sequenceDiagram
+    Browser->>zigmark.wasm: render_html(markdown)
+    zigmark.wasm->>pozeiden: render(mermaid_src)
+    pozeiden-->>zigmark.wasm: svg
+    zigmark.wasm-->>Browser: html with inline svg
+```
+
+```mermaid
+pie title Renderer usage
+    "HTML" : 60
+    "Typst" : 25
+    "AI" : 15
+```
+
+---
+
 ## Code Blocks
 
 ```zig
