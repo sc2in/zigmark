@@ -1,0 +1,45 @@
+name: Deploy Docs
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      deployments: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/determinate-nix-action@main
+        with:
+          extra-conf: |
+            sandbox = false
+
+      - name: Setup Nix cache
+        uses: DeterminateSystems/flakehub-cache-action@main
+        with:
+          use-gha-cache: "enabled"
+          flakehub-flake-name: "sc2in/zigmark"
+
+      - name: Configure permissions
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: Build site
+        run: nix build .#site -o site-out
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_SC2_PAGES_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site-out --project-name=zigmark --commit-dirty=true

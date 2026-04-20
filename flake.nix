@@ -36,6 +36,7 @@
             ./build.zig.zon2json-lock
             ./src
             ./include
+            ./examples
           ];
         };
         # Helper: build zigmark at a given optimization level (null = default).
@@ -62,6 +63,19 @@
         zigmark-safe = withDesc (mkZigmark "ReleaseSafe") "zigmark (ReleaseSafe)";
         zigmark-small = withDesc (mkZigmark "ReleaseSmall") "zigmark (ReleaseSmall)";
         zigmark-fast = withDesc (mkZigmark "ReleaseFast") "zigmark (ReleaseFast)";
+        site = (mkZigmark null).overrideAttrs (_old: {
+          pname = "zigmark-site";
+          buildPhase = "zig build site -Dversion=${version}";
+          installPhase = ''
+            mkdir -p $out
+            cp -r zig-out/site/. $out/
+            tmpdir=$(mktemp -d)
+            tar -xf $out/docs/sources.tar -C "$tmpdir" --wildcards 'zigmark/*'
+            tar -cf $out/docs/sources.tar -C "$tmpdir" zigmark
+            rm -rf "$tmpdir"
+          '';
+          meta.description = "zigmark static site (playground + docs) for zigmark.sc2.in";
+        });
       }
     );
 

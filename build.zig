@@ -337,6 +337,22 @@ pub fn build(b: *std.Build) void {
     const install_html = b.addInstallFile(b.path("examples/wasm/index.html"), "wasm/index.html");
     wasm_step.dependOn(&install_wasm.step);
     wasm_step.dependOn(&install_html.step);
+
+    // ── Site build (playground + docs → zig-out/site/) ───────────────────────
+    // Deployed to zigmark.sc2.in via nix build .#site
+    const site_step = b.step("site", "Build the combined site (playground + docs) for zigmark.sc2.in");
+    const site_wasm = b.addInstallArtifact(wasm_lib, .{
+        .dest_dir = .{ .override = .{ .custom = "site" } },
+    });
+    const site_html = b.addInstallFile(b.path("examples/wasm/index.html"), "site/index.html");
+    const site_docs = b.addInstallDirectory(.{
+        .source_dir = lib.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "site/docs",
+    });
+    site_step.dependOn(&site_wasm.step);
+    site_step.dependOn(&site_html.step);
+    site_step.dependOn(&site_docs.step);
 }
 
 /// Strip a leading "v" and trailing whitespace from a git describe string,
