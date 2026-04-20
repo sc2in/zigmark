@@ -306,6 +306,17 @@ pub fn build(b: *std.Build) void {
     zigmark_wasm_mod.addImport("mecha", wasm_mecha.module("mecha"));
     zigmark_wasm_mod.addImport("dt", wasm_dt.module("datetime"));
 
+    const wasm_pozeiden_dep = b.lazyDependency("pozeiden", .{
+        .target = wasm_target,
+        .optimize = wasm_optimize,
+    });
+    const wasm_pozeiden_module = if (wasm_pozeiden_dep) |dep|
+        dep.module("pozeiden")
+    else
+        b.addModule("pozeiden-stub-wasm", .{
+            .root_source_file = b.path("src/noop_mermaid.zig"),
+        });
+
     const wasm_lib = b.addExecutable(.{
         .name = "zigmark",
         .root_module = b.createModule(.{
@@ -314,6 +325,7 @@ pub fn build(b: *std.Build) void {
             .optimize = wasm_optimize,
             .imports = &.{
                 .{ .name = "zigmark", .module = zigmark_wasm_mod },
+                .{ .name = "pozeiden", .module = wasm_pozeiden_module },
             },
         }),
     });
