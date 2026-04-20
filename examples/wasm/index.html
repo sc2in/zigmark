@@ -10,8 +10,11 @@
   body { font: 15px/1.6 'SF Mono', Menlo, monospace; background: var(--bg); color: var(--fg); }
   header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; }
   header h1 { font-size: 16px; color: var(--accent); }
-  header .stats { font-size: 12px; opacity: 0.6; margin-left: auto; }
+  header .stats { font-size: 12px; opacity: 0.6; }
   header .stats b { color: var(--accent); }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .hdr-btn { font: 13px/1 'SF Mono', Menlo, monospace; color: var(--fg); background: none; border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; cursor: pointer; text-decoration: none; transition: border-color 0.15s; }
+  .hdr-btn:hover { border-color: var(--accent); color: var(--accent); }
   .container { display: grid; grid-template-columns: 1fr 1fr; height: calc(100vh - 48px); }
   textarea { background: #161b22; color: var(--fg); border: none; border-right: 1px solid var(--border);
              padding: 16px; font: inherit; resize: none; outline: none; }
@@ -51,6 +54,10 @@
     marked.js <b id="js-time">—</b> ms &nbsp;·&nbsp;
     speedup <b id="speedup">—</b>×
   </span>
+  <div class="header-right">
+    <a href="/docs" class="hdr-btn">Docs</a>
+    <a href="https://github.com/sc2in/zigmark" class="hdr-btn" target="_blank" rel="noopener">GitHub</a>
+  </div>
 </header>
 
 <div class="container">

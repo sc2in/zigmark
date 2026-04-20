@@ -13,6 +13,7 @@
 const std = @import("std");
 
 const zigmark = @import("zigmark");
+const pozeiden = @import("pozeiden");
 
 // ── Allocator ────────────────────────────────────────────────────────────────
 // Use a fixed-buffer allocator backed by WASM linear memory.
@@ -33,12 +34,22 @@ fn freeLastResult() void {
 
 // ── Exported API ─────────────────────────────────────────────────────────────
 
-/// Parse Markdown and render to HTML.
+/// Parse Markdown and render to HTML, with Mermaid diagrams rendered to SVG.
 /// `input` is a pointer into WASM linear memory; `len` is the byte length.
-/// Returns a pointer to the NUL-terminated result, or 0 on error.
+/// Returns a pointer to the result, or 0 on error.
 /// The pointer is valid until the next call to any render function.
 export fn render_html(input: [*]const u8, len: usize) usize {
-    return renderWith(input, len, zigmark.HTMLRenderer);
+    freeLastResult();
+    const slice = input[0..len];
+    var parser = zigmark.Parser.init();
+    var doc = parser.parseMarkdown(allocator, slice) catch return 0;
+    defer doc.deinit(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    zigmark.renderHtmlWithMermaid(allocator, &aw.writer, doc, pozeiden.render) catch return 0;
+    const buf = aw.toOwnedSlice() catch return 0;
+    last_result = buf;
+    return @intFromPtr(buf.ptr);
 }
 
 /// Parse Markdown and render to a human-readable AST tree.

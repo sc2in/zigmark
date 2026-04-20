@@ -36,6 +36,7 @@
             ./build.zig.zon2json-lock
             ./src
             ./include
+            ./examples
           ];
         };
         # Helper: build zigmark at a given optimization level (null = default).
@@ -62,6 +63,19 @@
         zigmark-safe = withDesc (mkZigmark "ReleaseSafe") "zigmark (ReleaseSafe)";
         zigmark-small = withDesc (mkZigmark "ReleaseSmall") "zigmark (ReleaseSmall)";
         zigmark-fast = withDesc (mkZigmark "ReleaseFast") "zigmark (ReleaseFast)";
+        site = (mkZigmark null).overrideAttrs (_old: {
+          pname = "zigmark-site";
+          buildPhase = "zig build site -Dversion=${version}";
+          installPhase = ''
+            mkdir -p $out
+            cp -r zig-out/site/. $out/
+            tmpdir=$(mktemp -d)
+            tar -xf $out/docs/sources.tar -C "$tmpdir" --wildcards 'zigmark/*'
+            tar -cf $out/docs/sources.tar -C "$tmpdir" zigmark
+            rm -rf "$tmpdir"
+          '';
+          meta.description = "zigmark static site (playground + docs) for zigmark.sc2.in";
+        });
       }
     );
 
@@ -110,9 +124,9 @@
                 echo "zig is not installed or not in PATH" >&2
                 exit 1
               fi
-              echo "Updating build.zig.zon dependencies..."
-              zig fetch --save .
-              echo "build.zig.zon updated."
+              echo "Regenerating build.zig.zon2json-lock..."
+              env -u ZIG_GLOBAL_CACHE_DIR zig2nix zon2lock
+              echo "build.zig.zon2json-lock updated."
             '')
             benchmark
           ];
@@ -126,7 +140,7 @@
             if [ -f build.zig.zon ]; then
               if [ ! -f build.zig.zon2json-lock ] || [ build.zig.zon -nt build.zig.zon2json-lock ]; then
                 echo "zig2nix: regenerating build.zig.zon2json-lock..."
-                zig2nix zon2lock
+                env -u ZIG_GLOBAL_CACHE_DIR zig2nix zon2lock
               fi
             fi
           '';

@@ -127,9 +127,14 @@ fn writeStringLiteral(writer: anytype, s: []const u8) !void {
 const Ctx = struct {
     /// label → definition node (borrowed references; lifetime == the AST).
     footnotes: std.StringHashMap(*const AST.FootnoteDefinition),
+    allocator: Allocator,
+    mermaid: ?*const fn (Allocator, []const u8) anyerror![]const u8 = null,
 
     fn init(allocator: Allocator) Ctx {
-        return .{ .footnotes = std.StringHashMap(*const AST.FootnoteDefinition).init(allocator) };
+        return .{
+            .footnotes = std.StringHashMap(*const AST.FootnoteDefinition).init(allocator),
+            .allocator = allocator,
+        };
     }
 
     fn deinit(self: *Ctx) void {
@@ -284,6 +289,22 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, ctx: *const Ctx) anyerr
         },
 
         .fenced_code_block => |fcb| {
+            mermaid: {
+                if (ctx.mermaid) |mfn| {
+                    const is_mermaid = if (fcb.language) |l| std.mem.eql(u8, l, "mermaid") or std.mem.eql(u8, l, "mermaidjs") else false;
+                    if (!is_mermaid) break :mermaid;
+                    const svg = mfn(ctx.allocator, fcb.content) catch break :mermaid;
+                    defer ctx.allocator.free(svg);
+                    const encoded_len = std.base64.standard.Encoder.calcSize(svg.len);
+                    const encoded = try ctx.allocator.alloc(u8, encoded_len);
+                    defer ctx.allocator.free(encoded);
+                    _ = std.base64.standard.Encoder.encode(encoded, svg);
+                    try writer.writeAll("#image.decode(bytes.fromBase64(\"");
+                    try writer.writeAll(encoded);
+                    try writer.writeAll("\"), format: \"svg\", width: 100%)\n\n");
+                    return;
+                }
+            }
             try writer.writeAll("```");
             if (fcb.language) |lang| try writer.writeAll(lang);
             try writer.writeByte('\n');
@@ -727,6 +748,26 @@ pub fn renderDocumentToWriter(allocator: Allocator, writer: *std.Io.Writer, doc:
     }
 }
 
+/// Render `doc` to a writer as a complete Typst document, converting mermaid
+/// fenced blocks to `#image.decode` calls using the provided renderer.
+pub fn renderDocumentToWriterWithMermaid(
+    allocator: Allocator,
+    writer: *std.Io.Writer,
+    doc: AST.Document,
+    opts: DocumentOptions,
+    mermaid: ?*const fn (Allocator, []const u8) anyerror![]const u8,
+) !void {
+    var ctx = Ctx.init(allocator);
+    ctx.mermaid = mermaid;
+    defer ctx.deinit();
+    try collectFootnotes(doc, &ctx);
+    try writePreamble(writer, opts);
+    for (doc.children.items) |child| {
+        if (child == .footnote_definition) continue;
+        try renderBlock(writer, child, &ctx);
+    }
+}
+
 /// Render `doc` as a complete Typst document with an Eisvogel-inspired
 /// preamble derived from `opts`.
 ///
@@ -817,6 +858,71 @@ test "special char escaping" {
     try ok("a * b", "a \\* b\n\n");
     try ok("a _ b", "a \\_ b\n\n");
     try ok("a $ b", "a \\$ b\n\n");
+}
+
+fn okMermaid(src: []const u8, mfn: ?*const fn (std.mem.Allocator, []const u8) anyerror![]const u8, expected: []const u8) !void {
+    const allocator = tst.allocator;
+    var parser = Parser.init();
+    defer parser.deinit(allocator);
+    var res = try parser.parseMarkdown(allocator, src);
+    defer res.deinit(allocator);
+    var ctx = Ctx.init(allocator);
+    ctx.mermaid = mfn;
+    defer ctx.deinit();
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    for (res.children.items) |child| try renderBlock(&aw.writer, child, &ctx);
+    const out = try aw.toOwnedSlice();
+    defer allocator.free(out);
+    try tst.expectEqualStrings(expected, out);
+}
+
+fn stubSvg(alloc: std.mem.Allocator, _: []const u8) anyerror![]const u8 {
+    return alloc.dupe(u8, "<svg>mock</svg>");
+}
+
+fn stubSvgError(_: std.mem.Allocator, _: []const u8) anyerror![]const u8 {
+    return error.RenderFailed;
+}
+
+test "mermaid block renders as image.decode" {
+    try okMermaid(
+        "```mermaid\ngraph LR\nA-->B\n```",
+        stubSvg,
+        "#image.decode(bytes.fromBase64(\"PHN2Zz5tb2NrPC9zdmc+\"), format: \"svg\", width: 100%)\n\n",
+    );
+}
+
+test "mermaidjs block renders as image.decode" {
+    try okMermaid(
+        "```mermaidjs\ngraph LR\nA-->B\n```",
+        stubSvg,
+        "#image.decode(bytes.fromBase64(\"PHN2Zz5tb2NrPC9zdmc+\"), format: \"svg\", width: 100%)\n\n",
+    );
+}
+
+test "mermaid renderer error falls back to code block" {
+    try okMermaid(
+        "```mermaid\ngraph LR\nA-->B\n```",
+        stubSvgError,
+        "```mermaid\ngraph LR\nA-->B\n```\n\n",
+    );
+}
+
+test "mermaid null renderer falls back to code block" {
+    try okMermaid(
+        "```mermaid\ngraph LR\nA-->B\n```",
+        null,
+        "```mermaid\ngraph LR\nA-->B\n```\n\n",
+    );
+}
+
+test "non-mermaid lang unaffected by mermaid renderer" {
+    try okMermaid(
+        "```zig\nconst x = 1;\n```",
+        stubSvg,
+        "```zig\nconst x = 1;\n```\n\n",
+    );
 }
 
 test "renderDocument smoke test" {

@@ -35,6 +35,16 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const pozeiden_dep = b.lazyDependency("pozeiden", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const pozeiden_module = if (pozeiden_dep) |dep|
+        dep.module("pozeiden")
+    else
+        b.addModule("pozeiden-stub", .{
+            .root_source_file = b.path("src/noop_mermaid.zig"),
+        });
     const options = b.addOptions();
     // Version priority: -Dversion flag > git describe > build.zig.zon
     // The flag lets Nix (and other sandboxed builds) inject the version
@@ -100,6 +110,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "zigmark", .module = zigmark },
                 .{ .name = "clap", .module = clap_dep.module("clap") },
+                .{ .name = "pozeiden", .module = pozeiden_module },
             },
         }),
     });
@@ -295,6 +306,17 @@ pub fn build(b: *std.Build) void {
     zigmark_wasm_mod.addImport("mecha", wasm_mecha.module("mecha"));
     zigmark_wasm_mod.addImport("dt", wasm_dt.module("datetime"));
 
+    const wasm_pozeiden_dep = b.lazyDependency("pozeiden", .{
+        .target = wasm_target,
+        .optimize = wasm_optimize,
+    });
+    const wasm_pozeiden_module = if (wasm_pozeiden_dep) |dep|
+        dep.module("pozeiden")
+    else
+        b.addModule("pozeiden-stub-wasm", .{
+            .root_source_file = b.path("src/noop_mermaid.zig"),
+        });
+
     const wasm_lib = b.addExecutable(.{
         .name = "zigmark",
         .root_module = b.createModule(.{
@@ -303,6 +325,7 @@ pub fn build(b: *std.Build) void {
             .optimize = wasm_optimize,
             .imports = &.{
                 .{ .name = "zigmark", .module = zigmark_wasm_mod },
+                .{ .name = "pozeiden", .module = wasm_pozeiden_module },
             },
         }),
     });
@@ -326,6 +349,22 @@ pub fn build(b: *std.Build) void {
     const install_html = b.addInstallFile(b.path("examples/wasm/index.html"), "wasm/index.html");
     wasm_step.dependOn(&install_wasm.step);
     wasm_step.dependOn(&install_html.step);
+
+    // ── Site build (playground + docs → zig-out/site/) ───────────────────────
+    // Deployed to zigmark.sc2.in via nix build .#site
+    const site_step = b.step("site", "Build the combined site (playground + docs) for zigmark.sc2.in");
+    const site_wasm = b.addInstallArtifact(wasm_lib, .{
+        .dest_dir = .{ .override = .{ .custom = "site" } },
+    });
+    const site_html = b.addInstallFile(b.path("examples/wasm/index.html"), "site/index.html");
+    const site_docs = b.addInstallDirectory(.{
+        .source_dir = lib.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "site/docs",
+    });
+    site_step.dependOn(&site_wasm.step);
+    site_step.dependOn(&site_html.step);
+    site_step.dependOn(&site_docs.step);
 }
 
 /// Strip a leading "v" and trailing whitespace from a git describe string,

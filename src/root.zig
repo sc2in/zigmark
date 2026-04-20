@@ -67,6 +67,35 @@ pub const TypstRenderer = Renderer.create(typst_mod);
 /// the Eisvogel-inspired preamble with title page, header/footer, etc.
 pub const typst = typst_mod;
 
+/// Function pointer type for an optional mermaid diagram renderer.
+/// Pass a function matching this signature to `renderHtmlWithMermaid` or
+/// `renderTypstDocWithMermaid` to have mermaid fenced code blocks converted
+/// to inline diagrams instead of emitting raw code blocks.
+pub const MermaidRendererFn = *const fn (std.mem.Allocator, []const u8) anyerror![]const u8;
+
+/// Render `doc` to HTML, converting mermaid fenced blocks to inline SVG
+/// `<figure>` elements using `mermaid` (pass `null` to skip conversion).
+pub fn renderHtmlWithMermaid(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    doc: AST.Document,
+    mermaid: ?MermaidRendererFn,
+) !void {
+    return html.renderToWriterWithMermaid(allocator, writer, doc, mermaid);
+}
+
+/// Render `doc` to a full Typst document, converting mermaid fenced blocks
+/// to `#image.decode` calls using `mermaid` (pass `null` to skip conversion).
+pub fn renderTypstDocWithMermaid(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    doc: AST.Document,
+    opts: typst_mod.DocumentOptions,
+    mermaid: ?MermaidRendererFn,
+) !void {
+    return typst_mod.renderDocumentToWriterWithMermaid(allocator, writer, doc, opts, mermaid);
+}
+
 /// A type-erased rendering back-end.
 ///
 /// Create concrete instances with `Renderer.create`, passing any struct that

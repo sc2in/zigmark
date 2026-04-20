@@ -95,31 +95,31 @@ Hello **world**.
 
 Supported frontmatter fields:
 
-| Field                                            | Type           | Default             | Description                               |
-| ------------------------------------------------ | -------------- | ------------------- | ----------------------------------------- |
-| `title`                                          | string         | —                   | Document title                            |
-| `subtitle`                                       | string         | —                   | Subtitle shown on title page              |
-| `author`                                         | string or list | —                   | Author name(s); list uses the first entry |
-| `date`                                           | string         | —                   | Date shown on title page                  |
-| `lang`                                           | string         | `en`                | Document language                         |
-| `paper`                                          | string         | `a4`                | Paper size (e.g. `a4`, `us-letter`)       |
-| `fontsize`                                       | string         | `11pt`              | Base font size                            |
-| `titlepage`                                      | bool           | `false`             | Generate a full-bleed title page          |
-| `titlepage-color`                                | string         | `1E3A5F`            | Title page background (hex, no `#`)       |
-| `titlepage-text-color`                           | string         | `FFFFFF`            | Title page text colour                    |
-| `titlepage-rule-color`                           | string         | `AAAAAA`            | Title page rule colour                    |
-| `titlepage-rule-height`                          | number         | `4`                 | Title page rule thickness (pt)            |
-| `toc`                                            | bool           | `false`             | Insert a table of contents                |
-| `toc-title`                                      | string         | `Contents`          | TOC heading                               |
-| `toc-own-page`                                   | bool           | `false`             | _(reserved, not yet implemented)_         |
-| `toc-depth`                                      | number         | `3`                 | TOC depth                                 |
-| `numbersections`                                 | bool           | `false`             | Number headings                           |
-| `disable-header-and-footer`                      | bool           | `false`             | Suppress page header and footer           |
-| `header-left` / `header-center` / `header-right` | string         | title / — / date    | Header slots                              |
-| `footer-left` / `footer-center` / `footer-right` | string         | author / — / page\# | Footer slots                              |
-| `colorlinks`                                     | bool           | `true`              | Colour hyperlinks                         |
-| `linkcolor`                                      | string         | `A50000`            | Internal link colour (hex)                |
-| `urlcolor`                                       | string         | `4077C0`            | URL link colour (hex)                     |
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `title` | string | — | Document title |
+| `subtitle` | string | — | Subtitle shown on title page |
+| `author` | string or list | — | Author name(s); list uses the first entry |
+| `date` | string | — | Date shown on title page |
+| `lang` | string | `en` | Document language |
+| `paper` | string | `a4` | Paper size (e.g. `a4`, `us-letter`) |
+| `fontsize` | string | `11pt` | Base font size |
+| `titlepage` | bool | `false` | Generate a full-bleed title page |
+| `titlepage-color` | string | `1E3A5F` | Title page background (hex, no `#`) |
+| `titlepage-text-color` | string | `FFFFFF` | Title page text colour |
+| `titlepage-rule-color` | string | `AAAAAA` | Title page rule colour |
+| `titlepage-rule-height` | number | `4` | Title page rule thickness (pt) |
+| `toc` | bool | `false` | Insert a table of contents |
+| `toc-title` | string | `Contents` | TOC heading |
+| `toc-own-page` | bool | `false` | _(reserved, not yet implemented)_ |
+| `toc-depth` | number | `3` | TOC depth |
+| `numbersections` | bool | `false` | Number headings |
+| `disable-header-and-footer` | bool | `false` | Suppress page header and footer |
+| `header-left` / `header-center` / `header-right` | string | title / — / date | Header slots |
+| `footer-left` / `footer-center` / `footer-right` | string | author / — / page\# | Footer slots |
+| `colorlinks` | bool | `true` | Colour hyperlinks |
+| `linkcolor` | string | `A50000` | Internal link colour (hex) |
+| `urlcolor` | string | `4077C0` | URL link colour (hex) |
 
 ### AI-Friendly Output
 
@@ -316,12 +316,12 @@ const para_count = query.count(.paragraph);
 
 Extract and query structured metadata from the top of a Markdown file. All four formats are normalised to `std.json.Value` for uniform access.
 
-| Format | Opening marker | Example                     |
-| ------ | -------------- | --------------------------- |
-| YAML   | `---`          | `--- \ntitle: Hello\n---`   |
-| TOML   | `+++`          | `+++\ntitle = "Hello"\n+++` |
-| JSON   | `{`            | `{"title": "Hello"}`        |
-| ZON    | `.{`           | `.{ .title = "Hello" }`     |
+| Format | Opening marker | Example |
+|---|---|---|
+| YAML | `---` | `--- \ntitle: Hello\n---` |
+| TOML | `+++` | `+++\ntitle = "Hello"\n+++` |
+| JSON | `{` | `{"title": "Hello"}` |
+| ZON | `.{` | `.{ .title = "Hello" }` |
 
 ```zig
 const FrontMatter = zigmark.FrontMatter;
@@ -416,10 +416,10 @@ Library.sortBy(results, "title", true);
 
 Tokens are whitespace-separated and may appear in any order.
 
-| Token         | Meaning                                            |
-| ------------- | -------------------------------------------------- |
-| `path`        | frontmatter field at `path` must exist             |
-| `path=value`  | frontmatter field at `path` must equal `value`     |
+| Token | Meaning |
+|---|---|
+| `path` | frontmatter field at `path` must exist |
+| `path=value` | frontmatter field at `path` must equal `value` |
 | `@block_type` | select blocks of this type from matching documents |
 
 Multiple `path` / `path=value` tokens are **AND-combined**: a document must satisfy every filter to appear in results.
@@ -452,11 +452,11 @@ try lib.query(allocator, "taxonomies.SCF @fenced_code_block")
 
 #### Result fields
 
-| Field        | Type                   | Description                                                      |
-| ------------ | ---------------------- | ---------------------------------------------------------------- |
-| `entry`      | `*const Library.Entry` | The matching document (`.document`, `.frontmatter`, `.path`)     |
-| `block`      | `?*const AST.Block`    | The specific block that matched, or `null` for doc-level results |
-| `confidence` | `f32`                  | Match confidence in `[0.0, 1.0]`; results sorted descending      |
+| Field | Type | Description |
+|---|---|---|
+| `entry` | `*const Library.Entry` | The matching document (`.document`, `.frontmatter`, `.path`) |
+| `block` | `?*const AST.Block` | The specific block that matched, or `null` for doc-level results |
+| `confidence` | `f32` | Match confidence in `[0.0, 1.0]`; results sorted descending |
 
 Documents without frontmatter are supported — they simply never match frontmatter filters.
 
@@ -576,45 +576,45 @@ LD_LIBRARY_PATH=zig-out/lib ./example
 
 Every section of the [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) spec passes:
 
-| Section                                 | Tests |
-| --------------------------------------- | ----- |
-| Tabs                                    | 11    |
-| Backslash escapes                       | 13    |
-| Entity and numeric character references | 17    |
-| Precedence                              | 1     |
-| Thematic breaks                         | 19    |
-| ATX headings                            | 18    |
-| Setext headings                         | 27    |
-| Indented code blocks                    | 12    |
-| Fenced code blocks                      | 29    |
-| HTML blocks                             | 44    |
-| Link reference definitions              | 27    |
-| Paragraphs                              | 8     |
-| Blank lines                             | 1     |
-| Block quotes                            | 25    |
-| List items                              | 48    |
-| Lists                                   | 27    |
-| Code spans                              | 22    |
-| Emphasis and strong emphasis            | 132   |
-| Links                                   | 90    |
-| Images                                  | 22    |
-| Autolinks                               | 19    |
-| Raw HTML                                | 20    |
-| Hard line breaks                        | 15    |
-| Soft line breaks                        | 2     |
-| Textual content                         | 3     |
+| Section | Tests |
+|---|---|
+| Tabs | 11 |
+| Backslash escapes | 13 |
+| Entity and numeric character references | 17 |
+| Precedence | 1 |
+| Thematic breaks | 19 |
+| ATX headings | 18 |
+| Setext headings | 27 |
+| Indented code blocks | 12 |
+| Fenced code blocks | 29 |
+| HTML blocks | 44 |
+| Link reference definitions | 27 |
+| Paragraphs | 8 |
+| Blank lines | 1 |
+| Block quotes | 25 |
+| List items | 48 |
+| Lists | 27 |
+| Code spans | 22 |
+| Emphasis and strong emphasis | 132 |
+| Links | 90 |
+| Images | 22 |
+| Autolinks | 19 |
+| Raw HTML | 20 |
+| Hard line breaks | 15 |
+| Soft line breaks | 2 |
+| Textual content | 3 |
 
 ### GFM Extensions — 24/24 ✅
 
 All [GitHub Flavored Markdown](https://github.github.com/gfm/) extensions pass.
 
-| GFM Extension        | Tests    |
-| -------------------- | -------- |
-| Tables               | 8/8 ✅   |
-| Task list items      | 2/2 ✅   |
-| Strikethrough        | 2/2 ✅   |
+| GFM Extension | Tests |
+|---|---|
+| Tables | 8/8 ✅ |
+| Task list items | 2/2 ✅ |
+| Strikethrough | 2/2 ✅ |
 | Autolinks (extended) | 11/11 ✅ |
-| Disallowed raw HTML  | 1/1 ✅   |
+| Disallowed raw HTML | 1/1 ✅ |
 
 **Tables** — pipe-delimited with column alignment (`---`, `:---`, `---:`, `:---:`):
 
@@ -694,9 +694,13 @@ zig-out/
 ├── lib/libzigmark.so     # C-callable shared library
 ├── include/zigmark.h     # C header
 ├── docs/                 # Generated documentation
-└── wasm/                 # WebAssembly module (zig build wasm)
+├── wasm/                 # WebAssembly module (zig build wasm)
+│   ├── zigmark.wasm
+│   └── index.html        # Live preview demo
+└── site/                 # Combined site (zig build site)
     ├── zigmark.wasm
-    └── index.html        # Live preview demo
+    ├── index.html        # Playground
+    └── docs/             # API docs
 ```
 
 ### WASM
@@ -737,6 +741,9 @@ nix develop
 # WASM live preview demo
 nix run .#wasm-demo
 
+# Build combined site (playground + docs) for zigmark.sc2.in
+nix build .#site
+
 # Run CLI performance benchmark (compares zigmark vs cmark, updates README)
 nix run .#bench
 ```
@@ -747,8 +754,8 @@ Requires **Zig 0.15.2** or later.
 
 - **`Parser`** — Block-level + inline two-pass parser built on the [mecha](https://github.com/Hejsil/mecha) parser combinator library; accepts a `[]const u8` via `parseMarkdown` or any `*std.Io.Reader` via `parseFromReader`
 - **`AST`** — Typed union-based Abstract Syntax Tree (`Document` → `Block` → `Inline`)
-- **`HTMLRenderer`** — CommonMark-compliant HTML serialiser
-- **`TypstRenderer`** — Typst markup renderer; `typst.renderDocument` adds an eisvogel-inspired preamble (title page, TOC, headers/footers, styled code blocks and blockquotes) driven by `DocumentOptions`
+- **`HTMLRenderer`** — CommonMark-compliant HTML serialiser; `renderHtmlWithMermaid` accepts an optional `pozeiden.render`-compatible function to convert `mermaid`/`mermaidjs` fenced blocks to inline SVG `<figure>` elements (falls back to a plain code block on error or when `null`)
+- **`TypstRenderer`** — Typst markup renderer; `typst.renderDocument` adds an eisvogel-inspired preamble (title page, TOC, headers/footers, styled code blocks and blockquotes) driven by `DocumentOptions`; `renderTypstDocWithMermaid` converts `mermaid`/`mermaidjs` blocks to `#image.decode` calls
 - **`ASTRenderer`** — Human-readable tree diagram with box-drawing characters
 - **`AIRenderer`** — Token-efficient AST representation for LLM consumption
 - **`MarkdownRenderer`** — AST→Markdown normaliser; converts headings to ATX, links to inline, code blocks to fenced
@@ -761,33 +768,33 @@ Requires **Zig 0.15.2** or later.
 
 <!-- bench-start -->
 
-_Last updated: 2026-03-21 · input: `README.md` (26 KB) · run `nix run .#bench` to reproduce_
+_Last updated: 2026-04-20 · input: `README.md` (31 KB) · run `nix run .#bench` to reproduce_
 
 ### Speed
 
-| Command                      |  Mean \[ms\] | Min \[ms\] | Max \[ms\] |    Relative |
-| :--------------------------- | -----------: | ---------: | ---------: | ----------: |
-| `lowdown`                    |    3.5 ± 0.5 |        2.4 |        5.3 |        1.00 |
-| `discount`                   |    3.7 ± 0.6 |        2.6 |        6.2 | 1.08 ± 0.25 |
-| **`zigmark (ReleaseFast)`**  |    4.8 ± 0.7 |        3.4 |        8.0 | 1.39 ± 0.29 |
-| **`zigmark (ReleaseSafe)`**  |    5.1 ± 0.8 |        3.7 |       12.9 | 1.47 ± 0.32 |
-| **`zigmark (ReleaseSmall)`** |    5.3 ± 0.7 |        3.8 |        7.6 | 1.54 ± 0.32 |
-| `cmark`                      |    7.0 ± 1.1 |        5.1 |       10.3 | 2.02 ± 0.45 |
-| `cmark-gfm`                  |    8.1 ± 1.2 |        5.9 |       20.0 | 2.35 ± 0.51 |
-| `pandoc`                     | 197.8 ± 15.3 |      176.9 |      234.2 |        1.00 |
+| Command | Mean \[ms\] | Min \[ms\] | Max \[ms\] | Relative |
+|:---|---:|---:|---:|---:|
+| `lowdown` | 2.6 ± 1.4 | 1.3 | 13.2 | 1.00 |
+| **`zigmark (ReleaseFast)`** | 3.5 ± 2.1 | 1.9 | 24.3 | 1.38 ± 1.12 |
+| `discount` | 3.5 ± 1.8 | 1.7 | 18.5 | 1.37 ± 1.04 |
+| **`zigmark (ReleaseSafe)`** | 4.0 ± 2.3 | 2.0 | 20.3 | 1.55 ± 1.24 |
+| **`zigmark (ReleaseSmall)`** | 4.0 ± 1.6 | 2.3 | 18.6 | 1.57 ± 1.08 |
+| `cmark-gfm` | 5.6 ± 1.9 | 3.2 | 17.4 | 2.20 ± 1.45 |
+| `cmark` | 5.9 ± 2.3 | 3.1 | 23.7 | 2.31 ± 1.59 |
+| `pandoc` | 211.4 ± 34.5 | 167.7 | 278.4 | 1.00 |
 
 ### Memory (peak RSS)
 
-| Command                      | Peak RSS (KB) |
-| :--------------------------- | ------------: |
-| **`zigmark (ReleaseSmall)`** |          1540 |
-| **`zigmark (ReleaseFast)`**  |          2000 |
-| `discount`                   |          2072 |
-| **`zigmark (ReleaseSafe)`**  |          2084 |
-| `lowdown`                    |          3112 |
-| `cmark-gfm`                  |          4256 |
-| `cmark`                      |          4264 |
-| `pandoc`                     |        132208 |
+| Command | Peak RSS (KB) |
+|:---|---:|
+| **`zigmark (ReleaseSmall)`** | 1856 |
+| **`zigmark (ReleaseFast)`** | 2116 |
+| `discount` | 2168 |
+| **`zigmark (ReleaseSafe)`** | 2372 |
+| `lowdown` | 3040 |
+| `cmark` | 4104 |
+| `cmark-gfm` | 4168 |
+| `pandoc` | 128628 |
 
 <!-- bench-end -->
 
