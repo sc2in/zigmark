@@ -45,10 +45,10 @@
     "hash": "sha256-HiSGtRsSbW03R6aKoMVVFOLrwP5aXtpeXUC/bE5M/qo=",
     "rev": "587a12bb54d95ac37241377e6ddc93ea0e45439b"
   },
-  "pozeiden-0.1.0-NAqiXThiCgCKuU61t_p5Nw2YP7ZHK6JMFfGcMXIX3HLN": {
+  "pozeiden-0.1.2-NAqiXZmYCgDmXFgpV7f3BqFaB3AeiMfByoKkxuQa668K": {
     "name": "pozeiden",
-    "url": "https://github.com/sc2in/pozeiden/archive/refs/tags/v0.1.0.tar.gz",
-    "hash": "sha256-FGno4AH5nbh4+QiiUy97J8vyo0oes5JhT/+JQqAAUdA="
+    "url": "https://github.com/sc2in/pozeiden/archive/refs/tags/v0.1.2.tar.gz",
+    "hash": "sha256-DBZy/m8zEetjZVXSh1o3kU5pp8ctyYsfkM8TpGonDmA="
   },
   "zigmark-0.5.0-cwOiyHzQCQBz8SXqL4pV4shRF5KG4kZxvbps1fpHygGg": {
     "name": "zigmark",
