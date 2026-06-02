@@ -111,7 +111,7 @@ fn mergedTextRun(items: []const AST.Inline, start: usize, allocator: Allocator) 
     if (consumed == 1) return .{ .text = first, .consumed = 1, .allocated = false };
 
     // Multiple adjacent text nodes — merge
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     for (items[start..end]) |item| try buf.appendSlice(allocator, item.text.content);
     return .{ .text = try buf.toOwnedSlice(allocator), .consumed = consumed, .allocated = true };
 }
@@ -127,7 +127,7 @@ fn isSingleTextRun(items: []const AST.Inline) bool {
 /// Collect the merged text content of a pure text run.
 fn collectTextRun(items: []const AST.Inline, allocator: Allocator) !struct { text: []const u8, allocated: bool } {
     if (items.len == 1) return .{ .text = items[0].text.content, .allocated = false };
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     for (items) |item| try buf.appendSlice(allocator, item.text.content);
     return .{ .text = try buf.toOwnedSlice(allocator), .allocated = true };
 }

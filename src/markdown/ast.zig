@@ -45,7 +45,7 @@ pub const Document = struct {
     pub fn init(allocator: std.mem.Allocator) Document {
         _ = allocator; // autofix
         return Document{
-            .children = std.ArrayList(Block){},
+            .children = std.ArrayList(Block).empty,
         };
     }
 
@@ -71,7 +71,7 @@ pub const Document = struct {
 
         /// Return every top-level block whose active tag equals `block_type`.
         pub fn blocks(self: Query, allocator: std.mem.Allocator, block_type: std.meta.Tag(Block)) !std.ArrayList(Block) {
-            var results = std.ArrayList(Block){};
+            var results = std.ArrayList(Block).empty;
 
             for (self.document.children.items) |block| {
                 if (std.meta.activeTag(block) == block_type) {
@@ -85,7 +85,7 @@ pub const Document = struct {
         /// Return all headings, optionally filtered to a single `level` (1–6).
         /// Pass `null` to return headings of every level.
         pub fn headings(self: Query, allocator: std.mem.Allocator, level: ?u8) !std.ArrayList(*const Heading) {
-            var results = std.ArrayList(*const Heading){};
+            var results = std.ArrayList(*const Heading).empty;
 
             for (self.document.children.items) |*block| {
                 if (block.* == .heading) {
@@ -104,7 +104,7 @@ pub const Document = struct {
 
         /// Return every paragraph that contains at least one inline of `inline_type`.
         pub fn paragraphsWithInlines(self: Query, allocator: std.mem.Allocator, inline_type: std.meta.Tag(Inline)) !std.ArrayList(*const Paragraph) {
-            var results = std.ArrayList(*const Paragraph){};
+            var results = std.ArrayList(*const Paragraph).empty;
 
             for (self.document.children.items) |*block| {
                 if (block.* == .paragraph) {
@@ -123,7 +123,7 @@ pub const Document = struct {
         /// Collect every `Link` inline across all blocks (paragraphs, headings,
         /// blockquotes, and list items) in document order.
         pub fn links(self: Query, allocator: std.mem.Allocator) !std.ArrayList(*const Link) {
-            var results = std.ArrayList(*const Link){};
+            var results = std.ArrayList(*const Link).empty;
 
             for (self.document.children.items) |*block| {
                 try self.collectLinksFromBlock(allocator, block, &results);
@@ -332,7 +332,7 @@ pub const Paragraph = struct {
     pub fn init(allocator: std.mem.Allocator) Paragraph {
         _ = allocator; // autofix
         return Paragraph{
-            .children = std.ArrayList(Inline){},
+            .children = std.ArrayList(Inline).empty,
         };
     }
 
@@ -374,7 +374,7 @@ pub const Heading = struct {
         _ = allocator; // autofix
         return Heading{
             .level = level,
-            .children = std.ArrayList(Inline){},
+            .children = std.ArrayList(Inline).empty,
         };
     }
 
@@ -454,7 +454,7 @@ pub const Blockquote = struct {
     pub fn init(allocator: std.mem.Allocator) Blockquote {
         _ = allocator; // autofix
         return Blockquote{
-            .children = std.ArrayList(Block){},
+            .children = std.ArrayList(Block).empty,
         };
     }
 
@@ -486,7 +486,7 @@ pub const ListItem = struct {
     pub fn init(allocator: std.mem.Allocator) ListItem {
         _ = allocator; // autofix
         return ListItem{
-            .children = std.ArrayList(Block){},
+            .children = std.ArrayList(Block).empty,
         };
     }
 
@@ -514,7 +514,7 @@ pub const List = struct {
         _ = allocator; // autofix
         return List{
             .type = list_type,
-            .items = std.ArrayList(ListItem){},
+            .items = std.ArrayList(ListItem).empty,
         };
     }
 
@@ -568,7 +568,7 @@ pub const FootnoteDefinition = struct {
         _ = allocator; // autofix
         return FootnoteDefinition{
             .label = label,
-            .children = std.ArrayList(Block){},
+            .children = std.ArrayList(Block).empty,
         };
     }
 
@@ -604,7 +604,7 @@ pub const Emphasis = struct {
     pub fn init(allocator: std.mem.Allocator, marker: u8) Emphasis {
         _ = allocator; // autofix
         return Emphasis{
-            .children = std.ArrayList(Inline){},
+            .children = std.ArrayList(Inline).empty,
             .marker = marker,
         };
     }
@@ -628,7 +628,7 @@ pub const Strong = struct {
     pub fn init(allocator: std.mem.Allocator, marker: u8) Strong {
         _ = allocator; // autofix
         return Strong{
-            .children = std.ArrayList(Inline){},
+            .children = std.ArrayList(Inline).empty,
             .marker = marker,
         };
     }
@@ -649,7 +649,7 @@ pub const Strikethrough = struct {
 
     pub fn init(allocator: std.mem.Allocator) Strikethrough {
         _ = allocator;
-        return Strikethrough{ .children = std.ArrayList(Inline){} };
+        return Strikethrough{ .children = std.ArrayList(Inline).empty };
     }
 
     pub fn deinit(self: *Strikethrough, allocator: std.mem.Allocator) void {
@@ -720,7 +720,7 @@ pub const Link = struct {
     pub fn init(allocator: std.mem.Allocator, destination: LinkDestination, link_type: LinkType) Link {
         _ = allocator; // autofix
         return Link{
-            .children = std.ArrayList(Inline){},
+            .children = std.ArrayList(Inline).empty,
             .destination = destination,
             .link_type = link_type,
         };
@@ -852,7 +852,7 @@ pub const TableCell = struct {
     pub fn init(allocator: std.mem.Allocator) TableCell {
         _ = allocator; // autofix
         return TableCell{
-            .children = std.ArrayList(Inline){},
+            .children = std.ArrayList(Inline).empty,
         };
     }
 
@@ -888,7 +888,7 @@ pub const TableRow = struct {
     pub fn init(allocator: std.mem.Allocator) TableRow {
         _ = allocator; // autofix
         return TableRow{
-            .cells = std.ArrayList(TableCell){},
+            .cells = std.ArrayList(TableCell).empty,
         };
     }
 
@@ -928,9 +928,9 @@ pub const Table = struct {
 
     pub fn init(allocator: std.mem.Allocator) Table {
         return Table{
-            .alignments = std.ArrayList(TableAlignment){},
+            .alignments = std.ArrayList(TableAlignment).empty,
             .header = TableRow.init(allocator),
-            .body = std.ArrayList(TableRow){},
+            .body = std.ArrayList(TableRow).empty,
         };
     }
 

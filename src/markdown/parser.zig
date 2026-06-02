@@ -64,7 +64,7 @@ fn isThematicBreak(line: []const u8) bool {
     var leading: usize = 0;
     while (leading < line.len and line[leading] == ' ') leading += 1;
     if (leading >= 4) return false;
-    const t = mem.trimRight(u8, line[leading..], " \t\r");
+    const t = mem.trimEnd(u8, line[leading..], " \t\r");
     if (t.len < 3) return false;
     const c = t[0];
     if (c != '-' and c != '*' and c != '_') return false;
@@ -225,7 +225,7 @@ fn isLinkRefDefStart(line: []const u8) bool {
         } else break;
     }
     if (leading >= 4) return false;
-    const t = mem.trimLeft(u8, line, " ");
+    const t = mem.trimStart(u8, line, " ");
     if (t.len == 0 or t[0] != '[') return false;
     if (t.len > 1 and t[1] == '^') return false;
     var pos: usize = 1;
@@ -305,7 +305,7 @@ pub fn parseFromReader(self: Self, allocator: Allocator, reader: *std.Io.Reader)
 
 /// Split input into lines, normalising CRLF/CR to LF.
 fn splitLines(allocator: Allocator, input: []const u8) !std.ArrayList([]const u8) {
-    var list = std.ArrayList([]const u8){};
+    var list = std.ArrayList([]const u8).empty;
     var it = mem.splitScalar(u8, input, '\n');
     while (it.next()) |raw| {
         const line = if (raw.len > 0 and raw[raw.len - 1] == '\r') raw[0 .. raw.len - 1] else raw;
@@ -377,7 +377,7 @@ fn collectLinkRefDefs(allocator: Allocator, input: []const u8, ref_map: *RefMap)
         // Blockquote: strip prefixes and scan inner content for ref defs
         if (t[0] == '>') {
             in_paragraph = false;
-            var bq = std.ArrayList(u8){};
+            var bq = std.ArrayList(u8).empty;
             while (i < lines.len) {
                 const bt = trimLine(lines[i]);
                 if (bt.len == 0 or bt[0] != '>') break;
@@ -671,7 +671,7 @@ fn parseList(
             is_blank_item = trimLine(first_strip.rest).len == 0 and first_strip.virtual_spaces == 0;
         }
 
-        var item_buf = std.ArrayList(u8){};
+        var item_buf = std.ArrayList(u8).empty;
         try appendStripped(allocator, &item_buf, first_strip);
         i += 1;
 
@@ -701,7 +701,7 @@ fn parseList(
             for (inner_doc.children.items) |block| try item.children.append(allocator, block);
             // Free the ArrayList backing memory without deiniting moved children.
             inner_doc.children.deinit(allocator);
-            inner_doc.children = std.ArrayList(AST.Block){};
+            inner_doc.children = std.ArrayList(AST.Block).empty;
         }
 
         if (hasLooseContent(item.children.items, cont.saw_blank, cont.saw_blank_before_sublist)) any_item_loose = true;
@@ -840,7 +840,7 @@ fn isHtmlBlockStart(t: []const u8) bool {
     // Type 7: a complete open or closing tag followed only by optional whitespace
     // (cannot interrupt a paragraph — handled by caller)
     if (Inline.tryParseHtmlTag(t, 0)) |end| {
-        const after = mem.trimRight(u8, t[end..], " \t\r");
+        const after = mem.trimEnd(u8, t[end..], " \t\r");
         if (after.len == 0) return true;
     }
 
@@ -963,7 +963,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
 
         // Indented code block
         if (parsers.tryIndentedCode(raw)) |_| {
-            var buf = std.ArrayList(u8){};
+            var buf = std.ArrayList(u8).empty;
             while (i < lines.len) {
                 if (trimLine(lines[i]).len == 0) {
                     var peek = i + 1;
@@ -985,7 +985,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
         // Fenced code block
         if (parsers.tryFenceStart(raw)) |fence| {
             i += 1;
-            var buf = std.ArrayList(u8){};
+            var buf = std.ArrayList(u8).empty;
             var first_content_line = true;
             while (i < lines.len) {
                 if (parsers.isFenceEnd(lines[i], fence)) {
@@ -1007,7 +1007,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
 
         // Blockquote
         if (parsers.tryBlockquoteLine(allocator, raw)) |_| {
-            var bq_buf = std.ArrayList(u8){};
+            var bq_buf = std.ArrayList(u8).empty;
             var has_lazy_setext_line = false;
             var last_was_blank_bq = false; // track if last '>' line was blank
             var in_bq_para = false; // track if we're in a paragraph inside the blockquote
@@ -1058,7 +1058,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
                     // The inner parser needs the raw indentation to determine
                     // whether the line is paragraph continuation text vs a
                     // new block construct (e.g. 4+ spaces = can't start a list).
-                    const nocr = mem.trimRight(u8, lines[i], "\r");
+                    const nocr = mem.trimEnd(u8, lines[i], "\r");
                     try bq_buf.appendSlice(allocator, nocr);
                     // Track if any lazy continuation line looks like a setext underline
                     if (isSetextEqLine(lines[i]) or isSetextDashLine(lines[i])) {
@@ -1075,7 +1075,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
             var bq = AST.Blockquote.init(allocator);
             for (inner_doc.children.items) |block| try bq.children.append(allocator, block);
             inner_doc.children.deinit(allocator);
-            inner_doc.children = std.ArrayList(AST.Block){};
+            inner_doc.children = std.ArrayList(AST.Block).empty;
             try doc.children.append(allocator, .{ .blockquote = bq });
             continue;
         }
@@ -1098,7 +1098,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
 
         // HTML block (CommonMark §4.6)
         if (isHtmlBlockStart(t)) {
-            var html_buf = std.ArrayList(u8){};
+            var html_buf = std.ArrayList(u8).empty;
             const block_type = htmlBlockEndCondition(t);
             while (i < lines.len) {
                 if (html_buf.items.len > 0) try html_buf.append(allocator, '\n');
@@ -1146,7 +1146,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
         // Paragraph (possibly setext heading)
         {
             var is_first = true;
-            var para_buf = std.ArrayList(u8){};
+            var para_buf = std.ArrayList(u8).empty;
             while (i < lines.len) {
                 const lr = lines[i];
                 const lt = trimLine(lr);
@@ -1160,8 +1160,8 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
                 is_first = false;
                 // Use left-trimmed content to preserve trailing spaces for code spans.
                 // Trailing spaces at the end of the paragraph are stripped below.
-                const nocr = mem.trimRight(u8, lr, "\r");
-                const left_trimmed = mem.trimLeft(u8, nocr, " \t");
+                const nocr = mem.trimEnd(u8, lr, "\r");
+                const left_trimmed = mem.trimStart(u8, nocr, " \t");
                 try para_buf.appendSlice(allocator, left_trimmed);
                 i += 1;
                 if (next_setext) break;
@@ -1304,7 +1304,7 @@ fn parseTableDelimiter(line: []const u8) ?TableDelimResult {
 fn splitTableRow(line: []const u8, col_count: usize) []const []const u8 {
     // Work on trimmed line, but preserve interior spaces for inline parsing
     const t = trimLine(line);
-    var cells = std.ArrayList([]const u8){};
+    var cells = std.ArrayList([]const u8).empty;
 
     var i: usize = 0;
 
@@ -1345,7 +1345,7 @@ const TableParseResult = struct {
 /// at the cell level, before inline parsing — including inside code spans).
 fn unescapeTablePipes(allocator: Allocator, src: []const u8) ![]const u8 {
     if (mem.indexOf(u8, src, "\\|") == null) return allocator.dupe(u8, src);
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     var i: usize = 0;
     while (i < src.len) {
         if (src[i] == '\\' and i + 1 < src.len and src[i + 1] == '|') {
