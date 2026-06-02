@@ -44,9 +44,9 @@
     "url": "git+https://github.com/mnemnion/mvzr?ref=v0.3.10#dd0e1bd2d6b10f9650317b30baef7ab7bc9dd9ec",
     "hash": "sha256-hUGdJPjC1PAm6zWL9eAE7A+wAfzf6Q7uSutT2Xe7EMU="
   },
-  "zig_yaml-0.3.0-C1161vSrAgCEKLk0825Y_GtmnThQI6O_cqtkBHb57KT-": {
+  "zig_yaml-0.3.0-C1161oSpAgCiEJXrktVkXNSWNQifQ8NWvNB-20PqoFc3": {
     "name": "yaml",
-    "url": "git+https://github.com/kubkon/zig-yaml#84d747bc80937a08ea1cf76a63fee12c5fb1dd61",
-    "hash": "sha256-tYmtVl2eSH+botXZ+jAk4ctRqCrMu+lptnkMpkG6kwc="
+    "url": "git+https://github.com/sc2in/zig-yaml#691a2c37f1546fe843f7080fd7bf4450f1facb2e",
+    "hash": "sha256-8BNs41Ch8CmvRME13b6xXTD6VN2/2LewIsW7kp30tCY="
   }
 }
