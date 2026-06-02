@@ -1,8 +1,8 @@
 {
-  "tomlz-0.3.0-H2E6wzxKAgD6D_3w6raXVf-FpUmFduKFWXQOCg6dQSGb": {
+  "tomlz-0.3.0-H2E6w05KAgCslPcZtjzZlnXYy1o5oZLmFrU-nvwWOwdp": {
     "name": "tomlz",
-    "url": "git+https://github.com/tsunaminoai/tomlz.git#b6362cb00e89d8f4996a9198a6ef33ac0523f52a",
-    "hash": "sha256-Lcwprnedbo1rR9qpK6MeJjJtZFzt028qSp25NjhqI3g="
+    "url": "git+https://github.com/tsunaminoai/tomlz.git#336c011194b4c91b714a063824e4a67f6a396976",
+    "hash": "sha256-F7Qr5XhYd/G+tXIXiJ/1w7uJ4+xhOOdpQIpzhZWpDfw="
   },
   "mvzr-0.3.7-ZSOky5FtAQB2VrFQPNbXHQCFJxWTMAYEK7ljYEaMR6jt": {
     "name": "mvzr",
@@ -24,11 +24,6 @@
     "url": "git+https://github.com/frmdstryr/zig-datetime#3a39a21e6e34dcb0ade0ff828d0914d40ba535f3",
     "hash": "sha256-0pd83SCUoUSkFUdiIQ54Vpb9HWUQSwtON1+wf86qJfY="
   },
-  "zig_yaml-0.2.0-C1161pmrAgC_rL9WzjvgNg7HnmyAMwHsG3Sre0F4haPI": {
-    "name": "yaml",
-    "url": "https://github.com/kubkon/zig-yaml/archive/refs/tags/0.2.0.tar.gz",
-    "hash": "sha256-ojn6HPabsK5UgBhKi/QPTQz/QmHqr22T3Kte1qtmi78="
-  },
   "mecha-0.11.0-dVGaSNuLAQDk3kihQu0WAoRKEOaR1KUF7z55Mj33DQ6A": {
     "name": "mecha",
     "url": "git+https://github.com/Hejsil/mecha#4ee15ea13107bc504a5c17291a7de1d3bf909a32",
@@ -48,5 +43,10 @@
     "name": "mvzr",
     "url": "git+https://github.com/mnemnion/mvzr?ref=v0.3.10#dd0e1bd2d6b10f9650317b30baef7ab7bc9dd9ec",
     "hash": "sha256-hUGdJPjC1PAm6zWL9eAE7A+wAfzf6Q7uSutT2Xe7EMU="
+  },
+  "zig_yaml-0.3.0-C1161vSrAgCEKLk0825Y_GtmnThQI6O_cqtkBHb57KT-": {
+    "name": "yaml",
+    "url": "git+https://github.com/kubkon/zig-yaml#84d747bc80937a08ea1cf76a63fee12c5fb1dd61",
+    "hash": "sha256-tYmtVl2eSH+botXZ+jAk4ctRqCrMu+lptnkMpkG6kwc="
   }
 }

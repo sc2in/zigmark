@@ -33,8 +33,8 @@
     // internet connectivity.
     .dependencies = .{
         .tomlz = .{
-            .url = "git+https://github.com/tsunaminoai/tomlz.git#b6362cb00e89d8f4996a9198a6ef33ac0523f52a",
-            .hash = "tomlz-0.3.0-H2E6wzxKAgD6D_3w6raXVf-FpUmFduKFWXQOCg6dQSGb",
+            .url = "git+https://github.com/tsunaminoai/tomlz.git#336c011194b4c91b714a063824e4a67f6a396976",
+            .hash = "tomlz-0.3.0-H2E6w05KAgCslPcZtjzZlnXYy1o5oZLmFrU-nvwWOwdp",
         },
         .mvzr = .{
             .url = "git+https://github.com/mnemnion/mvzr#17a44b46cfe48ef46818d51bdf1161783dfe66e1",
@@ -54,10 +54,6 @@
             .url = "git+https://github.com/frmdstryr/zig-datetime#3a39a21e6e34dcb0ade0ff828d0914d40ba535f3",
             .hash = "datetime-0.8.0-cJNXzP_YAQBxQ5hkNNP6ScnG5XsqciJmeP5RVV4xwCBA",
         },
-        .yaml = .{
-            .url = "https://github.com/kubkon/zig-yaml/archive/refs/tags/0.2.0.tar.gz",
-            .hash = "zig_yaml-0.2.0-C1161pmrAgC_rL9WzjvgNg7HnmyAMwHsG3Sre0F4haPI",
-        },
         .mecha = .{
             .url = "git+https://github.com/Hejsil/mecha#4ee15ea13107bc504a5c17291a7de1d3bf909a32",
             .hash = "mecha-0.11.0-dVGaSNuLAQDk3kihQu0WAoRKEOaR1KUF7z55Mj33DQ6A",
@@ -73,6 +69,10 @@
             .url = "https://github.com/sc2in/pozeiden/archive/refs/tags/v0.1.3.tar.gz",
             .hash = "pozeiden-0.1.3-NAqiXeOXCgAUNGkydN-lIYUZQ87uzGQPOQ-wXvK4FNW3",
             .lazy = true,
+        },
+        .yaml = .{
+            .url = "git+https://github.com/kubkon/zig-yaml#84d747bc80937a08ea1cf76a63fee12c5fb1dd61",
+            .hash = "zig_yaml-0.3.0-C1161vSrAgCEKLk0825Y_GtmnThQI6O_cqtkBHb57KT-",
         },
     },
     // Specifies the set of files and directories that are included in this package.
