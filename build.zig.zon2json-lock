@@ -1,8 +1,8 @@
 {
-  "tomlz-0.3.0-H2E6w05KAgCslPcZtjzZlnXYy1o5oZLmFrU-nvwWOwdp": {
+  "tomlz-0.3.0-H2E6w3VKAgCSZQFKG-VugLEn3cjOWshGqwGzAVABNm--": {
     "name": "tomlz",
-    "url": "git+https://github.com/tsunaminoai/tomlz.git#336c011194b4c91b714a063824e4a67f6a396976",
-    "hash": "sha256-F7Qr5XhYd/G+tXIXiJ/1w7uJ4+xhOOdpQIpzhZWpDfw="
+    "url": "git+https://github.com/sc2in/tomlz.git#ecd64e239768b573ec58286d0db1842991433e99",
+    "hash": "sha256-T2lN5b/fsHLmUWtWcN9DgNKWihU+pTFb8WtsHyzqVBA="
   },
   "mvzr-0.3.7-ZSOky5FtAQB2VrFQPNbXHQCFJxWTMAYEK7ljYEaMR6jt": {
     "name": "mvzr",
