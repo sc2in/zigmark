@@ -70,8 +70,8 @@
         // The CLI and WASM builds use it for mermaid rendering; falls back to
         // noop_mermaid.zig when pozeiden is unavailable.
         .pozeiden = .{
-            .url = "https://github.com/sc2in/pozeiden/archive/refs/tags/v0.1.2.tar.gz",
-            .hash = "pozeiden-0.1.2-NAqiXZmYCgDmXFgpV7f3BqFaB3AeiMfByoKkxuQa668K",
+            .url = "https://github.com/sc2in/pozeiden/archive/refs/tags/v0.1.3.tar.gz",
+            .hash = "pozeiden-0.1.3-NAqiXeOXCgAUNGkydN-lIYUZQ87uzGQPOQ-wXvK4FNW3",
             .lazy = true,
         },
     },
