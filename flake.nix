@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    zig2nix.url = "https://flakehub.com/f/Cloudef/zig2nix/0.1.885.tar.gz";
+    zig2nix.url = "https://flakehub.com/f/Cloudef/zig2nix/0.1.990.tar.gz";
   };
 
   outputs = {
