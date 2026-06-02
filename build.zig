@@ -35,16 +35,16 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    const pozeiden_dep = b.lazyDependency("pozeiden", .{
+    // pozeiden is a lazy dep: not fetched when zigmark is used as a library.
+    // Falls back to noop_mermaid.zig when unavailable (not yet 0.16-compatible).
+    const pozeiden_module = if (b.lazyDependency("pozeiden", .{
         .target = target,
         .optimize = optimize,
-    });
-    const pozeiden_module = if (pozeiden_dep) |dep|
-        dep.module("pozeiden")
+    })) |poz|
+        poz.module("pozeiden")
     else
-        b.addModule("pozeiden-stub", .{
-            .root_source_file = b.path("src/noop_mermaid.zig"),
-        });
+        b.addModule("pozeiden-noop", .{ .root_source_file = b.path("src/noop_mermaid.zig") });
+
     const options = b.addOptions();
     // Version priority: -Dversion flag > git describe > build.zig.zon
     // The flag lets Nix (and other sandboxed builds) inject the version
@@ -54,7 +54,7 @@ pub fn build(b: *std.Build) void {
         const git_describe = b.runAllowFail(
             &.{ "git", "describe", "--tags", "--always" },
             &exit_code,
-            .Ignore,
+            .ignore,
         ) catch "";
         break :blk if (git_describe.len > 0) trimLeadingV(git_describe) else zon.version;
     };
@@ -293,6 +293,13 @@ pub fn build(b: *std.Build) void {
     const wasm_mvzr = b.dependency("mvzr", .{ .target = wasm_target, .optimize = wasm_optimize });
     const wasm_mecha = b.dependency("mecha", .{});
     const wasm_dt = b.dependency("datetime", .{ .target = wasm_target, .optimize = wasm_optimize });
+    const wasm_pozeiden_module = if (b.lazyDependency("pozeiden", .{
+        .target = wasm_target,
+        .optimize = wasm_optimize,
+    })) |poz|
+        poz.module("pozeiden")
+    else
+        b.addModule("pozeiden-noop-wasm", .{ .root_source_file = b.path("src/noop_mermaid.zig") });
 
     const zigmark_wasm_mod = b.addModule("zigmark_wasm", .{
         .root_source_file = b.path("src/root.zig"),
@@ -305,10 +312,6 @@ pub fn build(b: *std.Build) void {
     zigmark_wasm_mod.addImport("mvzr", wasm_mvzr.module("mvzr"));
     zigmark_wasm_mod.addImport("mecha", wasm_mecha.module("mecha"));
     zigmark_wasm_mod.addImport("dt", wasm_dt.module("datetime"));
-
-    const wasm_pozeiden_module = b.addModule("pozeiden-stub-wasm", .{
-            .root_source_file = b.path("src/noop_mermaid.zig"),
-        });
 
     const wasm_lib = b.addExecutable(.{
         .name = "zigmark",

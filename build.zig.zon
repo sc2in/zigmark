@@ -25,7 +25,7 @@
     .fingerprint = 0x96ad88b9c8a20373, // Changing this has security and trust implications.
     // Tracks the earliest Zig version that the package considers to be a
     // supported use case.
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     // This field is optional.
     // Each dependency must either provide a `url` and `hash`, or a `path`.
     // `zig build --fetch` can be used to fetch all dependencies of a package, recursively.
@@ -66,9 +66,13 @@
             .url = "git+https://github.com/github/cmark-gfm.git#587a12bb54d95ac37241377e6ddc93ea0e45439b",
             .hash = "N-V-__8AACaGFwDmjLKFjd0jlhijuVlTuOCGoRVvp406CsLD",
         },
+        // Lazy dep: not fetched when zigmark is used as a library dep.
+        // The CLI and WASM builds use it for mermaid rendering; falls back to
+        // noop_mermaid.zig when pozeiden is unavailable (e.g. not yet zig-0.16-compatible).
         .pozeiden = .{
             .url = "https://github.com/sc2in/pozeiden/archive/refs/tags/v0.1.2.tar.gz",
             .hash = "pozeiden-0.1.2-NAqiXZmYCgDmXFgpV7f3BqFaB3AeiMfByoKkxuQa668K",
+            .lazy = true,
         },
     },
     // Specifies the set of files and directories that are included in this package.

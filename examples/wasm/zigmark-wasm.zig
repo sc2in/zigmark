@@ -16,9 +16,7 @@ const zigmark = @import("zigmark");
 const pozeiden = @import("pozeiden");
 
 // ── Allocator ────────────────────────────────────────────────────────────────
-// Use a fixed-buffer allocator backed by WASM linear memory.
-// 4 MiB is generous for most documents; the page allocator grows as needed.
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+var gpa: std.heap.DebugAllocator(.{}) = .init;
 const allocator = gpa.allocator();
 
 // ── Persistent state ─────────────────────────────────────────────────────────
