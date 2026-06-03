@@ -724,29 +724,31 @@ fn processEmphasis(allocator: Allocator, inlines: *std.ArrayList(AST.Inline), de
 /// iteration — up to 32x throughput vs scalar for long plain-text spans.
 fn indexOfBreakChar(input: []const u8, pos: usize, gfm: bool) usize {
     const vlen = std.simd.suggestVectorLength(u8) orelse 1;
-    const Vec = @Vector(vlen, u8);
-    // Comptime-splat each needle — each becomes a PCMPEQB operand.
-    const s_star: Vec = @splat('*');
-    const s_under: Vec = @splat('_');
-    const s_tilde: Vec = @splat('~');
-    const s_lbrack: Vec = @splat('[');
-    const s_bang: Vec = @splat('!');
-    const s_btick: Vec = @splat('`');
-    const s_lt: Vec = @splat('<');
-    const s_bslash: Vec = @splat('\\');
-    const s_nl: Vec = @splat('\n');
     const fallback = if (gfm) &inline_break_gfm else &inline_break_cm;
     var i = pos;
-    while (i + vlen <= input.len) {
-        const blk: Vec = input[i..][0..vlen].*;
-        var hits = (blk == s_star) | (blk == s_under) | (blk == s_tilde) |
-            (blk == s_lbrack) | (blk == s_bang) | (blk == s_btick) |
-            (blk == s_lt) | (blk == s_bslash) | (blk == s_nl);
-        if (gfm) hits = hits | (blk == @as(Vec, @splat('@')));
-        if (@reduce(.Or, hits)) return i + std.simd.firstTrue(hits).?;
-        i += vlen;
+    // SIMD path: only when vlen > 1; vlen == 1 means no vector support (e.g. WASM).
+    if (comptime vlen > 1) {
+        const Vec = @Vector(vlen, u8);
+        const s_star: Vec = @splat('*');
+        const s_under: Vec = @splat('_');
+        const s_tilde: Vec = @splat('~');
+        const s_lbrack: Vec = @splat('[');
+        const s_bang: Vec = @splat('!');
+        const s_btick: Vec = @splat('`');
+        const s_lt: Vec = @splat('<');
+        const s_bslash: Vec = @splat('\\');
+        const s_nl: Vec = @splat('\n');
+        while (i + vlen <= input.len) {
+            const blk: Vec = input[i..][0..vlen].*;
+            var hits = (blk == s_star) | (blk == s_under) | (blk == s_tilde) |
+                (blk == s_lbrack) | (blk == s_bang) | (blk == s_btick) |
+                (blk == s_lt) | (blk == s_bslash) | (blk == s_nl);
+            if (gfm) hits = hits | (blk == @as(Vec, @splat('@')));
+            if (@reduce(.Or, hits)) return i + std.simd.firstTrue(hits).?;
+            i += vlen;
+        }
     }
-    // Scalar tail for bytes that don't fill a full vector.
+    // Scalar tail (or full scalar path when vlen == 1).
     while (i < input.len) : (i += 1) if (fallback[input[i]]) return i;
     return input.len;
 }

@@ -27,10 +27,6 @@ pub fn build(b: *std.Build) void {
     });
 
     const mecha = b.dependency("mecha", .{});
-    const dt = b.dependency("datetime", .{
-        .target = target,
-        .optimize = optimize,
-    });
     const clap_dep = b.dependency("clap", .{
         .target = target,
         .optimize = optimize,
@@ -73,7 +69,6 @@ pub fn build(b: *std.Build) void {
     zigmark.addImport("yaml", yaml.module("yaml"));
     zigmark.addImport("mvzr", mvzr.module("mvzr"));
     zigmark.addImport("mecha", mecha.module("mecha"));
-    zigmark.addImport("dt", dt.module("datetime"));
 
     // The shared library needs its own module instance.  When the exe and .so
     // share a module, lld rejects the build because the .so's PIC TLS access
@@ -99,7 +94,6 @@ pub fn build(b: *std.Build) void {
     zigmark_lib.addImport("yaml", yaml.module("yaml"));
     zigmark_lib.addImport("mvzr", mvzr.module("mvzr"));
     zigmark_lib.addImport("mecha", mecha.module("mecha"));
-    zigmark_lib.addImport("dt", dt.module("datetime"));
 
     const exe = b.addExecutable(.{
         .name = "zigmark",
@@ -286,13 +280,16 @@ pub fn build(b: *std.Build) void {
         .cpu_arch = .wasm32,
         .os_tag = .wasi,
     });
-    const wasm_optimize = .ReleaseSmall;
+    const wasm_optimize = b.option(
+        std.builtin.OptimizeMode,
+        "wasm-optimize",
+        "Optimization for WASM target (default: ReleaseSmall)",
+    ) orelse .ReleaseSmall;
 
     const wasm_tomlz = b.dependency("tomlz", .{ .target = wasm_target, .optimize = wasm_optimize });
     const wasm_yaml = b.dependency("yaml", .{ .target = wasm_target, .optimize = wasm_optimize });
     const wasm_mvzr = b.dependency("mvzr", .{ .target = wasm_target, .optimize = wasm_optimize });
     const wasm_mecha = b.dependency("mecha", .{});
-    const wasm_dt = b.dependency("datetime", .{ .target = wasm_target, .optimize = wasm_optimize });
     const wasm_pozeiden_module = if (b.lazyDependency("pozeiden", .{
         .target = wasm_target,
         .optimize = wasm_optimize,
@@ -311,7 +308,6 @@ pub fn build(b: *std.Build) void {
     zigmark_wasm_mod.addImport("yaml", wasm_yaml.module("yaml"));
     zigmark_wasm_mod.addImport("mvzr", wasm_mvzr.module("mvzr"));
     zigmark_wasm_mod.addImport("mecha", wasm_mecha.module("mecha"));
-    zigmark_wasm_mod.addImport("dt", wasm_dt.module("datetime"));
 
     const wasm_lib = b.addExecutable(.{
         .name = "zigmark",
@@ -324,6 +320,10 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "pozeiden", .module = wasm_pozeiden_module },
             },
         }),
+        // Workaround: zig 0.16.0 LLVM WASM backend crashes in --listen=- mode;
+        // the self-hosted backend avoids the crash.
+        .use_llvm = false,
+        .use_lld = false,
     });
     wasm_lib.entry = .disabled;
     wasm_lib.root_module.export_symbol_names = &.{

@@ -16,8 +16,8 @@ const zigmark = @import("zigmark");
 const pozeiden = @import("pozeiden");
 
 // ── Allocator ────────────────────────────────────────────────────────────────
-var gpa: std.heap.DebugAllocator(.{}) = .init;
-const allocator = gpa.allocator();
+// DebugAllocator uses thread-local storage unsupported on WASM; use page_allocator.
+const allocator = std.heap.page_allocator;
 
 // ── Persistent state ─────────────────────────────────────────────────────────
 // Keep the last render result alive so JS can read from the pointer.

@@ -50,10 +50,6 @@
             .url = "git+https://github.com/Hejsil/zig-clap#bf56f229ed5b6c381d90e192234913c6deb3f688",
             .hash = "clap-0.12.0-oBajB9noAQCFiI2syvjiZf6dENWUBFPWMEzdEPr99ZVx",
         },
-        .datetime = .{
-            .url = "git+https://github.com/frmdstryr/zig-datetime#3a39a21e6e34dcb0ade0ff828d0914d40ba535f3",
-            .hash = "datetime-0.8.0-cJNXzP_YAQBxQ5hkNNP6ScnG5XsqciJmeP5RVV4xwCBA",
-        },
         .mecha = .{
             .url = "git+https://github.com/Hejsil/mecha#4ee15ea13107bc504a5c17291a7de1d3bf909a32",
             .hash = "mecha-0.11.0-dVGaSNuLAQDk3kihQu0WAoRKEOaR1KUF7z55Mj33DQ6A",
