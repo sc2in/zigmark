@@ -271,30 +271,52 @@ let wasm;
 async function initWasm() {
   const resp = await fetch(WASM_PATH);
   const bytes = await resp.arrayBuffer();
+  // random_get fires at runtime (not during instantiation) so `memory`
+  // is always set by the time it is called.
+  let memory;
+  const noop = () => 0;
   const wasiImport = {
-    args_get: () => 0,
-    args_sizes_get: () => 0,
-    environ_get: () => 0,
-    environ_sizes_get: () => 0,
-    fd_close: () => 0,
-    fd_fdstat_get: () => 0,
-    fd_filestat_get: () => 0,
-    fd_read: () => 0,
-    fd_seek: () => 0,
-    fd_write: () => 0,
-    fd_pwrite: () => 0,
+    args_get:                   noop,
+    args_sizes_get:             noop,
+    environ_get:                noop,
+    environ_sizes_get:          noop,
+    clock_res_get:              noop,
+    clock_time_get:             noop,
+    poll_oneoff:                noop,
+    fd_close:                   noop,
+    fd_fdstat_get:              noop,
+    fd_filestat_get:            noop,
+    fd_filestat_set_size:       noop,
+    fd_filestat_set_times:      noop,
+    fd_pread:                   noop,
+    fd_pwrite:                  noop,
+    fd_read:                    noop,
+    fd_readdir:                 noop,
+    fd_seek:                    noop,
+    fd_sync:                    noop,
+    fd_write:                   noop,
+    path_create_directory:      noop,
+    path_filestat_get:          noop,
+    path_link:                  noop,
+    path_open:                  noop,
+    path_readlink:              noop,
+    path_remove_directory:      noop,
+    path_rename:                noop,
+    path_symlink:               noop,
+    path_unlink_file:           noop,
     proc_exit: (code) => { throw new Error(`WASI proc_exit(${code})`); },
-    clock_time_get: () => 0,
+    random_get: (buf, buf_len) => {
+      crypto.getRandomValues(new Uint8Array(memory.buffer, buf, buf_len));
+      return 0;
+    },
   };
 
   const { instance } = await WebAssembly.instantiate(bytes, {
-    env: {
-      // zigmark with page_allocator on wasm32-freestanding needs no imports,
-      // but keep this object here so future additions don't break.
-    },
+    env: {},
     wasi_snapshot_preview1: wasiImport,
   });
   wasm = instance.exports;
+  memory = wasm.memory;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -395,7 +417,7 @@ try {
   preview.innerHTML =
     `<p style="color:#f85149">Failed to load <code>${WASM_PATH}</code>.</p>
      <p>Build it first:</p>
-     <pre><code>cd examples/wasm && ./build.sh</code></pre>
+     <pre><code>nix run .#wasm-demo</code></pre>
      <p style="opacity:0.6;margin-top:8px">${e}</p>`;
 }
 </script>

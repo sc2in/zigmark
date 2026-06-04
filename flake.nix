@@ -24,9 +24,14 @@
     om.checks = let
       om_system = builtins.getEnv "OM_SYSTEM";
       nix_system = builtins.getEnv "NIX_SYSTEM";
-      system = if om_system != "" then om_system else nix_system;
+      system =
+        if om_system != ""
+        then om_system
+        else nix_system;
     in
-      if system != "" then { ${system} = self.checks.${system}; } else {};
+      if system != ""
+      then {${system} = self.checks.${system};}
+      else {};
 
     packages = forAllSystems (
       system: let
@@ -175,13 +180,13 @@
           wasm-demo-app = pkgs.writeShellApplication {
             name = "zigmark-wasm-demo";
             meta.description = "Build the WASM module and serve the live-preview demo locally (optional port argument, default 8080)";
-            runtimeInputs = [pkgs.git pkgs.python3];
+            runtimeInputs = [pkgs.git pkgs.python3 pkgs.zig];
             text = ''
               cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
               echo "▸ Building WASM module…"
               zig build wasm
               PORT="''${1:-8080}"
-              echo "✓ Serving zig-out/wasm/ on http://localhost:$PORT"
+              echo "✓ Serving http://localhost:$PORT"
               python3 -m http.server "$PORT" -d zig-out/wasm
             '';
           };
