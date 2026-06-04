@@ -45,11 +45,12 @@ jobs:
       - name: Run CI
         env:
           TMPDIR: /tmp
+          OM_SYSTEM: ${{ matrix.system }}
         run: om ci run --systems ${{ matrix.system }}
 
       - name: Build release artifact
         if: success()
-        run: nix build .#zigmark-safe -o zigmark-release
+        run: nix build .#zigmark-safe --system ${{ matrix.system }} -o zigmark-release
 
       - name: Upload artifact
         if: success()

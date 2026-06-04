@@ -18,18 +18,15 @@
     # Version is system-independent; shared by packages and checks.
     version = self.shortRev or self.dirtyShortRev or "dev";
   in {
-    # For omnix CI: expose checks under `om.checks` for the current system only.
-    # Nix exposes the target system via NIX_SYSTEM in flake evaluation.
+    # For omnix CI: expose checks only for the system requested by OM_SYSTEM
+    # (fallback to NIX_SYSTEM). If neither is set, omit om.checks to avoid
+    # cross-platform evaluation failures during pure flake eval.
     om.checks = let
-      system = let
-        env = builtins.getEnv "NIX_SYSTEM";
-      in
-        if env != ""
-        then env
-        else "x86_64-linux";
-    in {
-      ${system} = self.checks.${system};
-    };
+      om_system = builtins.getEnv "OM_SYSTEM";
+      nix_system = builtins.getEnv "NIX_SYSTEM";
+      system = if om_system != "" then om_system else nix_system;
+    in
+      if system != "" then { ${system} = self.checks.${system}; } else {};
 
     packages = forAllSystems (
       system: let
