@@ -768,33 +768,33 @@ Requires **Zig 0.16.0** or later.
 
 <!-- bench-start -->
 
-_Last updated: 2026-04-20 · input: `README.md` (31 KB) · run `nix run .#bench` to reproduce_
+_Last updated: 2026-06-04 · input: `README.md` (27 KB) · run `nix run .#bench` to reproduce_
 
 ### Speed
 
 | Command | Mean \[ms\] | Min \[ms\] | Max \[ms\] | Relative |
 |:---|---:|---:|---:|---:|
-| `lowdown` | 2.6 ± 1.4 | 1.3 | 13.2 | 1.00 |
-| **`zigmark (ReleaseFast)`** | 3.5 ± 2.1 | 1.9 | 24.3 | 1.38 ± 1.12 |
-| `discount` | 3.5 ± 1.8 | 1.7 | 18.5 | 1.37 ± 1.04 |
-| **`zigmark (ReleaseSafe)`** | 4.0 ± 2.3 | 2.0 | 20.3 | 1.55 ± 1.24 |
-| **`zigmark (ReleaseSmall)`** | 4.0 ± 1.6 | 2.3 | 18.6 | 1.57 ± 1.08 |
-| `cmark-gfm` | 5.6 ± 1.9 | 3.2 | 17.4 | 2.20 ± 1.45 |
-| `cmark` | 5.9 ± 2.3 | 3.1 | 23.7 | 2.31 ± 1.59 |
-| `pandoc` | 211.4 ± 34.5 | 167.7 | 278.4 | 1.00 |
+| `lowdown` | 2.2 ± 0.8 | 1.3 | 7.5 | 1.00 |
+| **`zigmark (ReleaseFast)`** | 2.4 ± 1.0 | 1.3 | 10.5 | 1.05 ± 0.57 |
+| `discount` | 2.7 ± 1.2 | 1.6 | 10.8 | 1.22 ± 0.67 |
+| **`zigmark (ReleaseSmall)`** | 2.9 ± 0.7 | 1.8 | 7.9 | 1.27 ± 0.55 |
+| **`zigmark (ReleaseSafe)`** | 4.4 ± 1.0 | 2.8 | 13.0 | 1.97 ± 0.84 |
+| `cmark` | 5.3 ± 1.4 | 3.2 | 12.3 | 2.36 ± 1.04 |
+| `cmark-gfm` | 5.6 ± 1.2 | 3.3 | 13.3 | 2.48 ± 1.05 |
+| `pandoc` | 185.4 ± 32.2 | 150.8 | 259.9 | 1.00 |
 
 ### Memory (peak RSS)
 
 | Command | Peak RSS (KB) |
 |:---|---:|
-| **`zigmark (ReleaseSmall)`** | 1856 |
-| **`zigmark (ReleaseFast)`** | 2116 |
-| `discount` | 2168 |
-| **`zigmark (ReleaseSafe)`** | 2372 |
-| `lowdown` | 3040 |
-| `cmark` | 4104 |
-| `cmark-gfm` | 4168 |
-| `pandoc` | 128628 |
+| **`zigmark (ReleaseSmall)`** | 1952 |
+| `discount` | 2124 |
+| **`zigmark (ReleaseFast)`** | 2412 |
+| `lowdown` | 2988 |
+| **`zigmark (ReleaseSafe)`** | 3116 |
+| `cmark-gfm` | 4300 |
+| `cmark` | 4336 |
+| `pandoc` | 129416 |
 
 <!-- bench-end -->
 

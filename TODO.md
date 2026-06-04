@@ -97,3 +97,10 @@ Per-section breakdown (via `zig build spec`):
 - [x] GFM extension spec suite (`zig build gfm`, `zig build gfm-verbose`, per-extension targets)
 - [x] Comprehensive docstrings on all public API members (auto-doc generation via `zig build docs`)
 - [ ] Document any intentional deviations from spec
+- [ ] Terminal renderer inline images disabled pending Zig 0.16 env/fs API migration — see [#57](https://github.com/sc2in/zigmark/issues/57)
+- [ ] Spec runner per-test timing always reports 0.00 ms — see [#58](https://github.com/sc2in/zigmark/issues/58)
+
+## Known Issues (Zig 0.16.0 Migration)
+
+- [ ] **#57** Terminal renderer: inline images disabled — `std.posix.getenv` removed; `detectImageProtocol`, `readLocalFile`, and `writeKittyImagePath` all stubbed out pending `std.process.Init.Minimal` threading through the render stack
+- [ ] **#58** Spec runner: per-test timing always reports 0.00 ms — `std.time.nanoTimestamp` removed; needs `std.Io.Timestamp.now(io, .monotonic)` threaded through

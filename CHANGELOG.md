@@ -6,6 +6,32 @@ Versions track the library API, not Zig itself.  The major version will
 remain 0.x until Zig reaches 1.0, at which point zigmark will follow the
 same stability guarantee.
 
+## [0.7.0] — 2026-06-04
+
+### Breaking
+
+- **Minimum Zig version is now 0.16.0.** Zig 0.15.x is no longer supported.
+
+### Added
+
+- **GFM extension support** — Tables, task lists, strikethrough, extended autolinks, disallowed raw HTML. All 24/24 GFM extension spec tests pass.
+- **Mermaid diagram rendering** — Fenced `` ```mermaid `` blocks rendered to SVG via `pozeiden` (CLI + WASM). No-op fallback when used as a library dependency.
+- **Fuzz testing** — `zig build fuzz` for smoke tests; `zig build fuzz --fuzz` activates coverage-guided fuzzing with the Zig web UI.
+- **WASM demo** — Live Markdown preview: `nix run .#wasm-demo`.
+- **Benchmark app** — `nix run .#bench` runs `hyperfine` against cmark, cmark-gfm, pandoc, discount, and lowdown and writes results back to `README.md`.
+
+### Fixed
+
+- CI matrix now runs correctly on `x86_64-linux` and `aarch64-linux` via `om ci run --systems` with explicit `OM_SYSTEM` injection.
+- FlakeHub publish step re-enabled in `release.yml` (was commented out since v0.6.0). Fixes #43.
+- WASM: all 27 WASI imports (`random_get`, `clock_res_get`, `poll_oneoff`, all `fd_*`/`path_*`) stubbed in `index.html`; demo was previously broken with a `LinkError`.
+- `nix run .#wasm-demo` now includes `pkgs.zig` in `runtimeInputs` so it works outside the dev shell.
+
+### Known issues (open bugs)
+
+- **#57** — Terminal renderer inline images disabled (`std.posix.getenv` / `std.fs` removed in Zig 0.16; text rendering unaffected)
+- **#58** — Spec runner per-test timing always shows `0.00 ms` (`std.time.nanoTimestamp` removed in Zig 0.16; pass/fail counts are correct)
+
 ## [0.5.x] — current
 
 ### Added
