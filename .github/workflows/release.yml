@@ -95,9 +95,9 @@ jobs:
           persist-credentials: false
           ref: "${{ (inputs.tag != null) && format('refs/tags/{0}', inputs.tag) || '' }}"
 
-      - uses: DeterminateSystems/determinate-nix-action@main
+      - uses: DeterminateSystems/determinate-nix-action@v3
 
-      - uses: DeterminateSystems/flakehub-push@main
+      - uses: DeterminateSystems/flakehub-push@v1
         with:
           visibility: public
           name: sc2in/ZigMark
