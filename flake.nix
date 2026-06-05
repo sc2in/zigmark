@@ -30,7 +30,7 @@
         else nix_system;
     in
       if system != ""
-      then {${system} = self.checks.${system};}
+      then {"${system}" = self.checks.${system};}
       else {};
 
     packages = forAllSystems (

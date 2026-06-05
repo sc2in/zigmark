@@ -491,8 +491,7 @@ pub const TestResult = struct {
         return self.passed + self.failed + self.errors;
     }
 
-    /// Implements `std.fmt.format` so a `TestResult` can be printed directly.
-    pub fn format(self: TestResult, writer: std.Io.Writer) !void {
+    pub fn writeTo(self: TestResult, writer: std.Io.Writer) !void {
         try writer.print("{d} passed, {d} failed, {d} errors, {d} skipped", .{ self.passed, self.failed, self.errors, self.skipped });
     }
 };
@@ -736,7 +735,6 @@ pub fn parseSpecTests(allocator: std.mem.Allocator, spec_content: []const u8) !s
 /// Run individual test case
 fn runSpecTest(allocator: std.mem.Allocator, test_case: *SpecTest, normalize: bool, gfm: bool) !bool {
     // TODO(zig-0.16-migration): std.time.nanoTimestamp removed; thread io to use std.Io.Timestamp.now.
-    const t1: i128 = 0;
     // Parse markdown with our parser
     var p = Parser.init();
     p.gfm = gfm;
@@ -765,8 +763,6 @@ fn runSpecTest(allocator: std.mem.Allocator, test_case: *SpecTest, normalize: bo
     else
         actual_html;
     defer if (normalize) allocator.free(actual);
-    const t2: i128 = 0;
-    test_case.*.time_ns = t2 - t1;
 
     const passed = std.mem.eql(u8, expected, actual);
     if (!passed) {
@@ -799,7 +795,7 @@ pub fn runCommonMarkSpecTests(allocator: std.mem.Allocator, spec_file_path: ?[]c
         var tio: std.Io.Threaded = .init(allocator, .{});
         defer tio.deinit();
         const io = tio.io();
-        const content = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .unlimited) catch |err| {
+        const content = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(10 * 1024 * 1024)) catch |err| {
             std.log.err("Failed to open spec file '{s}': {}", .{ path, err });
             return TestResult{};
         };

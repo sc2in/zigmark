@@ -70,8 +70,9 @@ pub fn init(alloc: Allocator, source: []const u8, input_kind: Kind) !FrontMatter
             y.load(alloc) catch |err| switch (err) {
                 error.ParseFailure => {
                     std.debug.assert(y.parse_errors.errorMessageCount() > 0);
-                    var ebuf: [4096]u8 = undefined;
-                    var errw = std.Io.Writer.fixed(&ebuf);
+                    const ebuf = try alloc.alloc(u8, 64 * 1024);
+                    defer alloc.free(ebuf);
+                    var errw = std.Io.Writer.fixed(ebuf);
                     y.parse_errors.renderToWriter(.{}, &errw) catch {};
                     std.debug.print("{s}", .{errw.buffered()});
                     return error.ParseFailure;

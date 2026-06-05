@@ -170,7 +170,7 @@ pub const Library = struct {
         var tio: std.Io.Threaded = .init(self.allocator, .{});
         defer tio.deinit();
         const io = tio.io();
-        const source = try std.Io.Dir.cwd().readFileAlloc(io, path, self.allocator, .unlimited);
+        const source = try std.Io.Dir.cwd().readFileAlloc(io, path, self.allocator, .limited(16 * 1024 * 1024));
         defer self.allocator.free(source);
         try self.add(source, path);
     }
@@ -195,7 +195,7 @@ pub const Library = struct {
             if (wentry.kind != .file) continue;
             if (!mem.endsWith(u8, wentry.basename, ".md")) continue;
 
-            const source = try wentry.dir.readFileAlloc(io, wentry.basename, self.allocator, .unlimited);
+            const source = try wentry.dir.readFileAlloc(io, wentry.basename, self.allocator, .limited(16 * 1024 * 1024));
             defer self.allocator.free(source);
 
             const full_path = try std.fs.path.join(self.allocator, &.{ dir_path, wentry.path });
