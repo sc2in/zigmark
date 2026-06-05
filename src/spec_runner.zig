@@ -12,14 +12,13 @@ const zigmark = @import("zigmark");
 
 const default_spec_path = "./src/markdown/spec.txt";
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     // Use a page allocator — the spec runner is short-lived and
     // runs many parse/render cycles.  A page allocator avoids the
     // overhead of tracking individual allocations.
     const allocator = std.heap.page_allocator;
 
-    var args = try std.process.argsWithAllocator(allocator);
-    defer args.deinit();
+    var args = std.process.Args.Iterator.init(init.minimal.args);
     _ = args.skip(); // skip argv[0]
 
     var pattern: ?[]const u8 = null;

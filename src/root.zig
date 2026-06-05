@@ -491,8 +491,7 @@ pub const TestResult = struct {
         return self.passed + self.failed + self.errors;
     }
 
-    /// Implements `std.fmt.format` so a `TestResult` can be printed directly.
-    pub fn format(self: TestResult, writer: std.io.Writer) !void {
+    pub fn writeTo(self: TestResult, writer: std.Io.Writer) !void {
         try writer.print("{d} passed, {d} failed, {d} errors, {d} skipped", .{ self.passed, self.failed, self.errors, self.skipped });
     }
 };
@@ -616,7 +615,8 @@ pub fn runSpecSummary(allocator: std.mem.Allocator, spec_path: []const u8) !Spec
 /// HTML normalization for test comparison (simplified version)
 /// Based on the CommonMark normalize.py approach
 fn normalizeHtml(allocator: std.mem.Allocator, src: []const u8) ![]const u8 {
-    var normalized = std.ArrayList(u8){};
+    var normalized = std.ArrayList(u8).empty;
+    errdefer normalized.deinit(allocator);
     var in_tag = false;
     var i: usize = 0;
 
@@ -665,18 +665,18 @@ pub fn parseSpecTests(allocator: std.mem.Allocator, spec_content: []const u8) !s
 
     const alloc = arena.allocator();
 
-    var tests = std.ArrayList(SpecTest){};
+    var tests = std.ArrayList(SpecTest).empty;
     var lines = std.mem.splitAny(u8, spec_content, "\n");
 
     var line_number: usize = 0;
     var start_line: usize = 0;
     var example_number: usize = 0;
-    var markdown_lines = std.ArrayList([]const u8){};
+    var markdown_lines = std.ArrayList([]const u8).empty;
     defer {
         for (markdown_lines.items) |l| alloc.free(l);
         markdown_lines.deinit(alloc);
     }
-    var html_lines = std.ArrayList([]const u8){};
+    var html_lines = std.ArrayList([]const u8).empty;
     defer {
         for (html_lines.items) |l| alloc.free(l);
         html_lines.deinit(alloc);
@@ -735,7 +735,7 @@ pub fn parseSpecTests(allocator: std.mem.Allocator, spec_content: []const u8) !s
 
 /// Run individual test case
 fn runSpecTest(allocator: std.mem.Allocator, test_case: *SpecTest, normalize: bool, gfm: bool) !bool {
-    const t1 = std.time.nanoTimestamp();
+    // TODO(zig-0.16-migration): std.time.nanoTimestamp removed; thread io to use std.Io.Timestamp.now.
     // Parse markdown with our parser
     var p = Parser.init();
     p.gfm = gfm;
@@ -764,8 +764,6 @@ fn runSpecTest(allocator: std.mem.Allocator, test_case: *SpecTest, normalize: bo
     else
         actual_html;
     defer if (normalize) allocator.free(actual);
-    const t2 = std.time.nanoTimestamp();
-    test_case.*.time_ns = t2 - t1;
 
     const passed = std.mem.eql(u8, expected, actual);
     if (!passed) {
@@ -795,13 +793,13 @@ pub fn runCommonMarkSpecTests(allocator: std.mem.Allocator, spec_file_path: ?[]c
 }) !TestResult {
     // Default to embedded spec or read from file
     const spec_content = if (spec_file_path) |path| blk: {
-        const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+        var tio: std.Io.Threaded = .init(allocator, .{});
+        defer tio.deinit();
+        const io = tio.io();
+        const content = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(10 * 1024 * 1024)) catch |err| {
             std.log.err("Failed to open spec file '{s}': {}", .{ path, err });
             return TestResult{};
         };
-        defer file.close();
-
-        const content = try file.readToEndAlloc(allocator, 10 * 1024 * 1024); // 10MB max
         break :blk content;
     } else embedded_spec_tests;
     defer if (spec_file_path != null) allocator.free(spec_content);
@@ -815,7 +813,7 @@ pub fn runCommonMarkSpecTests(allocator: std.mem.Allocator, spec_file_path: ?[]c
     };
 
     // Filter tests based on options
-    var filtered_tests = std.ArrayList(SpecTest){};
+    var filtered_tests = std.ArrayList(SpecTest).empty;
     defer filtered_tests.deinit(allocator);
 
     for (tests.items) |test_case| {

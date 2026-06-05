@@ -2,8 +2,8 @@
   description = "ZigMark - Simple markdown processing for zig";
 
   inputs = {
-    nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.1.964459.tar.gz";
-    zig2nix.url = "https://flakehub.com/f/Cloudef/zig2nix/0.1.885.tar.gz";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    zig2nix.url = "https://flakehub.com/f/Cloudef/zig2nix/0.1.990.tar.gz";
   };
 
   outputs = {
@@ -18,6 +18,21 @@
     # Version is system-independent; shared by packages and checks.
     version = self.shortRev or self.dirtyShortRev or "dev";
   in {
+    # For omnix CI: expose checks only for the system requested by OM_SYSTEM
+    # (fallback to NIX_SYSTEM). If neither is set, omit om.checks to avoid
+    # cross-platform evaluation failures during pure flake eval.
+    om.checks = let
+      om_system = builtins.getEnv "OM_SYSTEM";
+      nix_system = builtins.getEnv "NIX_SYSTEM";
+      system =
+        if om_system != ""
+        then om_system
+        else nix_system;
+    in
+      if system != ""
+      then {"${system}" = self.checks.${system};}
+      else {};
+
     packages = forAllSystems (
       system: let
         # Use the pre-built Zig from nixpkgs (on the public binary cache)
@@ -165,13 +180,13 @@
           wasm-demo-app = pkgs.writeShellApplication {
             name = "zigmark-wasm-demo";
             meta.description = "Build the WASM module and serve the live-preview demo locally (optional port argument, default 8080)";
-            runtimeInputs = [pkgs.git pkgs.python3];
+            runtimeInputs = [pkgs.git pkgs.python3 pkgs.zig];
             text = ''
               cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
               echo "▸ Building WASM module…"
               zig build wasm
               PORT="''${1:-8080}"
-              echo "✓ Serving zig-out/wasm/ on http://localhost:$PORT"
+              echo "✓ Serving http://localhost:$PORT"
               python3 -m http.server "$PORT" -d zig-out/wasm
             '';
           };

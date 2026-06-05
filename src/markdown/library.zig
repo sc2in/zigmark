@@ -121,7 +121,7 @@ pub const Library = struct {
     pub fn init(allocator: Allocator) Library {
         return .{
             .allocator = allocator,
-            .entries = std.ArrayList(Entry){},
+            .entries = std.ArrayList(Entry).empty,
         };
     }
 
@@ -167,9 +167,10 @@ pub const Library = struct {
     /// It is stored verbatim as the entry's path identifier.
     /// Files up to 16 MiB are supported.
     pub fn addFromFile(self: *Library, path: []const u8) !void {
-        const file = try std.fs.cwd().openFile(path, .{});
-        defer file.close();
-        const source = try file.readToEndAlloc(self.allocator, 16 * 1024 * 1024);
+        var tio: std.Io.Threaded = .init(self.allocator, .{});
+        defer tio.deinit();
+        const io = tio.io();
+        const source = try std.Io.Dir.cwd().readFileAlloc(io, path, self.allocator, .limited(16 * 1024 * 1024));
         defer self.allocator.free(source);
         try self.add(source, path);
     }
@@ -181,20 +182,20 @@ pub const Library = struct {
     /// file's path relative to `dir_path` (e.g. `"policies/hr/hr-policy.md"`).
     /// Non-`.md` files are silently skipped; subdirectories are traversed.
     pub fn addFromDir(self: *Library, dir_path: []const u8) !void {
-        var dir = try std.fs.cwd().openDir(dir_path, .{ .iterate = true });
-        defer dir.close();
+        var tio: std.Io.Threaded = .init(self.allocator, .{});
+        defer tio.deinit();
+        const io = tio.io();
+        var dir = try std.Io.Dir.cwd().openDir(io, dir_path, .{ .iterate = true });
+        defer dir.close(io);
 
         var walker = try dir.walk(self.allocator);
         defer walker.deinit();
 
-        while (try walker.next()) |wentry| {
+        while (try walker.next(io)) |wentry| {
             if (wentry.kind != .file) continue;
             if (!mem.endsWith(u8, wentry.basename, ".md")) continue;
 
-            var file = try wentry.dir.openFile(wentry.basename, .{});
-            defer file.close();
-
-            const source = try file.readToEndAlloc(self.allocator, 16 * 1024 * 1024);
+            const source = try wentry.dir.readFileAlloc(io, wentry.basename, self.allocator, .limited(16 * 1024 * 1024));
             defer self.allocator.free(source);
 
             const full_path = try std.fs.path.join(self.allocator, &.{ dir_path, wentry.path });
@@ -330,7 +331,7 @@ pub const Library = struct {
     }
 
     fn executeQuery(self: *const Library, allocator: Allocator, pq: ParsedQuery) !?[]Result {
-        var results = std.ArrayList(Result){};
+        var results = std.ArrayList(Result).empty;
         errdefer results.deinit(allocator);
 
         for (self.entries.items) |*entry| {

@@ -548,14 +548,13 @@ test "library: addFromFile parses and stores document" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    {
-        var f = try tmp.dir.createFile("policy.md", .{});
-        defer f.close();
-        try f.writeAll(policy_a);
-    }
+    const tio = std.testing.io;
+    try tmp.dir.writeFile(tio, .{ .sub_path = "policy.md", .data = policy_a });
 
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const abs = try tmp.dir.realpath("policy.md", &path_buf);
+    const f_ref = try tmp.dir.openFile(tio, "policy.md", .{});
+    defer f_ref.close(tio);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const abs = path_buf[0..try f_ref.realPath(tio, &path_buf)];
 
     var lib = Library.init(tst.allocator);
     defer lib.deinit();
@@ -571,14 +570,13 @@ test "library: addFromFile stores path identifier" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    {
-        var f = try tmp.dir.createFile("policy.md", .{});
-        defer f.close();
-        try f.writeAll(policy_a);
-    }
+    const tio = std.testing.io;
+    try tmp.dir.writeFile(tio, .{ .sub_path = "policy.md", .data = policy_a });
 
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const abs = try tmp.dir.realpath("policy.md", &path_buf);
+    const f_ref = try tmp.dir.openFile(tio, "policy.md", .{});
+    defer f_ref.close(tio);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const abs = path_buf[0..try f_ref.realPath(tio, &path_buf)];
 
     var lib = Library.init(tst.allocator);
     defer lib.deinit();
@@ -594,23 +592,16 @@ test "library: addFromDir loads all md files" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    {
-        var f = try tmp.dir.createFile("a.md", .{});
-        defer f.close();
-        try f.writeAll(policy_a);
-    }
-    {
-        var f = try tmp.dir.createFile("b.md", .{});
-        defer f.close();
-        try f.writeAll(policy_b);
-    }
-    {
-        var f = try tmp.dir.createFile("notes.txt", .{}); // should be skipped
-        f.close();
-    }
+    const tio = std.testing.io;
+    try tmp.dir.writeFile(tio, .{ .sub_path = "a.md", .data = policy_a });
+    try tmp.dir.writeFile(tio, .{ .sub_path = "b.md", .data = policy_b });
+    try tmp.dir.writeFile(tio, .{ .sub_path = "notes.txt", .data = "" });
 
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const abs_dir = try tmp.dir.realpath(".", &path_buf);
+    const dir_f = try tmp.dir.openFile(tio, "a.md", .{});
+    defer dir_f.close(tio);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const abs_file = path_buf[0..try dir_f.realPath(tio, &path_buf)];
+    const abs_dir = std.fs.path.dirname(abs_file) orelse ".";
 
     var lib = Library.init(tst.allocator);
     defer lib.deinit();
@@ -624,22 +615,18 @@ test "library: addFromDir recurses into subdirectories" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.makeDir("sub");
-    {
-        var f = try tmp.dir.createFile("top.md", .{});
-        defer f.close();
-        try f.writeAll(policy_a);
-    }
-    {
-        var sub = try tmp.dir.openDir("sub", .{});
-        defer sub.close();
-        var f = try sub.createFile("nested.md", .{});
-        defer f.close();
-        try f.writeAll(policy_b);
-    }
+    const tio = std.testing.io;
+    try tmp.dir.createDir(tio, "sub", .default_dir);
+    try tmp.dir.writeFile(tio, .{ .sub_path = "top.md", .data = policy_a });
+    var sub = try tmp.dir.openDir(tio, "sub", .{});
+    defer sub.close(tio);
+    try sub.writeFile(tio, .{ .sub_path = "nested.md", .data = policy_b });
 
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const abs_dir = try tmp.dir.realpath(".", &path_buf);
+    const dir_f = try tmp.dir.openFile(tio, "top.md", .{});
+    defer dir_f.close(tio);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const abs_file = path_buf[0..try dir_f.realPath(tio, &path_buf)];
+    const abs_dir = std.fs.path.dirname(abs_file) orelse ".";
 
     var lib = Library.init(tst.allocator);
     defer lib.deinit();

@@ -13,8 +13,8 @@ const math = std.math;
 const JsonValue = std.json.Value;
 
 const tomlz = @import("tomlz");
-const Yaml = @import("yaml").Yaml;
 const Tree = @import("yaml").Tree;
+const Yaml = @import("yaml").Yaml;
 
 const FrontMatter = @This();
 
@@ -27,6 +27,12 @@ original: Origin,
 /// Arena that owns all memory allocated by `set()` and `merge()`.
 /// Lazily initialised on first mutation; freed by `deinit()`.
 set_arena: ?std.heap.ArenaAllocator = null,
+/// True once `self.root` has been deep-cloned into `set_arena`.
+/// After migration, every `put()` on any object map in the tree uses
+/// `set_arena.allocator()`, satisfying Zig 0.16's requirement that the
+/// allocator passed to an unmanaged map's `put()` matches the allocator
+/// that owns the map's backing store.
+root_in_set_arena: bool = false,
 
 const YamlOrigin = struct {
     yaml: Yaml,
@@ -64,7 +70,11 @@ pub fn init(alloc: Allocator, source: []const u8, input_kind: Kind) !FrontMatter
             y.load(alloc) catch |err| switch (err) {
                 error.ParseFailure => {
                     std.debug.assert(y.parse_errors.errorMessageCount() > 0);
-                    y.parse_errors.renderToStdErr(.{ .ttyconf = std.io.tty.detectConfig(std.fs.File.stderr()) });
+                    const ebuf = try alloc.alloc(u8, 64 * 1024);
+                    defer alloc.free(ebuf);
+                    var errw = std.Io.Writer.fixed(ebuf);
+                    y.parse_errors.renderToWriter(.{}, &errw) catch {};
+                    std.debug.print("{s}", .{errw.buffered()});
                     return error.ParseFailure;
                 },
                 else => return err,
@@ -112,7 +122,11 @@ pub fn deinit(self: *FrontMatter) void {
             o.yaml.deinit(self.allocator);
         },
         .toml => |*o| {
-            deinitJsonValue(self.allocator, &self.root);
+            // If root was migrated to set_arena during set()/merge(), the
+            // original TOML-allocated strings were already freed there;
+            // skip the redundant deinitJsonValue to avoid a double-free.
+            if (!self.root_in_set_arena)
+                deinitJsonValue(self.allocator, &self.root);
             o.deinit(self.allocator);
         },
         // Arena-based: frees self.root memory too — do NOT call deinitJsonValue.
@@ -253,7 +267,7 @@ const ZonParser = struct {
         p.skipWs();
         if (p.peek() == '}') {
             p.pos += 1;
-            return JsonValue{ .object = std.json.ObjectMap.init(p.alloc) };
+            return JsonValue{ .object = .{} };
         }
         return if (p.isStructField()) p.parseStructBody() else p.parseArrayBody();
     }
@@ -269,11 +283,14 @@ const ZonParser = struct {
     }
 
     fn parseStructBody(p: *ZonParser) !JsonValue {
-        var obj = JsonValue{ .object = std.json.ObjectMap.init(p.alloc) };
+        var obj = JsonValue{ .object = .{} };
         while (true) {
             p.skipWs();
             const c = p.peek() orelse return error.ZonParseError;
-            if (c == '}') { p.pos += 1; break; }
+            if (c == '}') {
+                p.pos += 1;
+                break;
+            }
             if (c != '.') return error.ZonParseError;
             p.pos += 1; // consume '.'
             const ns = p.pos;
@@ -284,7 +301,7 @@ const ZonParser = struct {
             if (p.peek() != '=') return error.ZonParseError;
             p.pos += 1; // consume '='
             const val = try p.parseValue();
-            try obj.object.put(key, val);
+            try obj.object.put(p.alloc, key, val);
             p.skipWs();
             if (p.peek() == ',') p.pos += 1;
         }
@@ -295,7 +312,10 @@ const ZonParser = struct {
         var arr = JsonValue{ .array = std.json.Array.init(p.alloc) };
         while (true) {
             p.skipWs();
-            if (p.peek() == '}') { p.pos += 1; break; }
+            if (p.peek() == '}') {
+                p.pos += 1;
+                break;
+            }
             const val = try p.parseValue();
             try arr.array.append(val);
             p.skipWs();
@@ -306,10 +326,13 @@ const ZonParser = struct {
 
     fn parseString(p: *ZonParser) !JsonValue {
         p.pos += 1; // consume '"'
-        var buf: std.ArrayListUnmanaged(u8) = .{};
+        var buf: std.ArrayListUnmanaged(u8) = .empty;
         while (p.pos < p.src.len) {
             const c = p.src[p.pos];
-            if (c == '"') { p.pos += 1; break; }
+            if (c == '"') {
+                p.pos += 1;
+                break;
+            }
             if (c == '\\') {
                 p.pos += 1;
                 if (p.pos >= p.src.len) return error.ZonParseError;
@@ -355,7 +378,7 @@ const ZonParser = struct {
 
     /// ZON multi-line string: consecutive lines each starting with `\\`.
     fn parseMultilineString(p: *ZonParser) !JsonValue {
-        var buf: std.ArrayListUnmanaged(u8) = .{};
+        var buf: std.ArrayListUnmanaged(u8) = .empty;
         while (p.pos + 1 < p.src.len and
             p.src[p.pos] == '\\' and p.src[p.pos + 1] == '\\')
         {
@@ -363,7 +386,10 @@ const ZonParser = struct {
             const ls = p.pos;
             while (p.pos < p.src.len and p.src[p.pos] != '\n') p.pos += 1;
             try buf.appendSlice(p.alloc, p.src[ls..p.pos]);
-            if (p.pos < p.src.len) { try buf.append(p.alloc, '\n'); p.pos += 1; }
+            if (p.pos < p.src.len) {
+                try buf.append(p.alloc, '\n');
+                p.pos += 1;
+            }
             // skip indentation before next `\\`
             while (p.pos < p.src.len and (p.src[p.pos] == ' ' or p.src[p.pos] == '\t'))
                 p.pos += 1;
@@ -523,7 +549,7 @@ fn deinitJsonValue(alloc: std.mem.Allocator, value: *std.json.Value) void {
         .object => |*o| {
             for (o.values()) |*v|
                 deinitJsonValue(alloc, v);
-            o.deinit();
+            o.deinit(alloc);
         },
         .array => |*a| {
             for (a.items) |*i|
@@ -554,12 +580,12 @@ pub fn cloneJsonValue(alloc: Allocator, value: std.json.Value) Allocator.Error!s
             break :blk .{ .array = new_arr };
         },
         .object => |obj| blk: {
-            var new_obj: std.json.ObjectMap = .init(alloc);
+            var new_obj: std.json.ObjectMap = .{};
             var it = obj.iterator();
             while (it.next()) |entry| {
                 const key = try alloc.dupe(u8, entry.key_ptr.*);
                 const val = try cloneJsonValue(alloc, entry.value_ptr.*);
-                try new_obj.put(key, val);
+                try new_obj.put(alloc, key, val);
             }
             break :blk .{ .object = new_obj };
         },
@@ -578,7 +604,7 @@ fn mergeJsonValue(alloc: Allocator, base: *std.json.Value, overlay: std.json.Val
             } else {
                 const key = try alloc.dupe(u8, entry.key_ptr.*);
                 const val = try cloneJsonValue(alloc, entry.value_ptr.*);
-                try base.object.put(key, val);
+                try base.object.put(alloc, key, val);
             }
         }
     } else {
@@ -603,18 +629,18 @@ fn treeNodeToJson(allocator: Allocator, tree: Tree, node_index: Tree.Node.Index)
             return treeNodeToJson(allocator, tree, inner);
         },
         .map_single => {
-            var object = JsonValue{ .object = .init(allocator) };
+            var object = JsonValue{ .object = .{} };
             const entry = tree.nodeData(node_index).map;
             const key = try allocator.dupe(u8, tree.rawString(entry.key, entry.key));
             const val = if (entry.maybe_node.unwrap()) |vn|
                 try treeNodeToJson(allocator, tree, vn)
             else
                 JsonValue{ .null = {} };
-            try object.object.put(key, val);
+            try object.object.put(allocator, key, val);
             return object;
         },
         .map_many => {
-            var object = JsonValue{ .object = .init(allocator) };
+            var object = JsonValue{ .object = .{} };
             const extra_index = tree.nodeData(node_index).extra;
             const map = tree.extraData(Tree.Map, extra_index);
             var extra_end = map.end;
@@ -626,7 +652,7 @@ fn treeNodeToJson(allocator: Allocator, tree: Tree, node_index: Tree.Node.Index)
                     try treeNodeToJson(allocator, tree, vn)
                 else
                     JsonValue{ .null = {} };
-                try object.object.put(key, val);
+                try object.object.put(allocator, key, val);
             }
             return object;
         },
@@ -735,13 +761,13 @@ pub fn tomlValueToJson(allocator: std.mem.Allocator, v: *tomlz.parser.Value) !st
 
 /// Convert a `tomlz` table into a `std.json.Value` object map.
 pub fn tableToJson(allocator: std.mem.Allocator, table: *tomlz.parser.Table) error{OutOfMemory}!std.json.Value {
-    var obj = std.json.ObjectMap.init(allocator);
-    errdefer obj.deinit();
+    var obj: std.json.ObjectMap = .{};
+    errdefer obj.deinit(allocator);
 
     var it = table.table.iterator();
     while (it.next()) |entry| {
         const v = try tomlValueToJson(allocator, entry.value_ptr);
-        try obj.put(entry.key_ptr.*, v);
+        try obj.put(allocator, entry.key_ptr.*, v);
     }
 
     return std.json.Value{ .object = obj };
@@ -811,23 +837,38 @@ pub fn set(self: *FrontMatter, path: []const u8, value: std.json.Value) !void {
     if (self.root != .object) return error.NotAnObject;
     if (self.set_arena == null)
         self.set_arena = std.heap.ArenaAllocator.init(self.allocator);
-    const alloc = self.set_arena.?.allocator();
-    const owned = try cloneJsonValue(alloc, value);
+    const set_alloc = self.set_arena.?.allocator();
+    // On first mutation, deep-clone the root tree into set_arena so every
+    // subsequent put() uses the same allocator that owns the backing store.
+    // Zig 0.16 unmanaged maps (StringArrayHashMapUnmanaged) require this.
+    // For TOML roots the original strings live in self.allocator and are freed
+    // here before being replaced; YAML/JSON/ZON roots live in their own parse
+    // arenas and are cleaned up by deinit() via self.original as normal.
+    if (!self.root_in_set_arena) {
+        const cloned = try cloneJsonValue(set_alloc, self.root);
+        switch (self.original) {
+            .toml => deinitJsonValue(self.allocator, &self.root),
+            else => {},
+        }
+        self.root = cloned;
+        self.root_in_set_arena = true;
+    }
+    const owned = try cloneJsonValue(set_alloc, value);
     var segs = std.mem.tokenizeScalar(u8, path, '.');
     var current: *std.json.Value = &self.root;
     while (segs.next()) |seg| {
         const is_last = segs.rest().len == 0;
         if (is_last) {
-            const key = try alloc.dupe(u8, seg);
-            try current.object.put(key, owned);
+            const key = try set_alloc.dupe(u8, seg);
+            try current.object.put(set_alloc, key, owned);
             return;
         }
         if (current.object.getPtr(seg)) |child| {
             if (child.* != .object) return error.NotAnObject;
             current = child;
         } else {
-            const key = try alloc.dupe(u8, seg);
-            try current.object.put(key, .{ .object = .init(alloc) });
+            const key = try set_alloc.dupe(u8, seg);
+            try current.object.put(set_alloc, key, .{ .object = .{} });
             current = current.object.getPtr(seg).?;
         }
     }
@@ -844,7 +885,17 @@ pub fn set(self: *FrontMatter, path: []const u8, value: std.json.Value) !void {
 pub fn merge(self: *FrontMatter, overlay: FrontMatter) !void {
     if (self.set_arena == null)
         self.set_arena = std.heap.ArenaAllocator.init(self.allocator);
-    try mergeJsonValue(self.set_arena.?.allocator(), &self.root, overlay.root);
+    const set_alloc = self.set_arena.?.allocator();
+    if (!self.root_in_set_arena) {
+        const cloned = try cloneJsonValue(set_alloc, self.root);
+        switch (self.original) {
+            .toml => deinitJsonValue(self.allocator, &self.root),
+            else => {},
+        }
+        self.root = cloned;
+        self.root_in_set_arena = true;
+    }
+    try mergeJsonValue(set_alloc, &self.root, overlay.root);
 }
 
 // ── Field argument parsing ────────────────────────────────────────────────────

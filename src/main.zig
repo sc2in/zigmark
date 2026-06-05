@@ -13,10 +13,9 @@ const pozeiden = @import("pozeiden");
 const AST = zigmark.AST;
 const version = zigmark.version;
 
-pub fn main() !void {
-    var gpa_impl: std.heap.GeneralPurposeAllocator(.{}) = .{};
-    defer _ = gpa_impl.deinit();
-    const gpa = gpa_impl.allocator();
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const io = init.io;
     const alloc = gpa;
 
     // ── CLI definition ───────────────────────────────────────────────────────
@@ -42,11 +41,8 @@ pub fn main() !void {
     );
 
     var diag = clap.Diagnostic{};
-    var iter = try std.process.argsWithAllocator(gpa);
-    defer iter.deinit();
-
-    // skip argv[0]
-    _ = iter.next();
+    var iter = std.process.Args.Iterator.init(init.minimal.args);
+    _ = iter.skip(); // skip argv[0]
 
     var res = clap.parseEx(clap.Help, &params, clap.parsers.default, &iter, .{
         .diagnostic = &diag,
@@ -124,18 +120,14 @@ pub fn main() !void {
     // ── Read input ───────────────────────────────────────────────────────────
     const input = blk: {
         if (res.positionals[0]) |path| {
-            const file = std.fs.cwd().openFile(path, .{}) catch |err| {
-                std.debug.print("error: cannot open '{s}': {}\n", .{ path, err });
-                return err;
-            };
-            defer file.close();
-            break :blk file.readToEndAlloc(alloc, std.math.maxInt(usize)) catch |err| {
-                std.debug.print("error: failed to read '{s}': {}\n", .{ path, err });
+            break :blk std.Io.Dir.cwd().readFileAlloc(io, path, alloc, .unlimited) catch |err| {
+                std.debug.print("error: cannot read '{s}': {}\n", .{ path, err });
                 return err;
             };
         } else {
-            const stdin = std.fs.File.stdin();
-            break :blk stdin.readToEndAlloc(alloc, std.math.maxInt(usize)) catch |err| {
+            var sbuf: [4096]u8 = undefined;
+            var stdin_reader = std.Io.File.stdin().reader(io, &sbuf);
+            break :blk stdin_reader.interface.allocRemaining(alloc, .unlimited) catch |err| {
                 std.debug.print("error: failed to read stdin: {}\n", .{err});
                 return err;
             };
@@ -147,10 +139,10 @@ pub fn main() !void {
     const format: []const u8 = if (res.args.format) |f| f else "html";
 
     // ── Output ───────────────────────────────────────────────────────────────
-    const out_file = getOutputFile(res.args.output);
-    defer closeOutput(res.args.output, out_file);
+    const out_file = getOutputFile(io, res.args.output);
+    defer closeOutput(io, res.args.output, out_file);
     var out_buf: [8192]u8 = undefined;
-    var writer = out_file.writer(&out_buf);
+    var writer = out_file.writer(io, &out_buf);
 
     // ── Frontmatter passthrough ("markdown") ─────────────────────────────────
     // Parse frontmatter, apply --set/--delete, re-serialize in original format,
@@ -246,8 +238,9 @@ pub fn main() !void {
         // --section-start / --section-end  (reads replacement from stdin)
         if (res.args.@"section-start") |start_marker| {
             const end_marker = res.args.@"section-end".?;
-            const stdin = std.fs.File.stdin();
-            const replacement_src = stdin.readToEndAlloc(alloc, std.math.maxInt(usize)) catch |err| {
+            var sbuf2: [4096]u8 = undefined;
+            var stdin_reader2 = std.Io.File.stdin().reader(io, &sbuf2);
+            const replacement_src = stdin_reader2.interface.allocRemaining(alloc, .unlimited) catch |err| {
                 std.debug.print("error: failed to read replacement content from stdin: {}\n", .{err});
                 return err;
             };
@@ -516,19 +509,19 @@ fn findHtmlCommentBlock(doc: AST.Document, marker: []const u8) ?usize {
 
 // ── Output helpers ───────────────────────────────────────────────────────────
 
-fn getOutputFile(output_path: ?[]const u8) std.fs.File {
+fn getOutputFile(io: std.Io, output_path: ?[]const u8) std.Io.File {
     if (output_path) |path| {
-        return std.fs.cwd().createFile(path, .{}) catch |err| {
+        return std.Io.Dir.cwd().createFile(io, path, .{}) catch |err| {
             std.debug.print("error: cannot create '{s}': {}\n", .{ path, err });
             std.process.exit(1);
         };
     } else {
-        return std.fs.File.stdout();
+        return std.Io.File.stdout();
     }
 }
 
-fn closeOutput(output_path: ?[]const u8, file: std.fs.File) void {
+fn closeOutput(io: std.Io, output_path: ?[]const u8, file: std.Io.File) void {
     if (output_path != null) {
-        file.close();
+        file.close(io);
     }
 }

@@ -16,10 +16,8 @@ const zigmark = @import("zigmark");
 const pozeiden = @import("pozeiden");
 
 // ── Allocator ────────────────────────────────────────────────────────────────
-// Use a fixed-buffer allocator backed by WASM linear memory.
-// 4 MiB is generous for most documents; the page allocator grows as needed.
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-const allocator = gpa.allocator();
+// Use page_allocator as DebugAllocator uses thread-local storage unsupported on WASM.
+const allocator = std.heap.page_allocator;
 
 // ── Persistent state ─────────────────────────────────────────────────────────
 // Keep the last render result alive so JS can read from the pointer.

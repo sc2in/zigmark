@@ -94,7 +94,7 @@ pub const bullet_list_item = mecha.combine(.{
     mecha.rest.asStr(),
 }).map(struct {
     fn f(r: anytype) BulletListResult {
-        return .{ .marker = r[1], .content = mem.trimLeft(u8, r[3], " \t") };
+        return .{ .marker = r[1], .content = mem.trimStart(u8, r[3], " \t") };
     }
 }.f);
 
@@ -109,7 +109,7 @@ pub const ordered_list_item = mecha.combine(.{
         return .{
             .num = std.fmt.parseInt(u32, r[1], 10) catch 0,
             .delimiter = r[2],
-            .content = mem.trimLeft(u8, r[4], " \t"),
+            .content = mem.trimStart(u8, r[4], " \t"),
         };
     }
 }.f);
@@ -121,7 +121,7 @@ pub const blockquote_line = mecha.combine(.{
     mecha.rest.asStr(),
 }).map(struct {
     fn f(r: anytype) BlockquoteResult {
-        return .{ .content = mem.trimRight(u8, r[3], " \t\n\r") };
+        return .{ .content = mem.trimEnd(u8, r[3], " \t\n\r") };
     }
 }.f);
 
@@ -159,7 +159,7 @@ pub fn tryAtxHeading(allocator: Allocator, line: []const u8) ?HeadingResult {
     while (pos < line.len and (line[pos] == ' ' or line[pos] == '\t')) pos += 1;
     var content = line[pos..];
     // Strip trailing spaces/tabs
-    content = mem.trimRight(u8, content, " \t");
+    content = mem.trimEnd(u8, content, " \t");
     // Strip optional closing sequence of #'s (only if preceded by space or empty)
     if (content.len > 0 and content[content.len - 1] == '#') {
         // Check if the trailing #'s are escaped
@@ -176,7 +176,7 @@ pub fn tryAtxHeading(allocator: Allocator, line: []const u8) ?HeadingResult {
             }
             if (backslash_count % 2 == 0) {
                 // Not escaped; strip trailing #'s and spaces
-                content = mem.trimRight(u8, content[0..end], " \t");
+                content = mem.trimEnd(u8, content[0..end], " \t");
             }
         }
     }
@@ -195,7 +195,7 @@ pub fn tryOrderedListItem(allocator: Allocator, line: []const u8) ?OrderedListRe
 }
 
 pub fn tryBlockquoteLine(allocator: Allocator, line: []const u8) ?[]const u8 {
-    const t = mem.trimLeft(u8, line, " \t");
+    const t = mem.trimStart(u8, line, " \t");
     if (t.len == 0 or t[0] != '>') return null;
     const result = blockquote_line.parse(allocator, line) catch return null;
     return switch (result.value) {
@@ -255,10 +255,10 @@ pub fn isFenceEnd(line: []const u8, fence: FenceInfo) bool {
         // We count up to 3 spaces. If we have exactly 3, that's ok.
         // We need to also check line had 4+ spaces:
     }
-    const t = mem.trimLeft(u8, line, " ");
+    const t = mem.trimStart(u8, line, " ");
     const total_leading = line.len - t.len;
     if (total_leading >= 4) return false;
-    const trimmed = mem.trimRight(u8, t, " \t\r");
+    const trimmed = mem.trimEnd(u8, t, " \t\r");
     if (trimmed.len == 0) return false;
     if (trimmed[0] != fence.char) return false;
     var n: usize = 0;

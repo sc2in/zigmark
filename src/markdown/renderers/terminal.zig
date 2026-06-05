@@ -88,32 +88,8 @@ const KITTY_IMG_END = "\x1b\\";
 const ImageProto = enum { none, iterm2, kitty };
 
 fn detectImageProtocol() ImageProto {
-    // VS Code's integrated terminal does NOT support inline images even
-    // when the outer terminal (e.g. Ghostty) does — bail out early.
-    if (std.posix.getenv("TERM_PROGRAM")) |tp| {
-        if (std.mem.eql(u8, tp, "vscode")) return .none;
-    }
-    // Ghostty ≥1.1 supports the iTerm2 inline image protocol, which is
-    // simpler (single payload, terminal auto-detects format).
-    if (std.posix.getenv("GHOSTTY_RESOURCES_DIR")) |_| return .iterm2;
-    // Check TERM_PROGRAM
-    if (std.posix.getenv("TERM_PROGRAM")) |tp| {
-        if (std.mem.eql(u8, tp, "iTerm.app") or
-            std.mem.eql(u8, tp, "WezTerm") or
-            std.mem.eql(u8, tp, "mintty") or
-            std.mem.eql(u8, tp, "ghostty"))
-        {
-            return .iterm2;
-        }
-        if (std.mem.eql(u8, tp, "kitty")) return .kitty;
-    }
-    // Konsole supports iterm2 protocol
-    if (std.posix.getenv("KONSOLE_VERSION")) |_| return .iterm2;
-    // Kitty sets TERM=xterm-kitty
-    if (std.posix.getenv("TERM")) |term| {
-        if (std.mem.indexOf(u8, term, "kitty") != null) return .kitty;
-        if (std.mem.indexOf(u8, term, "ghostty") != null) return .iterm2;
-    }
+    // TODO(zig-0.16-migration): std.posix.getenv removed; re-enable once io is
+    // threaded through renderToWriter so we can call io.getEnvVar().
     return .none;
 }
 
@@ -137,10 +113,9 @@ fn readLocalFile(allocator: Allocator, path: []const u8) ?[]u8 {
     {
         return null;
     }
-    const file = std.fs.cwd().openFile(path, .{}) catch return null;
-    defer file.close();
-    // Cap at 10 MiB to avoid runaway reads
-    return file.readToEndAlloc(allocator, 10 * 1024 * 1024) catch null;
+    // TODO(zig-0.16-migration): filesystem access requires io context; inline images disabled.
+    _ = allocator;
+    return null;
 }
 
 /// Write an iTerm2 inline image sequence.
@@ -175,19 +150,10 @@ fn writeIterm2Image(w: anytype, data: []const u8, alt: []const u8, allocator: Al
 fn writeKittyImagePath(w: anytype, path: []const u8, allocator: Allocator) !void {
     // Kitty protocol wants the path base64-encoded when using t=f
     // Resolve to absolute path first
-    const abs_path = std.fs.cwd().realpathAlloc(allocator, path) catch return;
-    defer allocator.free(abs_path);
-
-    const b64_len = std.base64.standard.Encoder.calcSize(abs_path.len);
-    const encoded_path = try allocator.alloc(u8, b64_len);
-    defer allocator.free(encoded_path);
-    _ = std.base64.standard.Encoder.encode(encoded_path, abs_path);
-
-    // Single-payload command: ESC_G a=T,t=f ; <base64-path> ST
-    // a=T = transmit and display, t=f = file path (terminal auto-detects format)
-    try w.writeAll("\x1b_Ga=T,t=f;");
-    try w.writeAll(encoded_path);
-    try w.writeAll(KITTY_IMG_END);
+    // TODO(zig-0.16-migration): filesystem access requires io context; inline images disabled.
+    _ = w;
+    _ = path;
+    _ = allocator;
 }
 
 /// Write a Kitty graphics protocol inline image from raw data.
@@ -254,7 +220,7 @@ fn mergedTextRun(items: []const AST.Inline, start: usize, allocator: Allocator) 
     const consumed = end - start;
     if (consumed == 1) return .{ .text = first, .consumed = 1, .allocated = false };
 
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     for (items[start..end]) |item| try buf.appendSlice(allocator, item.text.content);
     return .{ .text = try buf.toOwnedSlice(allocator), .consumed = consumed, .allocated = true };
 }
@@ -412,17 +378,17 @@ fn renderBlock(w: anytype, block: AST.Block, indent: usize, bq_depth: usize, all
             const columns = tbl.alignments.items.len;
 
             // Render cell contents to plain strings (ANSI stripped) for width calculations.
-            var header_text = std.ArrayList([]const u8){};
+            var header_text = std.ArrayList([]const u8).empty;
             defer header_text.deinit(allocator);
             for (tbl.header.cells.items) |cell| {
                 const txt = try renderInlinePlain(allocator, cell.children.items);
                 try header_text.append(allocator, txt);
             }
 
-            var body_text = std.ArrayList([]const u8){};
+            var body_text = std.ArrayList([]const u8).empty;
             defer body_text.deinit(allocator);
             for (tbl.body.items) |row| {
-                var row_text = std.ArrayList([]const u8){};
+                var row_text = std.ArrayList([]const u8).empty;
                 defer row_text.deinit(allocator);
                 for (row.cells.items) |cell| {
                     const txt = try renderInlinePlain(allocator, cell.children.items);
@@ -723,7 +689,7 @@ fn writeBlockquotePrefix(w: anytype, depth: usize) !void {
 
 /// Render inline content to an owned plain (ANSI-stripped) string.
 fn renderInlinePlain(allocator: Allocator, items: []const AST.Inline) ![]const u8 {
-    var aw: std.io.Writer.Allocating = .init(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
     defer aw.deinit();
     try renderInlineList(&aw.writer, items, allocator);
     const out = try aw.toOwnedSlice();
@@ -774,7 +740,7 @@ fn ok(markdown: []const u8, needle: []const u8) !void {
 
 /// Strip all ANSI escape sequences so we can assert on visible text.
 fn stripAnsi(allocator: Allocator, input: []const u8) ![]u8 {
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     var i: usize = 0;
     while (i < input.len) {
         if (input[i] == '\x1b' and i + 1 < input.len and input[i + 1] == '[') {

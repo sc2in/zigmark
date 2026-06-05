@@ -27,24 +27,20 @@ pub fn build(b: *std.Build) void {
     });
 
     const mecha = b.dependency("mecha", .{});
-    const dt = b.dependency("datetime", .{
-        .target = target,
-        .optimize = optimize,
-    });
     const clap_dep = b.dependency("clap", .{
         .target = target,
         .optimize = optimize,
     });
-    const pozeiden_dep = b.lazyDependency("pozeiden", .{
+    // pozeiden is a lazy dep: not fetched when zigmark is used as a library.
+    // Falls back to noop_mermaid.zig when unavailable (not yet 0.16-compatible).
+    const pozeiden_module = if (b.lazyDependency("pozeiden", .{
         .target = target,
         .optimize = optimize,
-    });
-    const pozeiden_module = if (pozeiden_dep) |dep|
-        dep.module("pozeiden")
+    })) |poz|
+        poz.module("pozeiden")
     else
-        b.addModule("pozeiden-stub", .{
-            .root_source_file = b.path("src/noop_mermaid.zig"),
-        });
+        b.addModule("pozeiden-noop", .{ .root_source_file = b.path("src/noop_mermaid.zig") });
+
     const options = b.addOptions();
     // Version priority: -Dversion flag > git describe > build.zig.zon
     // The flag lets Nix (and other sandboxed builds) inject the version
@@ -54,7 +50,7 @@ pub fn build(b: *std.Build) void {
         const git_describe = b.runAllowFail(
             &.{ "git", "describe", "--tags", "--always" },
             &exit_code,
-            .Ignore,
+            .ignore,
         ) catch "";
         break :blk if (git_describe.len > 0) trimLeadingV(git_describe) else zon.version;
     };
@@ -73,7 +69,6 @@ pub fn build(b: *std.Build) void {
     zigmark.addImport("yaml", yaml.module("yaml"));
     zigmark.addImport("mvzr", mvzr.module("mvzr"));
     zigmark.addImport("mecha", mecha.module("mecha"));
-    zigmark.addImport("dt", dt.module("datetime"));
 
     // The shared library needs its own module instance.  When the exe and .so
     // share a module, lld rejects the build because the .so's PIC TLS access
@@ -99,7 +94,6 @@ pub fn build(b: *std.Build) void {
     zigmark_lib.addImport("yaml", yaml.module("yaml"));
     zigmark_lib.addImport("mvzr", mvzr.module("mvzr"));
     zigmark_lib.addImport("mecha", mecha.module("mecha"));
-    zigmark_lib.addImport("dt", dt.module("datetime"));
 
     const exe = b.addExecutable(.{
         .name = "zigmark",
@@ -152,6 +146,15 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests + CommonMark spec + GFM spec");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+
+    // ── Frontmatter-only test step ────────────────────────────────────────────
+    const fm_tests = b.addTest(.{
+        .root_module = zigmark,
+        .filters = &.{"frontmatter"},
+    });
+    const run_fm_tests = b.addRunArtifact(fm_tests);
+    const fm_step = b.step("test-frontmatter", "Run frontmatter unit tests only");
+    fm_step.dependOn(&run_fm_tests.step);
 
     // ── Fuzz tests ────────────────────────────────────────────────────────────
     // Run once (smoke test):          zig build fuzz
@@ -286,13 +289,23 @@ pub fn build(b: *std.Build) void {
         .cpu_arch = .wasm32,
         .os_tag = .wasi,
     });
-    const wasm_optimize = .ReleaseSmall;
+    const wasm_optimize = b.option(
+        std.builtin.OptimizeMode,
+        "wasm-optimize",
+        "Optimization for WASM target (default: ReleaseSmall)",
+    ) orelse .ReleaseSmall;
 
     const wasm_tomlz = b.dependency("tomlz", .{ .target = wasm_target, .optimize = wasm_optimize });
     const wasm_yaml = b.dependency("yaml", .{ .target = wasm_target, .optimize = wasm_optimize });
     const wasm_mvzr = b.dependency("mvzr", .{ .target = wasm_target, .optimize = wasm_optimize });
     const wasm_mecha = b.dependency("mecha", .{});
-    const wasm_dt = b.dependency("datetime", .{ .target = wasm_target, .optimize = wasm_optimize });
+    const wasm_pozeiden_module = if (b.lazyDependency("pozeiden", .{
+        .target = wasm_target,
+        .optimize = wasm_optimize,
+    })) |poz|
+        poz.module("pozeiden")
+    else
+        b.addModule("pozeiden-noop-wasm", .{ .root_source_file = b.path("src/noop_mermaid.zig") });
 
     const zigmark_wasm_mod = b.addModule("zigmark_wasm", .{
         .root_source_file = b.path("src/root.zig"),
@@ -304,18 +317,6 @@ pub fn build(b: *std.Build) void {
     zigmark_wasm_mod.addImport("yaml", wasm_yaml.module("yaml"));
     zigmark_wasm_mod.addImport("mvzr", wasm_mvzr.module("mvzr"));
     zigmark_wasm_mod.addImport("mecha", wasm_mecha.module("mecha"));
-    zigmark_wasm_mod.addImport("dt", wasm_dt.module("datetime"));
-
-    const wasm_pozeiden_dep = b.lazyDependency("pozeiden", .{
-        .target = wasm_target,
-        .optimize = wasm_optimize,
-    });
-    const wasm_pozeiden_module = if (wasm_pozeiden_dep) |dep|
-        dep.module("pozeiden")
-    else
-        b.addModule("pozeiden-stub-wasm", .{
-            .root_source_file = b.path("src/noop_mermaid.zig"),
-        });
 
     const wasm_lib = b.addExecutable(.{
         .name = "zigmark",
@@ -328,6 +329,10 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "pozeiden", .module = wasm_pozeiden_module },
             },
         }),
+        // Workaround: zig 0.16.0 LLVM WASM backend crashes in --listen=- mode;
+        // the self-hosted backend avoids the crash.
+        .use_llvm = false,
+        .use_lld = false,
     });
     wasm_lib.entry = .disabled;
     wasm_lib.root_module.export_symbol_names = &.{

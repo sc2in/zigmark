@@ -98,7 +98,7 @@ fn unicodeCaseFold(cp: u21) u21 {
 
 /// Case-insensitive label normalization: collapse whitespace, Unicode casefold.
 fn normalizeLabel(allocator: Allocator, label: []const u8) ![]const u8 {
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     var prev_ws = true;
     var i: usize = 0;
     while (i < label.len) {
@@ -158,11 +158,11 @@ pub fn tryConsumeLinkRefDef(
     ref_map: *RefMap,
 ) !?usize {
     const line = lines[start];
-    const tl = mem.trimLeft(u8, line, " ");
+    const tl = mem.trimStart(u8, line, " ");
     if (tl.len == 0 or tl[0] != '[') return null;
     if (tl.len > 1 and tl[1] == '^') return null;
 
-    var candidate = std.ArrayList(u8){};
+    var candidate = std.ArrayList(u8).empty;
     defer candidate.deinit(allocator);
     try candidate.appendSlice(allocator, line);
     var j = start + 1;
@@ -625,7 +625,7 @@ fn wrapDelimiters(
     const close_il = closer.inline_idx;
 
     // Gather children between opener and closer
-    var children = std.ArrayList(AST.Inline){};
+    var children = std.ArrayList(AST.Inline).empty;
     const child_count = close_il -| (open_il + 1);
     if (child_count > 0) try children.ensureTotalCapacity(allocator, child_count);
     var ci = open_il + 1;
@@ -724,36 +724,38 @@ fn processEmphasis(allocator: Allocator, inlines: *std.ArrayList(AST.Inline), de
 /// iteration — up to 32x throughput vs scalar for long plain-text spans.
 fn indexOfBreakChar(input: []const u8, pos: usize, gfm: bool) usize {
     const vlen = std.simd.suggestVectorLength(u8) orelse 1;
-    const Vec = @Vector(vlen, u8);
-    // Comptime-splat each needle — each becomes a PCMPEQB operand.
-    const s_star: Vec = @splat('*');
-    const s_under: Vec = @splat('_');
-    const s_tilde: Vec = @splat('~');
-    const s_lbrack: Vec = @splat('[');
-    const s_bang: Vec = @splat('!');
-    const s_btick: Vec = @splat('`');
-    const s_lt: Vec = @splat('<');
-    const s_bslash: Vec = @splat('\\');
-    const s_nl: Vec = @splat('\n');
     const fallback = if (gfm) &inline_break_gfm else &inline_break_cm;
     var i = pos;
-    while (i + vlen <= input.len) {
-        const blk: Vec = input[i..][0..vlen].*;
-        var hits = (blk == s_star) | (blk == s_under) | (blk == s_tilde) |
-            (blk == s_lbrack) | (blk == s_bang) | (blk == s_btick) |
-            (blk == s_lt) | (blk == s_bslash) | (blk == s_nl);
-        if (gfm) hits = hits | (blk == @as(Vec, @splat('@')));
-        if (@reduce(.Or, hits)) return i + std.simd.firstTrue(hits).?;
-        i += vlen;
+    // SIMD path: only when vlen > 1; vlen == 1 means no vector support (e.g. WASM).
+    if (comptime vlen > 1) {
+        const Vec = @Vector(vlen, u8);
+        const s_star: Vec = @splat('*');
+        const s_under: Vec = @splat('_');
+        const s_tilde: Vec = @splat('~');
+        const s_lbrack: Vec = @splat('[');
+        const s_bang: Vec = @splat('!');
+        const s_btick: Vec = @splat('`');
+        const s_lt: Vec = @splat('<');
+        const s_bslash: Vec = @splat('\\');
+        const s_nl: Vec = @splat('\n');
+        while (i + vlen <= input.len) {
+            const blk: Vec = input[i..][0..vlen].*;
+            var hits = (blk == s_star) | (blk == s_under) | (blk == s_tilde) |
+                (blk == s_lbrack) | (blk == s_bang) | (blk == s_btick) |
+                (blk == s_lt) | (blk == s_bslash) | (blk == s_nl);
+            if (gfm) hits = hits | (blk == @as(Vec, @splat('@')));
+            if (@reduce(.Or, hits)) return i + std.simd.firstTrue(hits).?;
+            i += vlen;
+        }
     }
-    // Scalar tail for bytes that don't fill a full vector.
+    // Scalar tail (or full scalar path when vlen == 1).
     while (i < input.len) : (i += 1) if (fallback[input[i]]) return i;
     return input.len;
 }
 
 pub fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap, gfm: bool) !std.ArrayList(AST.Inline) {
-    var inlines = std.ArrayList(AST.Inline){};
-    var delimiters = std.ArrayList(Delimiter){};
+    var inlines = std.ArrayList(AST.Inline).empty;
+    var delimiters = std.ArrayList(Delimiter).empty;
     defer delimiters.deinit(allocator);
     var pos: usize = 0;
 
@@ -970,7 +972,7 @@ pub fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*c
                             txt.content[txt.content.len - 2] == ' ')
                         {
                             is_hard = true;
-                            txt.content = mem.trimRight(u8, txt.content, " ");
+                            txt.content = mem.trimEnd(u8, txt.content, " ");
                         }
                     },
                     else => {},
@@ -1205,7 +1207,7 @@ fn stripLastNCharsFromInlines(
 }
 
 fn expandGfmAutolinks(allocator: Allocator, inlines: *std.ArrayList(AST.Inline)) !void {
-    var new_inlines = std.ArrayList(AST.Inline){};
+    var new_inlines = std.ArrayList(AST.Inline).empty;
     for (inlines.items) |item| {
         if (item == .text) {
             // Don't expand autolinks in text immediately following a literal '<'.
@@ -1257,7 +1259,7 @@ fn tryParseCodeSpan(allocator: Allocator, input: []const u8, pos: usize) ?struct
             while (se + cl < input.len and input[se + cl] == '`') cl += 1;
             if (cl == tl) {
                 const raw = input[cs..se];
-                var code_buf = std.ArrayList(u8){};
+                var code_buf = std.ArrayList(u8).empty;
                 for (raw) |ch| code_buf.append(allocator, if (ch == '\n') ' ' else ch) catch return null;
                 var final: []const u8 = code_buf.items;
                 if (final.len >= 2 and final[0] == ' ' and final[final.len - 1] == ' ') {
@@ -1284,7 +1286,7 @@ fn flattenInlineText(allocator: Allocator, input: []const u8, ref_map: ?*const R
         for (inlines.items) |*item| item.deinit(allocator);
         inlines.deinit(allocator);
     }
-    var buf = std.ArrayList(u8){};
+    var buf = std.ArrayList(u8).empty;
     for (inlines.items) |item| try flattenInline(allocator, &buf, item);
     return buf.toOwnedSlice(allocator);
 }
