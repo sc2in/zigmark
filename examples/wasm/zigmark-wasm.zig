@@ -16,7 +16,7 @@ const zigmark = @import("zigmark");
 const pozeiden = @import("pozeiden");
 
 // ── Allocator ────────────────────────────────────────────────────────────────
-// DebugAllocator uses thread-local storage unsupported on WASM; use page_allocator.
+// Use page_allocator as DebugAllocator uses thread-local storage unsupported on WASM.
 const allocator = std.heap.page_allocator;
 
 // ── Persistent state ─────────────────────────────────────────────────────────

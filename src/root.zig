@@ -616,6 +616,7 @@ pub fn runSpecSummary(allocator: std.mem.Allocator, spec_path: []const u8) !Spec
 /// Based on the CommonMark normalize.py approach
 fn normalizeHtml(allocator: std.mem.Allocator, src: []const u8) ![]const u8 {
     var normalized = std.ArrayList(u8).empty;
+    errdefer normalized.deinit(allocator);
     var in_tag = false;
     var i: usize = 0;
 
