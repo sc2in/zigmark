@@ -13,8 +13,8 @@ const math = std.math;
 const JsonValue = std.json.Value;
 
 const tomlz = @import("tomlz");
-const Yaml = @import("yaml").Yaml;
 const Tree = @import("yaml").Tree;
+const Yaml = @import("yaml").Yaml;
 
 const FrontMatter = @This();
 
@@ -27,6 +27,12 @@ original: Origin,
 /// Arena that owns all memory allocated by `set()` and `merge()`.
 /// Lazily initialised on first mutation; freed by `deinit()`.
 set_arena: ?std.heap.ArenaAllocator = null,
+/// True once `self.root` has been deep-cloned into `set_arena`.
+/// After migration, every `put()` on any object map in the tree uses
+/// `set_arena.allocator()`, satisfying Zig 0.16's requirement that the
+/// allocator passed to an unmanaged map's `put()` matches the allocator
+/// that owns the map's backing store.
+root_in_set_arena: bool = false,
 
 const YamlOrigin = struct {
     yaml: Yaml,
@@ -115,7 +121,11 @@ pub fn deinit(self: *FrontMatter) void {
             o.yaml.deinit(self.allocator);
         },
         .toml => |*o| {
-            deinitJsonValue(self.allocator, &self.root);
+            // If root was migrated to set_arena during set()/merge(), the
+            // original TOML-allocated strings were already freed there;
+            // skip the redundant deinitJsonValue to avoid a double-free.
+            if (!self.root_in_set_arena)
+                deinitJsonValue(self.allocator, &self.root);
             o.deinit(self.allocator);
         },
         // Arena-based: frees self.root memory too — do NOT call deinitJsonValue.
@@ -276,7 +286,10 @@ const ZonParser = struct {
         while (true) {
             p.skipWs();
             const c = p.peek() orelse return error.ZonParseError;
-            if (c == '}') { p.pos += 1; break; }
+            if (c == '}') {
+                p.pos += 1;
+                break;
+            }
             if (c != '.') return error.ZonParseError;
             p.pos += 1; // consume '.'
             const ns = p.pos;
@@ -298,7 +311,10 @@ const ZonParser = struct {
         var arr = JsonValue{ .array = std.json.Array.init(p.alloc) };
         while (true) {
             p.skipWs();
-            if (p.peek() == '}') { p.pos += 1; break; }
+            if (p.peek() == '}') {
+                p.pos += 1;
+                break;
+            }
             const val = try p.parseValue();
             try arr.array.append(val);
             p.skipWs();
@@ -312,7 +328,10 @@ const ZonParser = struct {
         var buf: std.ArrayListUnmanaged(u8) = .empty;
         while (p.pos < p.src.len) {
             const c = p.src[p.pos];
-            if (c == '"') { p.pos += 1; break; }
+            if (c == '"') {
+                p.pos += 1;
+                break;
+            }
             if (c == '\\') {
                 p.pos += 1;
                 if (p.pos >= p.src.len) return error.ZonParseError;
@@ -366,7 +385,10 @@ const ZonParser = struct {
             const ls = p.pos;
             while (p.pos < p.src.len and p.src[p.pos] != '\n') p.pos += 1;
             try buf.appendSlice(p.alloc, p.src[ls..p.pos]);
-            if (p.pos < p.src.len) { try buf.append(p.alloc, '\n'); p.pos += 1; }
+            if (p.pos < p.src.len) {
+                try buf.append(p.alloc, '\n');
+                p.pos += 1;
+            }
             // skip indentation before next `\\`
             while (p.pos < p.src.len and (p.src[p.pos] == ' ' or p.src[p.pos] == '\t'))
                 p.pos += 1;
@@ -814,12 +836,22 @@ pub fn set(self: *FrontMatter, path: []const u8, value: std.json.Value) !void {
     if (self.root != .object) return error.NotAnObject;
     if (self.set_arena == null)
         self.set_arena = std.heap.ArenaAllocator.init(self.allocator);
-    // In 0.16 unmanaged containers, the allocator passed to `put` must match
-    // the allocator that owns the entries backing store. Use `self.allocator`
-    // for `put` to keep the backing store ownership consistent.
-    // Key/value memory is allocated from `set_arena` so `deinit()` frees it.
     const set_alloc = self.set_arena.?.allocator();
-    const map_alloc = self.allocator;
+    // On first mutation, deep-clone the root tree into set_arena so every
+    // subsequent put() uses the same allocator that owns the backing store.
+    // Zig 0.16 unmanaged maps (StringArrayHashMapUnmanaged) require this.
+    // For TOML roots the original strings live in self.allocator and are freed
+    // here before being replaced; YAML/JSON/ZON roots live in their own parse
+    // arenas and are cleaned up by deinit() via self.original as normal.
+    if (!self.root_in_set_arena) {
+        const cloned = try cloneJsonValue(set_alloc, self.root);
+        switch (self.original) {
+            .toml => deinitJsonValue(self.allocator, &self.root),
+            else => {},
+        }
+        self.root = cloned;
+        self.root_in_set_arena = true;
+    }
     const owned = try cloneJsonValue(set_alloc, value);
     var segs = std.mem.tokenizeScalar(u8, path, '.');
     var current: *std.json.Value = &self.root;
@@ -827,7 +859,7 @@ pub fn set(self: *FrontMatter, path: []const u8, value: std.json.Value) !void {
         const is_last = segs.rest().len == 0;
         if (is_last) {
             const key = try set_alloc.dupe(u8, seg);
-            try current.object.put(map_alloc, key, owned);
+            try current.object.put(set_alloc, key, owned);
             return;
         }
         if (current.object.getPtr(seg)) |child| {
@@ -835,7 +867,7 @@ pub fn set(self: *FrontMatter, path: []const u8, value: std.json.Value) !void {
             current = child;
         } else {
             const key = try set_alloc.dupe(u8, seg);
-            try current.object.put(map_alloc, key, .{ .object = .{} });
+            try current.object.put(set_alloc, key, .{ .object = .{} });
             current = current.object.getPtr(seg).?;
         }
     }
@@ -852,7 +884,17 @@ pub fn set(self: *FrontMatter, path: []const u8, value: std.json.Value) !void {
 pub fn merge(self: *FrontMatter, overlay: FrontMatter) !void {
     if (self.set_arena == null)
         self.set_arena = std.heap.ArenaAllocator.init(self.allocator);
-    try mergeJsonValue(self.set_arena.?.allocator(), &self.root, overlay.root);
+    const set_alloc = self.set_arena.?.allocator();
+    if (!self.root_in_set_arena) {
+        const cloned = try cloneJsonValue(set_alloc, self.root);
+        switch (self.original) {
+            .toml => deinitJsonValue(self.allocator, &self.root),
+            else => {},
+        }
+        self.root = cloned;
+        self.root_in_set_arena = true;
+    }
+    try mergeJsonValue(set_alloc, &self.root, overlay.root);
 }
 
 // ── Field argument parsing ────────────────────────────────────────────────────

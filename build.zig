@@ -147,6 +147,16 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
 
+    // ── Frontmatter-only test step ────────────────────────────────────────────
+    const fm_tests = b.addTest(.{
+        .root_module = zigmark,
+        .filters = &.{"frontmatter"},
+    });
+    const run_fm_tests = b.addRunArtifact(fm_tests);
+    const fm_step = b.step("test-frontmatter", "Run frontmatter unit tests only");
+    fm_step.dependOn(&run_fm_tests.step);
+    test_step.dependOn(fm_step);
+
     // ── Fuzz tests ────────────────────────────────────────────────────────────
     // Run once (smoke test):          zig build fuzz
     // Coverage-guided fuzzing:        zig build fuzz --fuzz

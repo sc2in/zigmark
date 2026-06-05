@@ -877,6 +877,68 @@ test "frontmatter: merge deep-merges nested objects" {
     try tst.expectEqualDeep(std.json.Value{ .bool = true }, base.get("extra.reviewed").?);
 }
 
+// ── set/merge on non-TOML origins (regression for allocator-consistency bug) ─
+// YAML, JSON, and ZON roots are built in parse-time arenas.  Before the fix,
+// set() / merge() would call put() with self.allocator instead of the arena,
+// which is UB in Zig 0.16 unmanaged maps on rehash.
+
+test "frontmatter: set on YAML origin" {
+    const source =
+        \\title: Hello
+        \\author: World
+    ;
+    var fm = try FrontMatter.init(tst.allocator, source, .yaml);
+    defer fm.deinit();
+
+    try fm.set("title", .{ .string = "Changed" });
+    try fm.set("new_key", .{ .integer = 99 });
+
+    try tst.expectEqualStrings("Changed", fm.get("title").?.string);
+    try tst.expectEqualStrings("World", fm.get("author").?.string);
+    try tst.expectEqual(@as(i64, 99), fm.get("new_key").?.integer);
+}
+
+test "frontmatter: merge on YAML origin" {
+    const base_src =
+        \\title: Base
+    ;
+    var base = try FrontMatter.init(tst.allocator, base_src, .yaml);
+    defer base.deinit();
+
+    var overlay = try FrontMatter.init(tst.allocator, "author = \"Alice\"", .toml);
+    defer overlay.deinit();
+
+    try base.merge(overlay);
+
+    try tst.expectEqualStrings("Base", base.get("title").?.string);
+    try tst.expectEqualStrings("Alice", base.get("author").?.string);
+}
+
+test "frontmatter: set on JSON origin" {
+    const source = "{\"title\": \"Hello\", \"count\": 1}";
+    var fm = try FrontMatter.init(tst.allocator, source, .json);
+    defer fm.deinit();
+
+    try fm.set("title", .{ .string = "Changed" });
+    try fm.set("extra", .{ .bool = true });
+
+    try tst.expectEqualStrings("Changed", fm.get("title").?.string);
+    try tst.expectEqualDeep(std.json.Value{ .bool = true }, fm.get("extra").?);
+}
+
+test "frontmatter: set on ZON origin" {
+    const source = ".{ .title = \"Hello\", .draft = false }";
+    var fm = try FrontMatter.init(tst.allocator, source, .zon);
+    defer fm.deinit();
+
+    try fm.set("draft", .{ .bool = true });
+    try fm.set("new_key", .{ .string = "added" });
+
+    try tst.expectEqualStrings("Hello", fm.get("title").?.string);
+    try tst.expectEqualDeep(std.json.Value{ .bool = true }, fm.get("draft").?);
+    try tst.expectEqualStrings("added", fm.get("new_key").?.string);
+}
+
 test "frontmatter: parseFieldArg string value" {
     const fa = try FrontMatter.parseFieldArg("title=Hello World");
     try tst.expectEqualStrings("title", fa.path);
