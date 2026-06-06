@@ -1,0 +1,46 @@
+name: Sync Rulesets
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/rulesets/**"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Sync rulesets via API
+        env:
+          GH_TOKEN: ${{ secrets.RULESET_SYNC_TOKEN }}
+        run: |
+          REPO="${{ github.repository }}"
+
+          sync_ruleset() {
+            local file="$1"
+            local name
+            name=$(jq -r '.name' "$file")
+
+            existing_id=$(gh api "repos/$REPO/rulesets" \
+              --jq ".[] | select(.name == \"$name\") | .id" 2>/dev/null || true)
+
+            if [ -n "$existing_id" ]; then
+              echo "Updating ruleset '$name' (id=$existing_id)"
+              gh api "repos/$REPO/rulesets/$existing_id" \
+                --method PUT \
+                --input "$file"
+            else
+              echo "Creating ruleset '$name'"
+              gh api "repos/$REPO/rulesets" \
+                --method POST \
+                --input "$file"
+            fi
+          }
+
+          for f in .github/rulesets/*.json; do
+            sync_ruleset "$f"
+          done

@@ -15,7 +15,13 @@
   .header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
   .hdr-btn { font: 13px/1 'SF Mono', Menlo, monospace; color: var(--fg); background: none; border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; cursor: pointer; text-decoration: none; transition: border-color 0.15s; }
   .hdr-btn:hover { border-color: var(--accent); color: var(--accent); }
-  .container { display: grid; grid-template-columns: 1fr 1fr; height: calc(100vh - 48px); }
+  /* Preset example bar */
+  #preset-bar { display:flex; align-items:center; gap:8px; padding:6px 20px; border-bottom:1px solid var(--border); background:#0d1117; }
+  #preset-bar span { font-size:12px; opacity:0.5; }
+  .preset-btn { font:12px/1 'SF Mono',Menlo,monospace; color:var(--fg); background:none; border:1px solid var(--border); border-radius:4px; padding:3px 10px; cursor:pointer; transition:border-color 0.15s; }
+  .preset-btn:hover { border-color:var(--accent); color:var(--accent); }
+  .preset-btn.active { border-color:var(--accent); color:var(--accent); background:rgba(88,166,255,.08); }
+  .container { display: grid; grid-template-columns: 1fr 1fr; height: calc(100vh - 84px); }
   textarea { background: #161b22; color: var(--fg); border: none; border-right: 1px solid var(--border);
              padding: 16px; font: inherit; resize: none; outline: none; }
   .preview { padding: 16px; overflow-y: auto; }
@@ -42,6 +48,29 @@
   .badge { display: inline-block; background: #238636; color: #fff; font-size: 11px; padding: 2px 8px;
            border-radius: 12px; vertical-align: middle; }
   .badge.js { background: #9e6a03; }
+  /* Allocator benchmark overlay */
+  #bench-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:100; align-items:center; justify-content:center; }
+  #bench-overlay.open { display:flex; }
+  #bench-box { background:#161b22; border:1px solid var(--border); border-radius:8px; padding:24px; width:620px; max-width:95vw; font-size:13px; max-height:90vh; overflow-y:auto; }
+  #bench-box h2 { font-size:15px; color:var(--accent); margin-bottom:8px; }
+  #bench-box h3 { font-size:13px; color:var(--fg); margin:16px 0 8px; opacity:.8; }
+  .bench-tbl { width:100%; border-collapse:collapse; margin-bottom:10px; }
+  .bench-tbl th,.bench-tbl td { padding:5px 9px; border:1px solid var(--border); text-align:right; }
+  .bench-tbl th:first-child,.bench-tbl td:first-child { text-align:left; }
+  .bench-tbl th { background:#0d1117; color:var(--fg); }
+  .bench-tbl .winner { color:#3fb950; font-weight:bold; }
+  .bench-tbl .note { color:#8b949e; font-size:11px; }
+  #bench-status { opacity:.6; margin-bottom:10px; min-height:1.4em; }
+  .bench-bar { display:inline-block; height:8px; background:var(--accent); border-radius:3px; vertical-align:middle; margin-left:6px; }
+  .bench-tabs { display:flex; gap:6px; margin-bottom:14px; }
+  .bench-tab { background:none; border:1px solid var(--border); color:var(--fg); border-radius:4px; padding:3px 12px; cursor:pointer; font:inherit; font-size:12px; }
+  .bench-tab.active { border-color:var(--accent); color:var(--accent); }
+  .bench-panel { display:none; }
+  .bench-panel.active { display:block; }
+  #bench-close { float:right; background:none; border:1px solid var(--border); color:var(--fg); border-radius:4px; padding:3px 10px; cursor:pointer; font:inherit; }
+  #bench-close:hover { border-color:var(--accent); color:var(--accent); }
+  .diag-row-slow { color:#f85149; }
+  .diag-row-ok { color:#3fb950; }
 </style>
 </head>
 <body>
@@ -51,197 +80,88 @@
   <span class="badge">WASM</span>
   <span class="stats">
     zigmark <b id="zig-time">—</b> ms &nbsp;·&nbsp;
-    marked.js <b id="js-time">—</b> ms &nbsp;·&nbsp;
+    <span id="js-label">marked.js</span> <b id="js-time">—</b> ms &nbsp;·&nbsp;
     speedup <b id="speedup">—</b>×
   </span>
   <div class="header-right">
+    <button id="bench-open" class="hdr-btn">Benchmark</button>
     <a href="/docs" class="hdr-btn">Docs</a>
     <a href="https://github.com/sc2in/zigmark" class="hdr-btn" target="_blank" rel="noopener">GitHub</a>
   </div>
 </header>
 
-<div class="container">
-  <textarea id="editor" spellcheck="false" placeholder="Type Markdown here…">
-# zigmark: Markdown at the Speed of Zig 🚀
+<!-- Allocator benchmark overlay -->
+<div id="bench-overlay">
+  <div id="bench-box">
+    <button id="bench-close">✕ Close</button>
+    <h2>Performance Benchmark</h2>
 
-> **A CommonMark + GFM-compliant Markdown parser, written in Zig, compiled to WebAssembly.**
->
-> - 652/652 CommonMark spec tests passing ✅
-> - 24/24 GFM extension tests passing ✅
-> - Three renderers: HTML, AST, AI
-> - Zero runtime dependencies
-> - Blazing fast — often faster than JS!
->
-> _Edit this pane and watch the preview update in real-time. Switch renderers on the right!_
+    <div class="bench-tabs">
+      <button class="bench-tab active" data-tab="alloc">Allocators</button>
+      <button class="bench-tab" data-tab="diag">Diagnostics</button>
+    </div>
 
----
+    <div id="bench-status">Press Run to start…</div>
 
-## Headings
+    <!-- Allocator tab -->
+    <div class="bench-panel active" id="tab-alloc">
+      <table class="bench-tbl">
+        <thead><tr><th>Allocator</th><th>Avg (ms)</th><th>Min (ms)</th><th>Speedup</th><th>Bar</th></tr></thead>
+        <tbody id="bench-tbody"><tr><td colspan="5" style="text-align:center;opacity:.4">not run yet</td></tr></tbody>
+      </table>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button id="bench-run" class="hdr-btn" style="border-color:var(--accent);color:var(--accent)">▶ Run (100 iters)</button>
+        <label style="opacity:.6;font-size:12px">
+          Iterations: <input id="bench-iters" type="number" value="100" min="10" max="1000" step="10"
+            style="width:60px;background:#0d1117;color:var(--fg);border:1px solid var(--border);border-radius:3px;padding:2px 5px;font:inherit">
+        </label>
+        <span style="opacity:.5;font-size:11px">Uses current editor content</span>
+      </div>
+    </div>
 
-# H1 Heading
-## H2 Heading
-### H3 Heading
-#### H4 Heading
-##### H5 Heading
-###### H6 Heading
+    <!-- Diagnostics tab -->
+    <div class="bench-panel" id="tab-diag">
+      <h3>Parse vs Render split</h3>
+      <table class="bench-tbl" id="diag-split-table">
+        <thead><tr><th>Phase</th><th>Avg (ms)</th><th>Min (ms)</th><th>% of total</th></tr></thead>
+        <tbody id="diag-split-body"><tr><td colspan="4" style="text-align:center;opacity:.4">not run yet</td></tr></tbody>
+      </table>
 
----
+      <h3>Mermaid overhead</h3>
+      <table class="bench-tbl" id="diag-mermaid-table">
+        <thead><tr><th>Variant</th><th>Avg (ms)</th><th>Min (ms)</th><th>Delta</th></tr></thead>
+        <tbody id="diag-mermaid-body"><tr><td colspan="4" style="text-align:center;opacity:.4">not run yet</td></tr></tbody>
+      </table>
 
-## Lists
+      <h3>Input scaling (is it O(n²)?)</h3>
+      <table class="bench-tbl" id="diag-scale-table">
+        <thead><tr><th>Input size</th><th>Avg (ms)</th><th>Ratio vs 1×</th><th>Expected O(n)</th></tr></thead>
+        <tbody id="diag-scale-body"><tr><td colspan="4" style="text-align:center;opacity:.4">not run yet</td></tr></tbody>
+      </table>
 
-- Unordered item 1
-- Unordered item 2
-  - Nested item
-    - Deeply nested
+      <h3>Cold vs warm</h3>
+      <table class="bench-tbl" id="diag-cold-table">
+        <thead><tr><th>Call</th><th>Time (ms)</th><th>Note</th></tr></thead>
+        <tbody id="diag-cold-body"><tr><td colspan="3" style="text-align:center;opacity:.4">not run yet</td></tr></tbody>
+      </table>
 
-1. Ordered item 1
-2. Ordered item 2
-   1. Sub-item
-   2. Sub-item
-
----
-
-## Emphasis & Inline
-
-*Italic* _Italic_ **Bold** __Bold__ ***Bold Italic***
-~~Strikethrough~~ `Inline code`
-
----
-
-## Links & Images
-
-[zigmark on GitHub](https://github.com/sc2in/zigmark)
-![Zig logo](https://ziglang.org/img/zig-logo-dark.svg)
-
----
-
-## Blockquotes
-
-> This is a blockquote.
-> > Nested blockquote!
-
----
-
-## Mermaid Diagrams
-
-Mermaid diagrams are rendered natively via [pozeiden](https://github.com/sc2in/pozeiden) — no JavaScript library required.
-
-```mermaid
-flowchart LR
-    MD[Markdown] --> Parser
-    Parser --> AST
-    AST --> HTML
-    AST --> Typst
-    AST --> AI
-```
-
-```mermaid
-sequenceDiagram
-    Browser->>zigmark.wasm: render_html(markdown)
-    zigmark.wasm->>pozeiden: render(mermaid_src)
-    pozeiden-->>zigmark.wasm: svg
-    zigmark.wasm-->>Browser: html with inline svg
-```
-
-```mermaid
-pie title Renderer usage
-    "HTML" : 60
-    "Typst" : 25
-    "AI" : 15
-```
-
----
-
-## Code Blocks
-
-```zig
-const zigmark = @import("zigmark");
-var doc = try parser.parseMarkdown(allocator, input);
-const html = try zigmark.HTMLRenderer.render(allocator, doc);
-```
-
----
-
-## Frontmatter (YAML & TOML)
-
-```yaml
-title: Zigmark Demo
-author: Your Name
-```
-
-```toml
-tags = ["zig", "markdown", "wasm"]
-```
-
----
-
-## Footnotes
-
-```markdown
-Here is a footnote reference[^1].
-
-[^1]: This is the footnote content.
-```
-
-
-## GFM Extensions
-
-### Tables
-
-| Name    | Role      | Score |
-| ------- | --------- | ----: |
-| Alice   | Engineer  |    42 |
-| Bob     | Designer  |    37 |
-| Charlie | Manager   |    51 |
-
-Alignment: left (`:---`), center (`:---:`), right (`---:`).
-
-| Left    | Center  |  Right |
-| :------ | :-----: | -----: |
-| apples  | bananas | 1.0000 |
-| oranges |  grapes | 0.5000 |
-
-### Task Lists
-
-- [x] Implement CommonMark parser
-- [x] Add GFM extensions
-- [ ] World domination
-
-### Autolinks
-
-Bare URLs and emails are linked automatically:
-
-Visit www.example.com or https://ziglang.org or email contact@sc2.in
-
----
-
-## Raw HTML
-
-```html
-<div style="padding:8px;border:1px solid #58a6ff;border-radius:6px;">
-  Raw HTML block! <b>Bold</b> <i>Italic</i>
+      <div style="margin-top:12px">
+        <button id="diag-run" class="hdr-btn" style="border-color:var(--accent);color:var(--accent)">▶ Run Diagnostics</button>
+        <span style="opacity:.5;font-size:11px;margin-left:8px">50 iters each · uses current editor content</span>
+      </div>
+    </div>
+  </div>
 </div>
-```
 
+<div id="preset-bar">
+  <span>Examples:</span>
+  <button class="preset-btn active" data-preset="gfm">GFM</button>
+  <button class="preset-btn" data-preset="diagrams">Diagrams</button>
+  <button class="preset-btn" data-preset="minimal">Minimal</button>
+</div>
 
-## Spec Compliance
-
-All <b>652/652</b> CommonMark tests pass and all <b>24/24</b> GFM extension tests pass.
-See the <a href="https://github.com/sc2in/zigmark">README</a> for a full breakdown.
-
----
-
-## About
-
-zigmark is a Markdown parser and renderer written in Zig, designed for speed, correctness, 
-and embeddability. It supports HTML, AST, and AI-friendly output modes. 
-
-Try switching renderers!
-
----
-
-*Edit this pane and watch the preview update in real-time. Use the dropdown to switch output renderers!*
-  </textarea>
+<div class="container">
+  <textarea id="editor" spellcheck="false" placeholder="Type Markdown here…"></textarea>
   <div style="display:flex;flex-direction:column;height:100%">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
       <label for="renderer-select" style="font-size:13px;opacity:0.7">Renderer:</label>
@@ -257,12 +177,16 @@ Try switching renderers!
 </div>
 
 <!--
-  marked.js is loaded purely for benchmarking comparison.
-  zigmark does all the actual rendering.
+  marked.js is loaded for benchmarking comparison.
+  mermaid.js is loaded for the JS-side diagram comparison only.
+  zigmark does all the actual rendering in the preview.
 -->
 <script src="https://cdn.jsdelivr.net/npm/marked@15/lib/marked.umd.min.js"></script>
 
 <script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+
 // ── Load WASM ────────────────────────────────────────────────────────────────
 const WASM_PATH = 'zigmark.wasm';
 
@@ -359,22 +283,58 @@ function bench(fn, iterations = 50) {
   return (performance.now() - t0) / iterations;
 }
 
+// ── mermaid.js helpers ────────────────────────────────────────────────────────
+// Used only for the JS-side timing comparison; the WASM preview uses pozeiden.
+
+function hasMermaid(md) {
+  return /^```mermaid\b/m.test(md);
+}
+
+let _mermaidCounter = 0;
+
+// Render markdown with marked.js + mermaid.js and return an HTML string.
+// Each call uses fresh IDs so concurrent/repeated calls don't collide.
+async function jsRenderWithMermaid(md) {
+  const html = marked.parse(md);
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  for (const code of tmp.querySelectorAll('pre > code.language-mermaid')) {
+    const source = code.textContent;
+    const pre = code.parentElement;
+    try {
+      const id = `mjr-${++_mermaidCounter}`;
+      const { svg } = await mermaid.render(id, source);
+      const wrap = document.createElement('div');
+      wrap.innerHTML = svg;
+      pre.replaceWith(wrap.firstElementChild || wrap);
+    } catch { /* leave as code block on error */ }
+  }
+  return tmp.innerHTML;
+}
+
 // ── UI ───────────────────────────────────────────────────────────────────────
 const editor  = document.getElementById('editor');
 const preview = document.getElementById('preview');
 const zigTime = document.getElementById('zig-time');
 const jsTime  = document.getElementById('js-time');
+const jsLabel = document.getElementById('js-label');
 const speedup = document.getElementById('speedup');
 const rendererSelect = document.getElementById('renderer-select');
 const copyOutputBtn = document.getElementById('copy-output');
 
 let debounce = null;
+let updateGen = 0;
 
-function update() {
+function escapeHtml(str) {
+  return str.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+}
+
+async function update() {
+  const gen = ++updateGen;
   const md = editor.value;
   const renderer = rendererSelect.value;
 
-  // zigmark (WASM)
+  // zigmark (WASM) — synchronous, bench with N iterations
   const zt = bench(() => zigmarkRender(md, renderer));
   const output = zigmarkRender(md, renderer);
   if (renderer === 'html') {
@@ -383,23 +343,411 @@ function update() {
     preview.innerHTML = `<pre style="margin:0;">${escapeHtml(output)}</pre>`;
   }
 
-  function escapeHtml(str) {
-    return str.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  // JS comparison: marked.js alone, or marked+mermaid.js when diagrams present
+  let jt;
+  if (renderer === 'html' && hasMermaid(md)) {
+    // mermaid.render is async — warm once, then time a single render
+    await jsRenderWithMermaid(md);
+    if (gen !== updateGen) return;
+    const t0 = performance.now();
+    await jsRenderWithMermaid(md);
+    if (gen !== updateGen) return;
+    jt = performance.now() - t0;
+    jsLabel.textContent = 'marked+mermaid';
+  } else {
+    jt = bench(() => marked.parse(md));
+    jsLabel.textContent = 'marked.js';
   }
-
-  // marked.js (JS, only for HTML)
-  const jt = bench(() => marked.parse(md));
 
   zigTime.textContent = zt.toFixed(2);
   jsTime.textContent  = jt.toFixed(2);
   speedup.textContent = (jt / zt).toFixed(1);
 }
 
+// ── Allocator benchmark ───────────────────────────────────────────────────────
+const benchOverlay  = document.getElementById('bench-overlay');
+const benchOpenBtn  = document.getElementById('bench-open');
+const benchCloseBtn = document.getElementById('bench-close');
+const benchRunBtn   = document.getElementById('bench-run');
+const benchIters    = document.getElementById('bench-iters');
+const benchStatus   = document.getElementById('bench-status');
+const benchTbody    = document.getElementById('bench-tbody');
+
+benchOpenBtn.addEventListener('click', () => benchOverlay.classList.add('open'));
+benchCloseBtn.addEventListener('click', () => benchOverlay.classList.remove('open'));
+benchOverlay.addEventListener('click', e => { if (e.target === benchOverlay) benchOverlay.classList.remove('open'); });
+
+const ALLOCATORS = [
+  { key: 'page',  label: 'page_allocator',  fn: (ptr, len) => wasm.render_html(ptr, len) },
+  { key: 'arena', label: 'ArenaAllocator',   fn: (ptr, len) => wasm.render_html_arena(ptr, len) },
+  { key: 'fba',   label: 'FixedBufferAlloc', fn: (ptr, len) => wasm.render_html_fba(ptr, len) },
+];
+
+async function runBenchmark() {
+  const N = Math.max(10, Math.min(1000, parseInt(benchIters.value, 10) || 100));
+  const md = editor.value;
+  const encoded = encoder.encode(md);
+  const len = encoded.byteLength;
+
+  benchRunBtn.disabled = true;
+  benchRunBtn.textContent = '⏳ Running…';
+  benchTbody.innerHTML = '';
+
+  const results = [];
+
+  for (const alloc of ALLOCATORS) {
+    benchStatus.textContent = `Warming up ${alloc.label}…`;
+    // Give the browser a chance to repaint
+    await new Promise(r => setTimeout(r, 0));
+
+    // Allocate input buffer once; it survives resets since it's page_alloc
+    const ptr = wasm.alloc_buf(len);
+    if (!ptr) { results.push({ ...alloc, avg: NaN, min: NaN }); continue; }
+    new Uint8Array(wasm.memory.buffer, ptr, len).set(encoded);
+
+    // Warm-up: 5 calls to let arena/fba reach steady state
+    for (let i = 0; i < 5; i++) alloc.fn(ptr, len);
+
+    benchStatus.textContent = `Benchmarking ${alloc.label} (${N} iterations)…`;
+    await new Promise(r => setTimeout(r, 0));
+
+    const times = [];
+    for (let i = 0; i < N; i++) {
+      const t0 = performance.now();
+      const outPtr = alloc.fn(ptr, len);
+      times.push(performance.now() - t0);
+      if (!outPtr) { times.length = 0; break; } // alloc failed (FBA OOM)
+    }
+
+    wasm.free_buf(ptr, len);
+
+    if (times.length === 0) {
+      results.push({ ...alloc, avg: NaN, min: NaN, oom: true });
+    } else {
+      times.sort((a, b) => a - b);
+      const avg = times.reduce((s, t) => s + t, 0) / times.length;
+      const min = times[0];
+      results.push({ ...alloc, avg, min, p50: times[Math.floor(N * 0.50)], p95: times[Math.floor(N * 0.95)] });
+    }
+  }
+
+  // Find winner (lowest avg, ignoring NaN/OOM)
+  const valid = results.filter(r => !isNaN(r.avg));
+  const bestAvg = valid.length ? Math.min(...valid.map(r => r.avg)) : 1;
+
+  benchTbody.innerHTML = results.map(r => {
+    if (r.oom) return `<tr><td>${r.label}</td><td colspan="4" style="color:#f85149;text-align:center">OOM (doc too large for 2 MB FBA)</td></tr>`;
+    const isWinner = Math.abs(r.avg - bestAvg) < 0.001;
+    const cls = isWinner ? ' class="winner"' : '';
+    const speedup = (bestAvg === r.avg) ? '—' : `${(r.avg / bestAvg).toFixed(2)}×`;
+    const barW = Math.round((bestAvg / r.avg) * 120);
+    return `<tr>
+      <td${cls}>${r.label}${isWinner ? ' 🏆' : ''}</td>
+      <td${cls}>${r.avg.toFixed(3)}</td>
+      <td>${r.min.toFixed(3)}</td>
+      <td>${isWinner ? '<b>fastest</b>' : speedup + ' slower'}</td>
+      <td><span class="bench-bar" style="width:${barW}px"></span></td>
+    </tr>`;
+  }).join('');
+
+  benchStatus.textContent = `Done — ${N} iterations per allocator, ${(len / 1024).toFixed(1)} KB input.`;
+  benchRunBtn.disabled = false;
+  benchRunBtn.textContent = '▶ Run (' + N + ' iters)';
+}
+
+benchRunBtn.addEventListener('click', runBenchmark);
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
+document.querySelectorAll('.bench-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.bench-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.bench-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// ── Diagnostics ───────────────────────────────────────────────────────────────
+const diagRunBtn    = document.getElementById('diag-run');
+const diagSplitBody = document.getElementById('diag-split-body');
+const diagMermaidBody = document.getElementById('diag-mermaid-body');
+const diagScaleBody = document.getElementById('diag-scale-body');
+const diagColdBody  = document.getElementById('diag-cold-body');
+
+// Measure N iterations of fn(ptr, len), return sorted times array.
+function measureTimes(fn, ptr, len, N, warmup = 5) {
+  for (let i = 0; i < warmup; i++) fn(ptr, len);
+  const times = [];
+  for (let i = 0; i < N; i++) {
+    const t0 = performance.now();
+    fn(ptr, len);
+    times.push(performance.now() - t0);
+  }
+  times.sort((a, b) => a - b);
+  return times;
+}
+
+function avg(times) { return times.reduce((s, t) => s + t, 0) / times.length; }
+
+async function runDiagnostics() {
+  const N = 50;
+  const md = editor.value;
+  const encoded = encoder.encode(md);
+  const len = encoded.byteLength;
+
+  diagRunBtn.disabled = true;
+  diagRunBtn.textContent = '⏳ Running…';
+  benchStatus.textContent = 'Running diagnostics…';
+
+  const ptr = wasm.alloc_buf(len);
+  if (!ptr) { benchStatus.textContent = 'alloc failed'; diagRunBtn.disabled = false; return; }
+  new Uint8Array(wasm.memory.buffer, ptr, len).set(encoded);
+
+  await new Promise(r => setTimeout(r, 0));
+
+  // ── 1. Parse vs Render split ──────────────────────────────────────────────
+  benchStatus.textContent = 'Measuring parse vs render split…';
+  await new Promise(r => setTimeout(r, 0));
+
+  const totalTimes   = measureTimes((p, l) => wasm.render_html(p, l), ptr, len, N);
+  const parseTimes   = measureTimes((p, l) => wasm.parse_only(p, l),  ptr, len, N);
+
+  const totalAvg = avg(totalTimes);
+  const parseAvg = avg(parseTimes);
+  const renderAvg = Math.max(0, totalAvg - parseAvg);
+
+  diagSplitBody.innerHTML = [
+    { label: 'parse_only',    a: parseAvg,  m: parseTimes[0] },
+    { label: 'render (est.)', a: renderAvg, m: null },
+    { label: 'total',         a: totalAvg,  m: totalTimes[0] },
+  ].map(r => {
+    const pct = totalAvg > 0 ? ((r.a / totalAvg) * 100).toFixed(0) + '%' : '—';
+    const minStr = r.m !== null ? r.m.toFixed(3) : '—';
+    return `<tr><td>${r.label}</td><td>${r.a.toFixed(3)}</td><td>${minStr}</td><td>${pct}</td></tr>`;
+  }).join('');
+
+  // ── 2. Mermaid overhead ───────────────────────────────────────────────────
+  benchStatus.textContent = 'Measuring mermaid overhead…';
+  await new Promise(r => setTimeout(r, 0));
+
+  const withMermaid    = measureTimes((p, l) => wasm.render_html(p, l),           ptr, len, N);
+  const withoutMermaid = measureTimes((p, l) => wasm.render_html_nomermaid(p, l), ptr, len, N);
+
+  const wm  = avg(withMermaid);
+  const wom = avg(withoutMermaid);
+  const delta = wm - wom;
+  const deltaStr = (delta >= 0 ? '+' : '') + delta.toFixed(3) + ' ms';
+  const deltaClass = delta > 0.1 ? 'diag-row-slow' : 'diag-row-ok';
+
+  diagMermaidBody.innerHTML = `
+    <tr><td>with mermaid (pozeiden)</td><td>${wm.toFixed(3)}</td><td>${withMermaid[0].toFixed(3)}</td><td>baseline</td></tr>
+    <tr><td>without mermaid (null)</td><td>${wom.toFixed(3)}</td><td>${withoutMermaid[0].toFixed(3)}</td><td class="${deltaClass}">${deltaStr}</td></tr>`;
+
+  // ── 3. Input scaling ──────────────────────────────────────────────────────
+  benchStatus.textContent = 'Measuring input scaling…';
+  await new Promise(r => setTimeout(r, 0));
+
+  const SCALES = [1, 2, 5, 10];
+  const scaleRows = [];
+  let baselineScaleAvg = null;
+
+  for (const scale of SCALES) {
+    const scaledMd = md.repeat(scale);
+    const scaledEnc = encoder.encode(scaledMd);
+    const slen = scaledEnc.byteLength;
+    const sptr = wasm.alloc_buf(slen);
+    if (!sptr) { scaleRows.push({ scale, avg: NaN }); continue; }
+    new Uint8Array(wasm.memory.buffer, sptr, slen).set(scaledEnc);
+
+    const st = measureTimes((p, l) => wasm.render_html(p, l), sptr, slen, 20);
+    wasm.free_buf(sptr, slen);
+
+    const a = avg(st);
+    if (scale === 1) baselineScaleAvg = a;
+    scaleRows.push({ scale, avg: a, kb: slen / 1024 });
+    await new Promise(r => setTimeout(r, 0));
+  }
+
+  diagScaleBody.innerHTML = scaleRows.map(r => {
+    if (isNaN(r.avg)) return `<tr><td>${r.scale}× (${r.kb?.toFixed(1)} KB)</td><td colspan="3" style="color:#f85149">alloc failed</td></tr>`;
+    const ratio = baselineScaleAvg ? (r.avg / baselineScaleAvg).toFixed(2) + '×' : '—';
+    const expected = r.scale.toFixed(2) + '×';
+    const isNonlinear = baselineScaleAvg && (r.avg / baselineScaleAvg) > r.scale * 1.5;
+    const cls = isNonlinear ? ' class="diag-row-slow"' : '';
+    return `<tr${cls}><td>${r.scale}× (${r.kb.toFixed(1)} KB)</td><td>${r.avg.toFixed(3)}</td><td>${ratio}</td><td>${expected}</td></tr>`;
+  }).join('');
+
+  // ── 4. Cold vs warm ───────────────────────────────────────────────────────
+  // We can't truly reload, so we measure first 5 calls after a fresh arena reset.
+  // The page_alloc path is not warm-startable mid-run, so show first 10 raw calls.
+  benchStatus.textContent = 'Measuring cold vs warm calls…';
+  await new Promise(r => setTimeout(r, 0));
+
+  const coldTimes = [];
+  for (let i = 0; i < 10; i++) {
+    const t0 = performance.now();
+    wasm.render_html(ptr, len);
+    coldTimes.push(performance.now() - t0);
+  }
+
+  diagColdBody.innerHTML = coldTimes.map((t, i) => {
+    const label = i === 0 ? 'call 1 (coldest in sequence)' : `call ${i + 1}`;
+    const cls = t > totalAvg * 1.5 ? ' class="diag-row-slow"' : (t < totalAvg * 0.8 ? ' class="diag-row-ok"' : '');
+    const note = i === 0 ? 'first call after benchmark' : (i < 3 ? 'JIT warming' : 'steady state');
+    return `<tr${cls}><td>${label}</td><td>${t.toFixed(3)}</td><td class="note">${note}</td></tr>`;
+  }).join('');
+
+  wasm.free_buf(ptr, len);
+
+  benchStatus.textContent = `Diagnostics done — ${(len / 1024).toFixed(1)} KB input.`;
+  diagRunBtn.disabled = false;
+  diagRunBtn.textContent = '▶ Run Diagnostics';
+}
+
+diagRunBtn.addEventListener('click', runDiagnostics);
+
+// ── Example presets ───────────────────────────────────────────────────────────
+const PRESETS = {
+  gfm: `# zigmark — GFM Showcase
+
+> **652/652** CommonMark tests ✅ · **24/24** GFM tests ✅
+
+## Tables
+
+| Name    | Role      | Score |
+| :------ | :-------: | ----: |
+| Alice   | Engineer  |    42 |
+| Bob     | Designer  |    37 |
+| Charlie | Manager   |    51 |
+
+## Task lists
+
+- [x] CommonMark spec
+- [x] GFM extensions
+- [ ] World domination
+
+## Emphasis & Inline
+
+**Bold** *italic* ~~strike~~ \`code\` ***bold italic***
+
+## Autolinks
+
+Bare URLs: visit https://ziglang.org or www.example.com
+
+## Blockquotes
+
+> Nested blockquotes:
+> > this is level 2
+> > > level 3
+
+## Code
+
+\`\`\`zig
+const doc = try parser.parseMarkdown(alloc, input);
+defer doc.deinit(alloc);
+const html = try zigmark.HTMLRenderer.render(alloc, doc);
+\`\`\`
+
+## Footnotes
+
+Here is a footnote[^1].
+
+[^1]: The footnote content lives here.
+
+---
+*Switch to the **Diagrams** preset to see pozeiden vs mermaid.js performance.*`,
+
+  diagrams: `# Diagram Rendering: pozeiden vs mermaid.js
+
+zigmark renders diagrams **natively in WASM** via [pozeiden](https://github.com/sc2in/pozeiden) —
+no JavaScript library required. The header shows timing vs marked+mermaid.js.
+
+## Flowchart
+
+\`\`\`mermaid
+flowchart TD
+    MD[Markdown input] --> Parser
+    Parser --> AST
+    AST --> HTML[HTML Renderer]
+    AST --> Typst
+    AST --> AI
+    HTML --> Pozeiden[pozeiden WASM]
+    Pozeiden --> SVG[Inline SVG]
+\`\`\`
+
+## Sequence diagram
+
+\`\`\`mermaid
+sequenceDiagram
+    participant B as Browser
+    participant W as zigmark.wasm
+    participant P as pozeiden
+
+    B->>W: render_html(markdown)
+    W->>W: parse + render HTML
+    W->>P: render(mermaid_src)
+    P-->>W: SVG string
+    W-->>B: HTML with inline SVG
+\`\`\`
+
+## Pie chart
+
+\`\`\`mermaid
+pie title Renderer distribution
+    "HTML" : 60
+    "Typst" : 20
+    "AI" : 15
+    "AST" : 5
+\`\`\`
+
+## State machine
+
+\`\`\`mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Rendering: input event
+    Rendering --> Idle: done
+    Rendering --> Error: parse failed
+    Error --> Idle: reset
+\`\`\`
+
+---
+
+*The **header timing** shows zigmark+pozeiden (WASM) vs marked.js+mermaid.js (JS).
+Try the **Diagnostics** benchmark to see the mermaid overhead breakdown.*`,
+
+  minimal: `# Minimal
+
+Just a short document for quick iteration.
+
+Hello **world**! This is *zigmark* — a Markdown parser written in Zig.
+
+- Fast
+- Correct
+- Embeddable
+
+[zigmark on GitHub](https://github.com/sc2in/zigmark)`,
+};
+
+document.querySelectorAll('.preset-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const preset = PRESETS[btn.dataset.preset];
+    if (!preset) return;
+    editor.value = preset;
+    document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    clearTimeout(debounce);
+    update();
+  });
+});
+
+// Clear active preset when user types
 editor.addEventListener('input', () => {
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
   clearTimeout(debounce);
   debounce = setTimeout(update, 80);
 });
-rendererSelect.addEventListener('change', update);
+rendererSelect.addEventListener('change', () => update());
 copyOutputBtn.addEventListener('click', () => {
   const renderer = rendererSelect.value;
   const md = editor.value;
@@ -411,8 +759,9 @@ copyOutputBtn.addEventListener('click', () => {
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 try {
+  editor.value = PRESETS.gfm;
   await initWasm();
-  update();
+  await update();
 } catch (e) {
   preview.innerHTML =
     `<p style="color:#f85149">Failed to load <code>${WASM_PATH}</code>.</p>
