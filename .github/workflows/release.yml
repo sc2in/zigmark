@@ -104,11 +104,12 @@ jobs:
             system: x86_64-linux
           - os: ubuntu-24.04-arm
             system: aarch64-linux
-          - os: macos-latest
+          - os: macos-14
             system: aarch64-darwin
           - os: macos-13
             system: x86_64-darwin
     runs-on: ${{ matrix.os }}
+    name: flakehub-publish (${{ matrix.system }})
     permissions:
       id-token: write
       contents: read
