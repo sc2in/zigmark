@@ -28,10 +28,13 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Nix
         uses: DeterminateSystems/determinate-nix-action@v3
+        with:
+          extra-conf: |
+            sandbox = false
 
       - name: Setup Nix cache
         uses: DeterminateSystems/flakehub-cache-action@v3
@@ -40,7 +43,7 @@ jobs:
           flakehub-flake-name: "sc2in/ZigMark"
 
       - name: Build
-        run: nix build
+        run: nix build .#zigmark-safe -o result
 
       - name: Package
         run: |
