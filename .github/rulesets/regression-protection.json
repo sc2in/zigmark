@@ -16,10 +16,10 @@
         "strict_required_status_checks_policy": false,
         "do_not_enforce_on_create": true,
         "required_status_checks": [
-          { "context": "CI / build (x86_64-linux)" },
-          { "context": "CI / build (aarch64-linux)" },
-          { "context": "CI / wasm" },
-          { "context": "CI / bench-regression" }
+          { "context": "build (x86_64-linux)" },
+          { "context": "build (aarch64-linux)" },
+          { "context": "wasm" },
+          { "context": "bench-regression" }
         ]
       }
     }
