@@ -75,13 +75,24 @@ jobs:
           cd dist
           sha256sum *.tar.gz > checksums.txt
 
-      - name: Create release
-        run: |
-          gh release create "${{ github.ref_name }}" \
-            dist/*.tar.gz dist/checksums.txt \
-            --generate-notes
+      - name: Create / update release
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          TAG="${{ github.ref_name }}"
+          REPO="${{ github.repository }}"
+
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$REPO" --draft=true
+          else
+            gh release create "$TAG" --repo "$REPO" --draft --generate-notes
+          fi
+
+          gh release upload "$TAG" --repo "$REPO" dist/*.tar.gz dist/checksums.txt --clobber
+          gh release edit "$TAG" --repo "$REPO" --draft=false
 
   flakehub-publish:
     needs: release
