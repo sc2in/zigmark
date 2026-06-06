@@ -40,7 +40,7 @@ RULESET_JSON=$(jq -n \
     enforcement: "active",
     conditions: {
       ref_name: {
-        include: ["refs/heads/*"],
+        include: ["~ALL"],
         exclude: []
       }
     },
@@ -52,7 +52,8 @@ RULESET_JSON=$(jq -n \
         type: "required_status_checks",
         parameters: {
           required_status_checks: $checks,
-          strict_required_status_checks_policy: false
+          strict_required_status_checks_policy: false,
+          do_not_enforce_on_create: true
         }
       }
     ]
