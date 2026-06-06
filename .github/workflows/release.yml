@@ -96,6 +96,7 @@ jobs:
 
   flakehub-publish:
     needs: release
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
