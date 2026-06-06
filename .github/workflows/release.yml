@@ -125,7 +125,7 @@ jobs:
       - name: Setup Nix cache
         uses: DeterminateSystems/flakehub-cache-action@v3
         with:
-          use-gha-cache: "enabled"
+          use-gha-cache: "disabled"
           flakehub-flake-name: "sc2in/ZigMark"
 
       - uses: DeterminateSystems/flakehub-push@v6
