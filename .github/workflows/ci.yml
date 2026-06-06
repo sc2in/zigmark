@@ -59,3 +59,126 @@ jobs:
           name: zigmark-${{ matrix.system }}
           path: zigmark-release/
           retention-days: 7
+
+  # ── WASM build ─────────────────────────────────────────────────────────────
+  # Separate job so "CI / wasm" appears as a distinct required check in branch
+  # rulesets.  The nix check (flake#checks.wasm) also covers this in `build`,
+  # but that check is bundled under the matrix job name and not independently
+  # addressable.  Running it standalone here gives us a stable check name.
+  wasm:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Nix
+        uses: DeterminateSystems/determinate-nix-action@v3
+        with:
+          extra-conf: |
+            sandbox = false
+      - name: Setup Nix cache
+        uses: DeterminateSystems/flakehub-cache-action@v3
+        with:
+          use-gha-cache: "enabled"
+          flakehub-flake-name: "sc2in/ZigMark"
+      - name: Build WASM module
+        run: nix build .#checks.x86_64-linux.wasm
+
+  # ── Benchmark regression ───────────────────────────────────────────────────
+  # Downloads the last tagged release binary and compares it against the
+  # current build on the same machine (cancels runner variance).
+  # Fails if current_mean > baseline_mean + 2 * baseline_stddev.
+  # Skipped automatically when no prior release exists (e.g. first PR).
+  bench-regression:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Nix
+        uses: DeterminateSystems/determinate-nix-action@v3
+        with:
+          extra-conf: |
+            sandbox = false
+      - name: Setup Nix cache
+        uses: DeterminateSystems/flakehub-cache-action@v3
+        with:
+          use-gha-cache: "enabled"
+          flakehub-flake-name: "sc2in/ZigMark"
+
+      - name: Build current binary (ReleaseFast)
+        run: nix build .#zigmark-fast -o zigmark-current
+
+      - name: Download last release baseline
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LAST_TAG=$(gh release list -L 1 --json tagName -q '.[0].tagName' 2>/dev/null || true)
+          if [ -z "$LAST_TAG" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "No prior release found — skipping regression check."
+            exit 0
+          fi
+          mkdir -p baseline
+          if ! gh release download "$LAST_TAG" \
+               -p "zigmark-*-x86_64-linux.tar.gz" -D baseline/ 2>/dev/null; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Release asset not found for $LAST_TAG — skipping."
+            exit 0
+          fi
+          tar xzf baseline/*.tar.gz -C baseline/
+          echo "skip=false"  >> "$GITHUB_OUTPUT"
+          echo "tag=$LAST_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Run hyperfine comparison
+        if: steps.baseline.outputs.skip == 'false'
+        run: |
+          nix profile add nixpkgs#hyperfine
+          hyperfine \
+            --warmup 100 -m 300 \
+            --export-json bench-results.json \
+            --command-name current \
+              "./zigmark-current/bin/zigmark README.md > /dev/null" \
+            --command-name "baseline (${{ steps.baseline.outputs.tag }})" \
+              "./baseline/bin/zigmark README.md > /dev/null"
+
+      - name: Check for regression
+        if: steps.baseline.outputs.skip == 'false'
+        run: |
+          python3 - <<'PYEOF'
+          import json, sys
+
+          with open("bench-results.json") as f:
+              results = json.load(f)["results"]
+
+          current  = next(r for r in results if r["command"] == "current")
+          baseline = next(r for r in results if "baseline" in r["command"])
+
+          c_mean = current["mean"]
+          b_mean = baseline["mean"]
+          b_std  = baseline["stddev"]
+          threshold = b_mean + 2 * b_std
+          ratio = c_mean / b_mean if b_mean > 0 else 1.0
+
+          print(f"Current:   {c_mean*1000:.3f} ms")
+          print(f"Baseline:  {b_mean*1000:.3f} ms  (σ = {b_std*1000:.3f} ms)")
+          print(f"Threshold: {threshold*1000:.3f} ms  (baseline + 2σ)")
+          print(f"Ratio:     {ratio:.3f}×")
+
+          if c_mean > threshold:
+              print(f"\n❌  Regression: {c_mean*1000:.3f} ms > {threshold*1000:.3f} ms")
+              sys.exit(1)
+
+          print(f"\n✅  No regression: {c_mean*1000:.3f} ms ≤ {threshold*1000:.3f} ms")
+          PYEOF
+
+      - name: Upload benchmark results
+        if: steps.baseline.outputs.skip == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: bench-results.json
+          retention-days: 30

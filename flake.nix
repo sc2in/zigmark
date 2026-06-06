@@ -94,13 +94,22 @@
       }
     );
 
-    # `nix flake check` / omnix ci — runs `zig build test` (unit + cmark + gfm spec)
+    # `nix flake check` / omnix ci — runs `zig build test` + `zig build wasm`
     checks = forAllSystems (system: {
       test = self.packages.${system}.default.overrideAttrs (old: {
         pname = "zigmark-test";
         buildPhase = "zig build test -Dversion=${version}";
         installPhase = "touch $out";
         meta = (old.meta or {}) // {description = "Run zig build test — unit tests + CommonMark spec + GFM spec";};
+      });
+      wasm = self.packages.${system}.default.overrideAttrs (old: {
+        pname = "zigmark-wasm-check";
+        buildPhase = "zig build wasm -Dversion=${version}";
+        installPhase = ''
+          mkdir -p $out
+          install -m644 zig-out/wasm/zigmark.wasm $out/
+        '';
+        meta = (old.meta or {}) // {description = "Build WASM module and verify zigmark.wasm is produced";};
       });
     });
 
@@ -241,7 +250,11 @@
               MEM_MD=$(mktemp /tmp/bench-mem-XXXXXX.md)
               TIME_TMP=$(mktemp /tmp/bench-time-XXXXXX)
               NEW_SECTION_MD=$(mktemp /tmp/bench-new-section-XXXXXX.md)
-              trap 'rm -f "$RESULT_MD" "$PANDOC_MD" "$MEM_MD" "$TIME_TMP" "$NEW_SECTION_MD" "$CMARK_WRAP" "$CMARK_GFM_WRAP"' EXIT
+              # Mermaid-heavy input: committed benchmark fixture with 6 mermaid blocks.
+              MERMAID_FILE="$REPO/bench/input-mermaid.md"
+
+              RESULT_MERMAID_MD=$(mktemp /tmp/bench-mermaid-XXXXXX.md)
+              trap 'rm -f "$RESULT_MD" "$PANDOC_MD" "$MEM_MD" "$TIME_TMP" "$NEW_SECTION_MD" "$CMARK_WRAP" "$CMARK_GFM_WRAP" "$RESULT_MERMAID_MD"' EXIT
 
               echo "▸ Running hyperfine (fast tools — 500 runs)…"
               hyperfine \
@@ -265,6 +278,19 @@
                 --export-markdown "$PANDOC_MD" \
                 --command-name "pandoc" "pandoc -o /dev/null $BENCH_FILE"
 
+              echo "▸ Running hyperfine (mermaid-heavy input — 500 runs)…"
+              echo "  Mermaid file: $MERMAID_FILE ($(wc -c < "$MERMAID_FILE") bytes)"
+              hyperfine \
+                -N \
+                --warmup 50 \
+                --runs 500 \
+                --export-markdown "$RESULT_MERMAID_MD" \
+                --command-name "zigmark (ReleaseSafe) + mermaid"  "$ZIGMARK_SAFE  -o /dev/null $MERMAID_FILE" \
+                --command-name "zigmark (ReleaseSmall) + mermaid" "$ZIGMARK_SMALL -o /dev/null $MERMAID_FILE" \
+                --command-name "zigmark (ReleaseFast) + mermaid"  "$ZIGMARK_FAST  -o /dev/null $MERMAID_FILE" \
+                --command-name "cmark + mermaid"                   "$CMARK_WRAP $MERMAID_FILE" \
+                --command-name "cmark-gfm + mermaid"              "$CMARK_GFM_WRAP $MERMAID_FILE"
+
               echo "▸ Measuring peak RSS (one run each)…"
               # GNU time -v reports "Maximum resident set size (kbytes)" on Linux.
               # Shell builtin `time` can't be overridden by PATH; use the store path directly.
@@ -286,14 +312,15 @@
               # Python handles the data-processing only: sort rows, bold zigmark
               # entries, and write the new section body to $NEW_SECTION_MD.
               # README.md is updated below by zigmark via its AST mutation API.
-              python3 - "$RESULT_MD" "$PANDOC_MD" "$BENCH_FILE" "$MEM_MD" "$NEW_SECTION_MD" <<'PYEOF'
+              python3 - "$RESULT_MD" "$PANDOC_MD" "$BENCH_FILE" "$MEM_MD" "$NEW_SECTION_MD" "$RESULT_MERMAID_MD" <<'PYEOF'
               import re, sys, pathlib, datetime
 
-              fast_md     = pathlib.Path(sys.argv[1]).read_text()
-              pandoc_md   = pathlib.Path(sys.argv[2]).read_text()
-              bench_file  = sys.argv[3]
-              mem_md      = pathlib.Path(sys.argv[4]).read_text()
-              out_path    = pathlib.Path(sys.argv[5])
+              fast_md        = pathlib.Path(sys.argv[1]).read_text()
+              pandoc_md      = pathlib.Path(sys.argv[2]).read_text()
+              bench_file     = sys.argv[3]
+              mem_md         = pathlib.Path(sys.argv[4]).read_text()
+              out_path       = pathlib.Path(sys.argv[5])
+              mermaid_md     = pathlib.Path(sys.argv[6]).read_text()
 
               def parse_mean_ms(row):
                   # row cells: | cmd | mean ± sd | min | max | rel |
@@ -341,6 +368,15 @@
               mem_rows    = [bold_if_zigmark(r) for r in mem_rows]
               mem_table   = "\n".join([mem_header, mem_sep] + mem_rows) + "\n"
 
+              # Build mermaid-input table (no pandoc / no lowdown — not in that run)
+              mermaid_lines  = mermaid_md.rstrip().splitlines()
+              mermaid_header = [l for l in mermaid_lines if l.startswith("| Command")][0]
+              mermaid_sep    = [l for l in mermaid_lines if l.startswith("|:")][0]
+              mermaid_rows   = [l for l in mermaid_lines if is_data_row(l)]
+              mermaid_rows.sort(key=parse_mean_ms)
+              mermaid_rows   = [bold_if_zigmark(r) for r in mermaid_rows]
+              mermaid_table  = "\n".join([mermaid_header, mermaid_sep] + mermaid_rows) + "\n"
+
               bench_size = pathlib.Path(bench_file).stat().st_size
               today      = datetime.date.today().isoformat()
 
@@ -351,6 +387,9 @@
                   f" ({bench_size // 1024} KB) · run `nix run .#bench` to reproduce_\n\n"
                   f"### Speed\n\n{bench_md}\n"
                   f"### Memory (peak RSS)\n\n{mem_table}\n"
+                  f"### Speed — mermaid-heavy input (`bench/input-mermaid.md`)\n\n"
+                  f"Measures parser throughput on a document with 6 mermaid fenced blocks.\n\n"
+                  f"{mermaid_table}\n"
               )
               out_path.write_text(section_body)
               PYEOF

@@ -293,7 +293,7 @@ pub fn build(b: *std.Build) void {
         std.builtin.OptimizeMode,
         "wasm-optimize",
         "Optimization for WASM target (default: ReleaseSmall)",
-    ) orelse .ReleaseSmall;
+    ) orelse .ReleaseFast;
 
     const wasm_tomlz = b.dependency("tomlz", .{ .target = wasm_target, .optimize = wasm_optimize });
     const wasm_yaml = b.dependency("yaml", .{ .target = wasm_target, .optimize = wasm_optimize });
@@ -337,6 +337,11 @@ pub fn build(b: *std.Build) void {
     wasm_lib.entry = .disabled;
     wasm_lib.root_module.export_symbol_names = &.{
         "render_html",
+        "render_html_arena",
+        "render_html_fba",
+        "render_html_nomermaid",
+        "flush_mermaid_cache",
+        "parse_only",
         "render_ast",
         "render_ai",
         "result_len",
