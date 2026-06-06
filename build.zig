@@ -292,7 +292,7 @@ pub fn build(b: *std.Build) void {
     const wasm_optimize = b.option(
         std.builtin.OptimizeMode,
         "wasm-optimize",
-        "Optimization for WASM target (default: ReleaseSmall)",
+        "Optimization for WASM target (default: ReleaseFast)",
     ) orelse .ReleaseFast;
 
     const wasm_tomlz = b.dependency("tomlz", .{ .target = wasm_target, .optimize = wasm_optimize });

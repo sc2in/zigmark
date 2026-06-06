@@ -323,12 +323,14 @@ const rendererSelect = document.getElementById('renderer-select');
 const copyOutputBtn = document.getElementById('copy-output');
 
 let debounce = null;
+let updateGen = 0;
 
 function escapeHtml(str) {
   return str.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 }
 
 async function update() {
+  const gen = ++updateGen;
   const md = editor.value;
   const renderer = rendererSelect.value;
 
@@ -346,8 +348,10 @@ async function update() {
   if (renderer === 'html' && hasMermaid(md)) {
     // mermaid.render is async — warm once, then time a single render
     await jsRenderWithMermaid(md);
+    if (gen !== updateGen) return;
     const t0 = performance.now();
     await jsRenderWithMermaid(md);
+    if (gen !== updateGen) return;
     jt = performance.now() - t0;
     jsLabel.textContent = 'marked+mermaid';
   } else {
