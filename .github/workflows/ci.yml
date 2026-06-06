@@ -78,6 +78,8 @@ jobs:
         with:
           extra-conf: |
             sandbox = false
+      - name: Configure permissions
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: Setup Nix cache
         uses: DeterminateSystems/flakehub-cache-action@v3
         with:
@@ -103,6 +105,8 @@ jobs:
         with:
           extra-conf: |
             sandbox = false
+      - name: Configure permissions
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
       - name: Setup Nix cache
         uses: DeterminateSystems/flakehub-cache-action@v3
         with:
