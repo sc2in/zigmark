@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Reject release-tag pushes that don't include a CHANGELOG.md update since the
+# previous release tag. Installed into .git/hooks/pre-push by the Nix devshell
+# (see flake.nix shellHook). The pre-commit framework only manages the
+# pre-commit hook, so pre-push is ours.
+#
+# Bypass (discouraged): git push --no-verify
+set -euo pipefail
+
+tag_re='^refs/tags/v?[0-9]+\.[0-9]+\.[0-9]+$'
+status=0
+
+# git feeds one line per ref being pushed: <local_ref> <local_sha> <remote_ref> <remote_sha>
+while read -r local_ref local_sha _remote_ref _remote_sha; do
+  [[ "$local_ref" =~ $tag_re ]] || continue
+  # Tag deletion (all-zero local sha) — nothing to verify.
+  [[ "$local_sha" =~ ^0+$ ]] && continue
+
+  tag="${local_ref#refs/tags/}"
+  # Nearest release tag before this commit. None => first release, allow it.
+  prev="$(git describe --tags --abbrev=0 "${local_sha}^" 2>/dev/null || true)"
+  [ -n "$prev" ] || continue
+
+  if git diff --quiet "$prev" "$local_sha" -- CHANGELOG.md; then
+    echo "✗ $tag: CHANGELOG.md has no changes since $prev." >&2
+    echo "  Update the changelog before tagging — e.g. 'nix run .#bump -- <version>'." >&2
+    echo "  (Override with 'git push --no-verify' if you really mean to.)" >&2
+    status=1
+  fi
+done
+
+exit "$status"
