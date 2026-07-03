@@ -8,6 +8,8 @@ same stability guarantee.
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-07-03
+
 ## [0.7.2] — 2026-07-03
 
 ### Fixed
