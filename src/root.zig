@@ -72,6 +72,11 @@ pub const typst = typst_mod;
 /// `renderTypstWithMermaid`, or `renderTypstDocWithMermaid` to have mermaid
 /// fenced code blocks converted to inline diagrams instead of emitting raw
 /// code blocks.
+///
+/// The returned slice must be allocated with the allocator passed into the
+/// callback; zigmark frees it with that same allocator after emitting the
+/// diagram. Returning static or externally-owned memory will trigger an
+/// invalid free.
 pub const MermaidRendererFn = *const fn (std.mem.Allocator, []const u8) anyerror![]const u8;
 
 /// Render `doc` to HTML, converting mermaid fenced blocks to inline SVG
@@ -85,9 +90,11 @@ pub fn renderHtmlWithMermaid(
     return html.renderToWriterWithMermaid(allocator, writer, doc, mermaid);
 }
 
-/// Render `doc` to Typst markup (body only, no preamble), converting mermaid
-/// fenced blocks to inline `#image` calls using `mermaid` (pass `null` to
-/// skip conversion). Use this when you supply your own Typst preamble.
+/// Render `doc` to Typst markup (body only, no preamble), converting each
+/// mermaid fenced block to an inline Typst `#{ … }` block that embeds the SVG
+/// via `image(bytes("…"), format: "svg")` — sized to its natural width but
+/// capped at the line width — using `mermaid` (pass `null` to skip
+/// conversion). Use this when you supply your own Typst preamble.
 pub fn renderTypstWithMermaid(
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,
@@ -97,8 +104,10 @@ pub fn renderTypstWithMermaid(
     return typst_mod.renderToWriterWithMermaid(allocator, writer, doc, mermaid);
 }
 
-/// Render `doc` to a full Typst document, converting mermaid fenced blocks
-/// to inline `#image` calls using `mermaid` (pass `null` to skip conversion).
+/// Render `doc` to a full Typst document, converting each mermaid fenced block
+/// to an inline Typst `#{ … }` block that embeds the SVG via
+/// `image(bytes("…"), format: "svg")` — sized to its natural width but capped
+/// at the line width — using `mermaid` (pass `null` to skip conversion).
 pub fn renderTypstDocWithMermaid(
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,

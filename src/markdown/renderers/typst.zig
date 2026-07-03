@@ -746,9 +746,10 @@ pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
 }
 
 /// Render `doc` to a writer as Typst markup (body only, no preamble),
-/// converting mermaid fenced blocks to inline `#image` calls using the
-/// provided renderer. Pass `null` to render mermaid blocks as plain code
-/// blocks.
+/// converting each mermaid fenced block to an inline Typst `#{ … }` block that
+/// embeds the SVG via `image(bytes("…"), format: "svg")` — sized to its
+/// natural width but capped at the line width — using the provided renderer.
+/// Pass `null` to render mermaid blocks as plain code blocks.
 pub fn renderToWriterWithMermaid(
     allocator: Allocator,
     writer: *std.Io.Writer,
@@ -778,8 +779,10 @@ pub fn renderDocumentToWriter(allocator: Allocator, writer: *std.Io.Writer, doc:
     }
 }
 
-/// Render `doc` to a writer as a complete Typst document, converting mermaid
-/// fenced blocks to inline `#image` calls using the provided renderer.
+/// Render `doc` to a writer as a complete Typst document, converting each
+/// mermaid fenced block to an inline Typst `#{ … }` block that embeds the SVG
+/// via `image(bytes("…"), format: "svg")` — sized to its natural width but
+/// capped at the line width — using the provided renderer.
 pub fn renderDocumentToWriterWithMermaid(
     allocator: Allocator,
     writer: *std.Io.Writer,
