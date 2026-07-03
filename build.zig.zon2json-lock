@@ -29,10 +29,10 @@
     "url": "git+https://github.com/github/cmark-gfm.git#587a12bb54d95ac37241377e6ddc93ea0e45439b",
     "hash": "sha256-egCWzw09e5daT8cnlSORC3gep9soiqonVC4GQ/s3voM="
   },
-  "pozeiden-0.1.3-NAqiXeOXCgAUNGkydN-lIYUZQ87uzGQPOQ-wXvK4FNW3": {
+  "pozeiden-0.2.0-NAqiXaypCgBCkAMB3WZpGLPnwV5XTsUvOf3KUY9aAN0p": {
     "name": "pozeiden",
-    "url": "https://github.com/sc2in/pozeiden/archive/refs/tags/v0.1.3.tar.gz",
-    "hash": "sha256-D6MZywks5n7jCWx/C02HT8LSdaWleCsL2/jjpYAbM1Q="
+    "url": "https://github.com/sc2in/pozeiden/archive/refs/tags/v0.2.0.tar.gz",
+    "hash": "sha256-9j8xkNndJX+l20+/qlfK2aLFCfPQsX1xoTDQ+V2jXUg="
   },
   "mvzr-0.3.9-ZSOky8FzAQBQ9-GkQnaLjOZZHxrioD8NwY-QyZT6oAyR": {
     "name": "mvzr",
