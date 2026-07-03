@@ -743,7 +743,10 @@ pub fn renderToWriter(allocator: Allocator, writer: *std.Io.Writer, doc: AST.Doc
 }
 
 /// Render `doc` to a writer, converting mermaid fenced blocks to inline SVG
-/// using the provided renderer function.
+/// using the provided renderer function. The renderer must return memory
+/// allocated with `allocator`; it is freed with that allocator after the
+/// diagram is emitted, so returning static or externally-owned memory will
+/// trigger an invalid free.
 pub fn renderToWriterWithMermaid(
     allocator: Allocator,
     writer: *std.Io.Writer,

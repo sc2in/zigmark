@@ -295,13 +295,23 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, ctx: *const Ctx) anyerr
                     if (!is_mermaid) break :mermaid;
                     const svg = mfn(ctx.allocator, fcb.content) catch break :mermaid;
                     defer ctx.allocator.free(svg);
-                    const encoded_len = std.base64.standard.Encoder.calcSize(svg.len);
-                    const encoded = try ctx.allocator.alloc(u8, encoded_len);
-                    defer ctx.allocator.free(encoded);
-                    _ = std.base64.standard.Encoder.encode(encoded, svg);
-                    try writer.writeAll("#image.decode(bytes.fromBase64(\"");
-                    try writer.writeAll(encoded);
-                    try writer.writeAll("\"), format: \"svg\", width: 100%)\n\n");
+                    // Embed the SVG source directly as a string literal:
+                    // `bytes.fromBase64` does not exist in Typst and
+                    // `image.decode` is deprecated; `image(bytes("…"))` is the
+                    // supported construct (raw newlines are legal in Typst
+                    // string literals). The layout/measure wrapper renders the
+                    // diagram at its natural size but caps it at the line
+                    // width, matching how LaTeX pipelines size images.
+                    try writer.writeAll("#{\n  let d = bytes(\"");
+                    try writeStringLiteral(writer, svg);
+                    try writer.writeAll(
+                        "\")\n" ++
+                        "  layout(size => {\n" ++
+                        "    let img = image(d, format: \"svg\")\n" ++
+                        "    if measure(img).width > size.width { image(d, format: \"svg\", width: 100%) } else { img }\n" ++
+                        "  })\n" ++
+                        "}\n\n",
+                    );
                     return;
                 }
             }
@@ -735,6 +745,30 @@ pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
     return aw.toOwnedSlice();
 }
 
+/// Render `doc` to a writer as Typst markup (body only, no preamble),
+/// converting each mermaid fenced block to an inline Typst `#{ … }` block that
+/// embeds the SVG via `image(bytes("…"), format: "svg")` — sized to its
+/// natural width but capped at the line width — using the provided renderer.
+/// Pass `null` to render mermaid blocks as plain code blocks. The renderer
+/// must return memory allocated with `allocator`; it is freed with that
+/// allocator after the diagram is emitted, so returning static or
+/// externally-owned memory will trigger an invalid free.
+pub fn renderToWriterWithMermaid(
+    allocator: Allocator,
+    writer: *std.Io.Writer,
+    doc: AST.Document,
+    mermaid: ?*const fn (Allocator, []const u8) anyerror![]const u8,
+) !void {
+    var ctx = Ctx.init(allocator);
+    ctx.mermaid = mermaid;
+    defer ctx.deinit();
+    try collectFootnotes(doc, &ctx);
+    for (doc.children.items) |child| {
+        if (child == .footnote_definition) continue;
+        try renderBlock(writer, child, &ctx);
+    }
+}
+
 /// Render `doc` to a writer as a complete Typst document with an
 /// Eisvogel-inspired preamble derived from `opts`.
 pub fn renderDocumentToWriter(allocator: Allocator, writer: *std.Io.Writer, doc: AST.Document, opts: DocumentOptions) !void {
@@ -748,8 +782,13 @@ pub fn renderDocumentToWriter(allocator: Allocator, writer: *std.Io.Writer, doc:
     }
 }
 
-/// Render `doc` to a writer as a complete Typst document, converting mermaid
-/// fenced blocks to `#image.decode` calls using the provided renderer.
+/// Render `doc` to a writer as a complete Typst document, converting each
+/// mermaid fenced block to an inline Typst `#{ … }` block that embeds the SVG
+/// via `image(bytes("…"), format: "svg")` — sized to its natural width but
+/// capped at the line width — using the provided renderer. The renderer must
+/// return memory allocated with `allocator`; it is freed with that allocator
+/// after the diagram is emitted, so returning static or externally-owned
+/// memory will trigger an invalid free.
 pub fn renderDocumentToWriterWithMermaid(
     allocator: Allocator,
     writer: *std.Io.Writer,
@@ -885,20 +924,60 @@ fn stubSvgError(_: std.mem.Allocator, _: []const u8) anyerror![]const u8 {
     return error.RenderFailed;
 }
 
-test "mermaid block renders as image.decode" {
+/// The Typst emitted for a mermaid block whose renderer produced `svg_lit`
+/// (already escaped for a Typst string literal).
+fn expectedMermaidTypst(comptime svg_lit: []const u8) []const u8 {
+    return "#{\n  let d = bytes(\"" ++ svg_lit ++ "\")\n" ++
+        "  layout(size => {\n" ++
+        "    let img = image(d, format: \"svg\")\n" ++
+        "    if measure(img).width > size.width { image(d, format: \"svg\", width: 100%) } else { img }\n" ++
+        "  })\n" ++
+        "}\n\n";
+}
+
+test "mermaid block renders as inline svg image" {
     try okMermaid(
         "```mermaid\ngraph LR\nA-->B\n```",
         stubSvg,
-        "#image.decode(bytes.fromBase64(\"PHN2Zz5tb2NrPC9zdmc+\"), format: \"svg\", width: 100%)\n\n",
+        expectedMermaidTypst("<svg>mock</svg>"),
     );
 }
 
-test "mermaidjs block renders as image.decode" {
+test "mermaidjs block renders as inline svg image" {
     try okMermaid(
         "```mermaidjs\ngraph LR\nA-->B\n```",
         stubSvg,
-        "#image.decode(bytes.fromBase64(\"PHN2Zz5tb2NrPC9zdmc+\"), format: \"svg\", width: 100%)\n\n",
+        expectedMermaidTypst("<svg>mock</svg>"),
     );
+}
+
+fn stubSvgSpecials(alloc: std.mem.Allocator, _: []const u8) anyerror![]const u8 {
+    // Quotes and backslashes must be escaped in the Typst string literal;
+    // raw newlines pass through unchanged (legal in Typst strings).
+    return alloc.dupe(u8, "<svg attr=\"a\\b\">\nline2\n</svg>");
+}
+
+test "mermaid svg quotes, backslashes, and newlines survive string-literal embedding" {
+    try okMermaid(
+        "```mermaid\ngraph LR\nA-->B\n```",
+        stubSvgSpecials,
+        expectedMermaidTypst("<svg attr=\\\"a\\\\b\\\">\nline2\n</svg>"),
+    );
+}
+
+test "renderToWriterWithMermaid public API" {
+    const allocator = tst.allocator;
+    var parser = Parser.init();
+    defer parser.deinit(allocator);
+    var res = try parser.parseMarkdown(allocator, "# T\n\n```mermaid\ngraph LR\nA-->B\n```");
+    defer res.deinit(allocator);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    try renderToWriterWithMermaid(allocator, &aw.writer, res, stubSvg);
+    const out = try aw.toOwnedSlice();
+    defer allocator.free(out);
+    try tst.expect(std.mem.indexOf(u8, out, "let d = bytes(\"<svg>mock</svg>\")") != null);
+    try tst.expect(std.mem.indexOf(u8, out, "```mermaid") == null);
 }
 
 test "mermaid renderer error falls back to code block" {

@@ -29,6 +29,28 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Full history + tags so the release-tag CHANGELOG guard can diff
+          # against the previous tag.
+          fetch-depth: 0
+
+      # Authoritative backstop for the local pre-push hook (.githooks/pre-push):
+      # a release tag must include a CHANGELOG.md change since the previous tag.
+      # Cannot be bypassed with `git push --no-verify`.
+      - name: Require CHANGELOG update for release tag
+        if: ${{ github.ref_type == 'tag' }}
+        run: |
+          tag="${{ github.ref_name }}"
+          prev="$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)"
+          if [ -z "$prev" ]; then
+            echo "No previous tag; skipping CHANGELOG check."
+            exit 0
+          fi
+          if git diff --quiet "$prev" "$tag" -- CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no changes between $prev and $tag. Update the changelog (e.g. 'nix run .#bump') before releasing."
+            exit 1
+          fi
+          echo "CHANGELOG.md updated since $prev ✓"
 
       - name: Install Nix
         uses: DeterminateSystems/determinate-nix-action@v3
