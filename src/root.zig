@@ -68,9 +68,10 @@ pub const TypstRenderer = Renderer.create(typst_mod);
 pub const typst = typst_mod;
 
 /// Function pointer type for an optional mermaid diagram renderer.
-/// Pass a function matching this signature to `renderHtmlWithMermaid` or
-/// `renderTypstDocWithMermaid` to have mermaid fenced code blocks converted
-/// to inline diagrams instead of emitting raw code blocks.
+/// Pass a function matching this signature to `renderHtmlWithMermaid`,
+/// `renderTypstWithMermaid`, or `renderTypstDocWithMermaid` to have mermaid
+/// fenced code blocks converted to inline diagrams instead of emitting raw
+/// code blocks.
 pub const MermaidRendererFn = *const fn (std.mem.Allocator, []const u8) anyerror![]const u8;
 
 /// Render `doc` to HTML, converting mermaid fenced blocks to inline SVG
@@ -84,8 +85,20 @@ pub fn renderHtmlWithMermaid(
     return html.renderToWriterWithMermaid(allocator, writer, doc, mermaid);
 }
 
+/// Render `doc` to Typst markup (body only, no preamble), converting mermaid
+/// fenced blocks to inline `#image` calls using `mermaid` (pass `null` to
+/// skip conversion). Use this when you supply your own Typst preamble.
+pub fn renderTypstWithMermaid(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    doc: AST.Document,
+    mermaid: ?MermaidRendererFn,
+) !void {
+    return typst_mod.renderToWriterWithMermaid(allocator, writer, doc, mermaid);
+}
+
 /// Render `doc` to a full Typst document, converting mermaid fenced blocks
-/// to `#image.decode` calls using `mermaid` (pass `null` to skip conversion).
+/// to inline `#image` calls using `mermaid` (pass `null` to skip conversion).
 pub fn renderTypstDocWithMermaid(
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,

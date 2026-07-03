@@ -6,6 +6,28 @@ Versions track the library API, not Zig itself.  The major version will
 remain 0.x until Zig reaches 1.0, at which point zigmark will follow the
 same stability guarantee.
 
+## [0.7.2] — 2026-07-03
+
+### Fixed
+
+- **Typst mermaid embeds now actually compile.** The Typst renderer emitted
+  `#image.decode(bytes.fromBase64("…"))`, but `bytes.fromBase64` does not
+  exist in Typst (and `image.decode` is deprecated) — every document with a
+  rendered mermaid block failed `typst compile`. Diagrams are now embedded as
+  `image(bytes("<svg…>"), format: "svg")` with the SVG source in a string
+  literal (verified against typst 0.14.2). The existing tests only asserted
+  the emitted string, which is how this slipped through.
+- Mermaid diagrams are rendered at their natural size and only scaled down
+  when wider than the line width (via a `layout`/`measure` wrapper), instead
+  of being blown up to full text width.
+
+### Added
+
+- `renderTypstWithMermaid` / `TypstRenderer`'s `renderToWriterWithMermaid` —
+  body-only Typst rendering with the mermaid hook, for callers that supply
+  their own preamble (previously the hook was only reachable through the
+  full-document `renderTypstDocWithMermaid`).
+
 ## [0.7.0] — 2026-06-04
 
 ### Breaking
