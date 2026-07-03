@@ -17,11 +17,14 @@ while read -r local_ref local_sha _remote_ref _remote_sha; do
   [[ "$local_sha" =~ ^0+$ ]] && continue
 
   tag="${local_ref#refs/tags/}"
+  # Use the tag ref, not $local_sha: for annotated tags the pushed sha is the
+  # tag object, so resolve through $tag so both lightweight and annotated tags
+  # peel to the tagged commit.
   # Nearest release tag before this commit. None => first release, allow it.
-  prev="$(git describe --tags --abbrev=0 "${local_sha}^" 2>/dev/null || true)"
+  prev="$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null || true)"
   [ -n "$prev" ] || continue
 
-  if git diff --quiet "$prev" "$local_sha" -- CHANGELOG.md; then
+  if git diff --quiet "$prev" "$tag" -- CHANGELOG.md; then
     echo "✗ $tag: CHANGELOG.md has no changes since $prev." >&2
     echo "  Update the changelog before tagging — e.g. 'nix run .#bump -- <version>'." >&2
     echo "  (Override with 'git push --no-verify' if you really mean to.)" >&2
