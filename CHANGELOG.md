@@ -6,6 +6,8 @@ Versions track the library API, not Zig itself.  The major version will
 remain 0.x until Zig reaches 1.0, at which point zigmark will follow the
 same stability guarantee.
 
+## [Unreleased]
+
 ## [0.7.2] — 2026-07-03
 
 ### Fixed

@@ -498,17 +498,28 @@
                 exit 0
               fi
 
+              if ! grep -q '^## \[Unreleased\]' CHANGELOG.md; then
+                echo "error: no '## [Unreleased]' section in CHANGELOG.md; add one (with notes) before bumping" >&2
+                exit 1
+              fi
+
               sed -i -E "s/^([[:space:]]*\.version = )\"[^\"]+\",/\1\"$new\",/" build.zig.zon
-              awk -v ver="$new" -v dt="$today" '
+              if ! awk -v ver="$new" -v dt="$today" '
                 !done && /^## \[Unreleased\]/ {
                   print "## [Unreleased]";
                   print "";
-                  print "## [" ver "] - " dt;
+                  print "## [" ver "] \xe2\x80\x94 " dt;
                   done = 1;
                   next
                 }
                 { print }
-              ' CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+                END { if (!done) exit 3 }
+              ' CHANGELOG.md > CHANGELOG.md.tmp; then
+                rm -f CHANGELOG.md.tmp
+                echo "error: failed to roll '## [Unreleased]' in CHANGELOG.md" >&2
+                exit 1
+              fi
+              mv CHANGELOG.md.tmp CHANGELOG.md
 
               echo "Updated build.zig.zon, CHANGELOG.md"
 
