@@ -899,6 +899,18 @@ test "special char escaping" {
     try ok("a $ b", "a \\$ b\n\n");
 }
 
+test "raw HTML is intentionally dropped (no Typst equivalent)" {
+    // Downstream (sc2in/policypress#117) relies on this: its build pre-flight
+    // flags raw HTML in policy bodies precisely because this renderer omits it
+    // while the HTML renderer keeps it, so the site and the PDF would diverge.
+    // If this behaviour ever changes, that validation rule should be revisited.
+    //
+    // Block HTML (`<div>` starts a type-6 HTML block) is dropped whole.
+    try ok("<div class=\"note\">\nhidden\n</div>", "");
+    // Inline HTML drops only the tags; the enclosed text survives as text.
+    try ok("before <span>kept</span> after", "before kept after\n\n");
+}
+
 fn okMermaid(src: []const u8, mfn: ?*const fn (std.mem.Allocator, []const u8) anyerror![]const u8, expected: []const u8) !void {
     const allocator = tst.allocator;
     var parser = Parser.init();
