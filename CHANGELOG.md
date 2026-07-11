@@ -8,9 +8,26 @@ same stability guarantee.
 
 ## [Unreleased]
 
-## [0.7.4] — 2026-07-03
+## [0.7.4] — 2026-07-08
+
+### Tests
+
+- **Pinned the intentional raw-HTML drop in the Typst renderer.** The Typst
+  renderer omits raw HTML with no Typst equivalent (block HTML is dropped
+  whole; inline HTML drops the tags but keeps the enclosed text), while the
+  HTML renderer preserves it. A downstream consumer (sc2in/policypress#117)
+  depends on this to flag raw HTML in policy bodies, so a test now makes the
+  contract explicit — if the behaviour ever changes, the failure surfaces
+  here. Renderer behaviour is unchanged.
 
 ## [0.7.3] — 2026-07-03
+
+### Changed
+
+- Bumped the `pozeiden` lazy dependency to v0.2.0, bringing thread-safe
+  rendering (threadlocal theme state, locked grammar init) and its Zig 0.16
+  line into the CLI/WASM mermaid path. The dependency remains `lazy`, so
+  library consumers still don't fetch it.
 
 ## [0.7.2] — 2026-07-03
 
