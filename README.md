@@ -223,6 +223,9 @@ Usage: zigmark [OPTIONS] [FILE]
                               "ai", "terminal", "frontmatter", "markdown", or
                               "normalize".
   -o, --output <str>          Write output to FILE instead of stdout.
+      --safe                  HTML only: escape raw/inline HTML to visible text
+                              (for untrusted input). URL-scheme filtering is
+                              always on.
   -s, --set <str>...          Set a frontmatter field (KEY=VALUE). Repeatable.
                               Applies to: markdown, normalize, frontmatter.
   -d, --delete <str>...       Delete a frontmatter field (dot-path). Repeatable.
@@ -235,6 +238,42 @@ Usage: zigmark [OPTIONS] [FILE]
       --section-end   <str>   ) markers with Markdown from stdin. FILE required.
                                 Applies to: normalize.
 ```
+
+## Rendering Untrusted Markdown
+
+zigmark is safe to point at untrusted input, with two things to know:
+
+- **URL-scheme filtering is always on.** Links and images whose destination
+  scheme is `javascript:`, `vbscript:`, `file:`, or a non-image `data:` are
+  rendered with an empty `href`/`src`. Ordinary, relative, fragment, and
+  `data:image/*` URLs are untouched, so CommonMark/GFM conformance is unchanged.
+- **Raw HTML passthrough is opt-out.** By default the HTML renderer passes raw
+  HTML through (as CommonMark requires). For untrusted input, enable **safe
+  mode** to escape raw HTML to visible text:
+
+  ```zig
+  // Library: html.Options.safe, threaded through the convenience helper
+  var aw: std.Io.Writer.Allocating = .init(allocator);
+  defer aw.deinit();
+  try zigmark.renderHtmlWithOptions(allocator, &aw.writer, doc, .{ .safe = true });
+  ```
+
+  ```bash
+  # CLI
+  zigmark --safe untrusted.md
+  ```
+
+  The C ABI exposes `zigmark_render_html_safe` for the same behaviour.
+
+For denial-of-service protection, the parser bounds recursion and input size:
+
+```zig
+var parser = zigmark.Parser.init();
+parser.max_input_bytes = 1 << 20;  // 1 MiB cap → error.InputTooLarge (default 16 MiB; 0 = unlimited)
+parser.max_nesting_depth = 64;     // → error.NestingTooDeep (default 128)
+```
+
+See [SECURITY.md](SECURITY.md) for the full threat model and known limitations.
 
 ## Zig Library Usage
 

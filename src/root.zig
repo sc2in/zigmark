@@ -79,6 +79,24 @@ pub const typst = typst_mod;
 /// invalid free.
 pub const MermaidRendererFn = *const fn (std.mem.Allocator, []const u8) anyerror![]const u8;
 
+/// Options for the HTML renderer. `safe` escapes raw/inline HTML to visible
+/// text; `mermaid` supplies an optional diagram renderer. URL-scheme filtering
+/// (blocking `javascript:`/`vbscript:`/`file:`/non-image `data:` in links and
+/// images) is always applied regardless of these options.
+pub const HtmlOptions = html.Options;
+
+/// Render `doc` to HTML with explicit `HtmlOptions` — use this to enable `safe`
+/// mode (raw-HTML escaping) for untrusted input, optionally with a mermaid
+/// renderer.
+pub fn renderHtmlWithOptions(
+    allocator: std.mem.Allocator,
+    writer: *std.Io.Writer,
+    doc: AST.Document,
+    opts: HtmlOptions,
+) !void {
+    return html.renderToWriterWithOptions(allocator, writer, doc, opts);
+}
+
 /// Render `doc` to HTML, converting mermaid fenced blocks to inline SVG
 /// `<figure>` elements using `mermaid` (pass `null` to skip conversion).
 pub fn renderHtmlWithMermaid(
@@ -239,6 +257,21 @@ fn renderC(wrapper: ?*OpaqueDoc, renderer: Renderer) ?[*:0]u8 {
 /// Render the document to CommonMark-compliant HTML.
 export fn zigmark_render_html(doc: ?*OpaqueDoc) ?[*:0]u8 {
     return renderC(doc, HTMLRenderer);
+}
+
+/// Render the document to HTML in *safe* mode: raw and inline HTML from the
+/// input is escaped to visible text. URL-scheme filtering (blocking
+/// `javascript:`/`vbscript:`/`file:`/non-image `data:`) applies to both this
+/// and `zigmark_render_html`. Use this for untrusted input.
+export fn zigmark_render_html_safe(doc: ?*OpaqueDoc) ?[*:0]u8 {
+    const w = doc orelse return null;
+    const buf = html.renderWithOptions(w.allocator, w.doc, .{ .safe = true }) catch return null;
+    const c_str = w.allocator.realloc(buf, buf.len + 1) catch {
+        w.allocator.free(buf);
+        return null;
+    };
+    c_str[buf.len] = 0;
+    return c_str[0..buf.len :0];
 }
 
 /// Render the document to a human-readable AST tree diagram.

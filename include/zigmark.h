@@ -41,6 +41,17 @@ void zigmark_free_document(ZigmarkDocument *doc);
 char *zigmark_render_html(ZigmarkDocument *doc);
 
 /**
+ * Render the document to HTML in safe mode: raw and inline HTML from the input
+ * is escaped to visible text. URL-scheme filtering (blocking javascript:,
+ * vbscript:, file:, and non-image data: destinations) applies to both this and
+ * zigmark_render_html(). Use this for untrusted input.
+ *
+ * @return A NUL-terminated string, or NULL on failure.
+ *         Free with zigmark_free_string().
+ */
+char *zigmark_render_html_safe(ZigmarkDocument *doc);
+
+/**
  * Render the document to a human-readable AST tree diagram.
  *
  * @return A NUL-terminated string, or NULL on failure.

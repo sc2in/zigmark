@@ -69,12 +69,11 @@ pub fn init(alloc: Allocator, source: []const u8, input_kind: Kind) !FrontMatter
             var y = Yaml{ .source = source };
             y.load(alloc) catch |err| switch (err) {
                 error.ParseFailure => {
-                    std.debug.assert(y.parse_errors.errorMessageCount() > 0);
-                    const ebuf = try alloc.alloc(u8, 64 * 1024);
-                    defer alloc.free(ebuf);
-                    var errw = std.Io.Writer.fixed(ebuf);
-                    y.parse_errors.renderToWriter(.{}, &errw) catch {};
-                    std.debug.print("{s}", .{errw.buffered()});
+                    // Free the parser's error bundle and partial state, then
+                    // return the error. A library must not write diagnostics to
+                    // stderr, nor assert on the vendored parser's internals; the
+                    // caller decides how (and whether) to report the failure.
+                    y.deinit(alloc);
                     return error.ParseFailure;
                 },
                 else => return err,

@@ -245,6 +245,15 @@ fn encodeUtf8Buf(cp: u21, buf: *[4]u8) u3 {
 /// Result of decoding an HTML entity: UTF-8 bytes and their length.
 const EntityResult = struct { bytes: [8]u8, len: u4 };
 
+// Guard the fixed 8-byte entity buffer against future table edits: no entity's
+// UTF-8 expansion may exceed it (`len` is a `u4`, so the hard ceiling is 15).
+comptime {
+    for (EntryMap) |e| {
+        if (e.bytes.len > @typeInfo(@FieldType(EntityResult, "bytes")).array.len)
+            @compileError("HTML entity '" ++ e.name ++ "' exceeds EntityResult buffer");
+    }
+}
+
 /// Resolve a named HTML entity to its UTF-8 byte sequence.
 /// Returns the bytes and length, or null if the entity is not recognized.
 /// Supports multi-codepoint entities (e.g. &ngE; → U+2267 U+0338).
@@ -387,6 +396,72 @@ fn writeUrlEncodedWithEntities(writer: anytype, s: []const u8) !void {
     }
 }
 
+// ── URL scheme safety (default-on XSS guard) ──────────────────────────────────
+
+/// True if a destination URL carries a scheme that can execute script or read
+/// local resources (`javascript:`, `vbscript:`, `file:`, or a non-image
+/// `data:`). Such destinations are neutralised to an empty `href`/`src` by the
+/// HTML renderer, matching the safe behaviour of the CommonMark reference
+/// implementation. This is always applied, independent of the `safe` option.
+///
+/// Detection mirrors what a browser sees: leading control/space bytes are
+/// ignored, single-byte HTML entities in the scheme are decoded (so
+/// `java&#115;cript:` is caught), and tab/newline/CR are stripped from within
+/// the scheme (so `java&Tab;script:` is caught). A `/`, `?`, or `#` before any
+/// `:` means the URL is relative (no scheme) and therefore safe.
+fn urlSchemeIsDangerous(url: []const u8) bool {
+    var buf: [11]u8 = undefined; // longest tracked scheme is "javascript" (10)
+    var n: usize = 0;
+    var i: usize = 0;
+    while (i < url.len and url[i] <= 0x20) : (i += 1) {}
+    while (i < url.len) {
+        var c = url[i];
+        var adv: usize = 1;
+        if (c == '&') {
+            if (tryDecodeEntity(url, i)) |ent| {
+                if (ent.len != 1) return false; // multi-byte can't be part of a scheme
+                c = ent.bytes[0];
+                adv = ent.consumed;
+            }
+        }
+        // Browsers strip tab/newline/CR from URLs before scheme parsing.
+        if (c == '\t' or c == '\n' or c == '\r') {
+            i += adv;
+            continue;
+        }
+        switch (c) {
+            ':' => {
+                const scheme = buf[0..n];
+                if (std.ascii.eqlIgnoreCase(scheme, "javascript") or
+                    std.ascii.eqlIgnoreCase(scheme, "vbscript") or
+                    std.ascii.eqlIgnoreCase(scheme, "file"))
+                    return true;
+                if (std.ascii.eqlIgnoreCase(scheme, "data"))
+                    return !dataUrlIsSafeImage(url[i + 1 ..]);
+                return false;
+            },
+            '/', '?', '#' => return false, // relative URL — no scheme
+            else => {
+                if (n >= buf.len) return false; // scheme longer than any we block
+                buf[n] = std.ascii.toLower(c);
+                n += 1;
+            },
+        }
+        i += adv;
+    }
+    return false;
+}
+
+/// True if a `data:` payload (bytes after `data:`) is one of a few inert image
+/// media types that are safe to embed.
+fn dataUrlIsSafeImage(rest: []const u8) bool {
+    const safe = [_][]const u8{ "image/png", "image/gif", "image/jpeg", "image/webp" };
+    for (safe) |m| {
+        if (rest.len >= m.len and std.ascii.eqlIgnoreCase(rest[0..m.len], m)) return true;
+    }
+    return false;
+}
+
 /// Write title text with HTML entity decoding, backslash escape processing, and HTML escaping.
 fn writeEscapedTitleWithEntities(writer: anytype, s: []const u8) !void {
     var i: usize = 0;
@@ -444,7 +519,9 @@ const disallowed_html_tags = std.StaticStringMap(void).initComptime(.{
     .{ "noframes", {} }, .{ "script", {} },   .{ "plaintext", {} },
 });
 
-fn writeHtmlFiltered(writer: anytype, s: []const u8, gfm: bool) !void {
+fn writeHtmlFiltered(writer: anytype, s: []const u8, gfm: bool, safe: bool) !void {
+    // Safe mode: neutralise raw HTML by escaping it to visible text.
+    if (safe) return writeEscaped(writer, s);
     if (!gfm) return writer.writeAll(s);
     var i: usize = 0;
     while (i < s.len) {
@@ -483,7 +560,7 @@ fn writeHtmlFiltered(writer: anytype, s: []const u8, gfm: bool) !void {
 
 // ── Inline renderer ───────────────────────────────────────────────────────────
 
-fn renderInline(writer: anytype, item: AST.Inline, gfm: bool) !void {
+fn renderInline(writer: anytype, item: AST.Inline, ctx: *const RenderCtx) !void {
     switch (item) {
         .text => |t| try writeEscapedWithEntities(writer, t.content),
         .soft_break => try writer.writeByte('\n'),
@@ -495,22 +572,23 @@ fn renderInline(writer: anytype, item: AST.Inline, gfm: bool) !void {
         },
         .emphasis => |e| {
             try writer.writeAll("<em>");
-            for (e.children.items) |child| try renderInline(writer, child, gfm);
+            for (e.children.items) |child| try renderInline(writer, child, ctx);
             try writer.writeAll("</em>");
         },
         .strong => |s| {
             try writer.writeAll("<strong>");
-            for (s.children.items) |child| try renderInline(writer, child, gfm);
+            for (s.children.items) |child| try renderInline(writer, child, ctx);
             try writer.writeAll("</strong>");
         },
         .strikethrough => |s| {
             try writer.writeAll("<del>");
-            for (s.children.items) |child| try renderInline(writer, child, gfm);
+            for (s.children.items) |child| try renderInline(writer, child, ctx);
             try writer.writeAll("</del>");
         },
         .link => |l| {
             try writer.writeAll("<a href=\"");
-            try writeUrlEncodedWithEntities(writer, l.destination.url);
+            if (!urlSchemeIsDangerous(l.destination.url))
+                try writeUrlEncodedWithEntities(writer, l.destination.url);
             try writer.writeByte('"');
             if (l.destination.title) |title| {
                 try writer.writeAll(" title=\"");
@@ -518,12 +596,13 @@ fn renderInline(writer: anytype, item: AST.Inline, gfm: bool) !void {
                 try writer.writeByte('"');
             }
             try writer.writeByte('>');
-            for (l.children.items) |child| try renderInline(writer, child, gfm);
+            for (l.children.items) |child| try renderInline(writer, child, ctx);
             try writer.writeAll("</a>");
         },
         .image => |img| {
             try writer.writeAll("<img src=\"");
-            try writeUrlEncodedWithEntities(writer, img.destination.url);
+            if (!urlSchemeIsDangerous(img.destination.url))
+                try writeUrlEncodedWithEntities(writer, img.destination.url);
             try writer.writeAll("\" alt=\"");
             try writeEscaped(writer, img.alt_text);
             try writer.writeByte('"');
@@ -536,17 +615,24 @@ fn renderInline(writer: anytype, item: AST.Inline, gfm: bool) !void {
         },
         .autolink => |al| {
             try writer.writeAll("<a href=\"");
+            // Email and www autolinks always carry a safe scheme prefix; only a
+            // raw URI autolink (e.g. `<javascript:…>`) can carry a bad scheme.
+            const dangerous = !al.is_email and !al.is_gfm_www and urlSchemeIsDangerous(al.url);
             if (al.is_email) try writer.writeAll("mailto:");
             if (al.is_gfm_www) try writer.writeAll("http://");
-            try writeUrlEncodedLiteral(writer, al.url);
+            if (!dangerous) try writeUrlEncodedLiteral(writer, al.url);
             try writer.writeAll("\">");
             try writeEscaped(writer, al.url);
             try writer.writeAll("</a>");
         },
         .footnote_reference => |fr| {
-            try writer.print("<a href=\"#fn:{s}\" class=\"footnote-ref\">{s}</a>", .{ fr.label, fr.label });
+            try writer.writeAll("<a href=\"#fn:");
+            try writeEscaped(writer, fr.label);
+            try writer.writeAll("\" class=\"footnote-ref\">");
+            try writeEscaped(writer, fr.label);
+            try writer.writeAll("</a>");
         },
-        .html_in_line => |hi| try writeHtmlFiltered(writer, hi.content, gfm),
+        .html_in_line => |hi| try writeHtmlFiltered(writer, hi.content, ctx.gfm, ctx.safe),
     }
 }
 
@@ -555,6 +641,8 @@ fn renderInline(writer: anytype, item: AST.Inline, gfm: bool) !void {
 const RenderCtx = struct {
     gfm: bool,
     allocator: Allocator,
+    /// When true, raw/inline HTML is escaped to visible text (see `Options`).
+    safe: bool = false,
     mermaid: ?*const fn (Allocator, []const u8) anyerror![]const u8 = null,
 };
 
@@ -572,7 +660,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, ctx: *const RenderCtx) 
                     .center => try writer.writeAll("<th align=\"center\">"),
                     .right => try writer.writeAll("<th align=\"right\">"),
                 }
-                for (cell.children.items) |inl| try renderInline(writer, inl, ctx.gfm);
+                for (cell.children.items) |inl| try renderInline(writer, inl, ctx);
                 try writer.writeAll("</th>\n");
             }
             try writer.writeAll("</tr>\n</thead>\n");
@@ -589,7 +677,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, ctx: *const RenderCtx) 
                             .center => try writer.writeAll("<td align=\"center\">"),
                             .right => try writer.writeAll("<td align=\"right\">"),
                         }
-                        for (cell.children.items) |inl| try renderInline(writer, inl, ctx.gfm);
+                        for (cell.children.items) |inl| try renderInline(writer, inl, ctx);
                         try writer.writeAll("</td>\n");
                     }
                     try writer.writeAll("</tr>\n");
@@ -602,12 +690,12 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, ctx: *const RenderCtx) 
 
         .heading => |h| {
             try writer.print("<h{d}>", .{h.level});
-            for (h.children.items) |item| try renderInline(writer, item, ctx.gfm);
+            for (h.children.items) |item| try renderInline(writer, item, ctx);
             try writer.print("</h{d}>\n", .{h.level});
         },
         .paragraph => |p| {
             try writer.writeAll("<p>");
-            for (p.children.items) |item| try renderInline(writer, item, ctx.gfm);
+            for (p.children.items) |item| try renderInline(writer, item, ctx);
             try writer.writeAll("</p>\n");
         },
         .thematic_break => try writer.writeAll("<hr />\n"),
@@ -689,7 +777,7 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, ctx: *const RenderCtx) 
                     for (item.children.items) |child| {
                         switch (child) {
                             .paragraph => |p| {
-                                for (p.children.items) |inl| try renderInline(writer, inl, ctx.gfm);
+                                for (p.children.items) |inl| try renderInline(writer, inl, ctx);
                                 wrote_inline = true;
                             },
                             else => {
@@ -717,12 +805,16 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, ctx: *const RenderCtx) 
             try writer.print("</{s}>\n", .{tag});
         },
         .footnote_definition => |fd| {
-            try writer.print("<div class=\"footnote\" id=\"fn:{s}\">\n", .{fd.label});
+            try writer.writeAll("<div class=\"footnote\" id=\"fn:");
+            try writeEscaped(writer, fd.label);
+            try writer.writeAll("\">\n");
             for (fd.children.items) |child| {
                 switch (child) {
                     .paragraph => |p| {
-                        try writer.print("<p><b>{s}</b>: ", .{fd.label});
-                        for (p.children.items) |inl| try renderInline(writer, inl, ctx.gfm);
+                        try writer.writeAll("<p><b>");
+                        try writeEscaped(writer, fd.label);
+                        try writer.writeAll("</b>: ");
+                        for (p.children.items) |inl| try renderInline(writer, inl, ctx);
                         try writer.writeAll("</p>\n");
                     },
                     else => try renderBlock(writer, child, ctx),
@@ -730,16 +822,48 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, ctx: *const RenderCtx) 
             }
             try writer.writeAll("</div>\n");
         },
-        .html_block => |hb| try writeHtmlFiltered(writer, hb.content, ctx.gfm),
+        .html_block => |hb| try writeHtmlFiltered(writer, hb.content, ctx.gfm, ctx.safe),
     }
 }
 
 // ── Top-level render ──────────────────────────────────────────────────────────
 
+/// Rendering options for the HTML back-end.
+///
+/// URL-scheme filtering — neutralising `javascript:`, `vbscript:`, `file:`, and
+/// non-image `data:` destinations in links and images — is *always* applied and
+/// is not configurable; it does not affect CommonMark conformance. These options
+/// only control the additional, opt-in hardening below.
+pub const Options = struct {
+    /// When true, raw and inline HTML from the input is escaped to visible text
+    /// (`<script>` renders literally) instead of being passed through, closing
+    /// the raw-HTML XSS surface. Defaults to `false` so that default output
+    /// remains byte-identical and CommonMark/GFM spec-conformant.
+    safe: bool = false,
+    /// Optional mermaid diagram renderer (see the module `render*WithMermaid`
+    /// helpers). The returned slice must be allocated with the allocator passed
+    /// into the callback; it is freed with that same allocator after emission.
+    mermaid: ?*const fn (Allocator, []const u8) anyerror![]const u8 = null,
+};
+
+/// Render `doc` to a writer with the given `Options`.
+pub fn renderToWriterWithOptions(allocator: Allocator, writer: *std.Io.Writer, doc: AST.Document, opts: Options) !void {
+    const ctx: RenderCtx = .{ .gfm = doc.gfm, .allocator = allocator, .safe = opts.safe, .mermaid = opts.mermaid };
+    for (doc.children.items) |child| try renderBlock(writer, child, &ctx);
+}
+
+/// Render `doc` to an allocator-owned HTML byte slice with the given `Options`.
+/// The caller owns the returned memory and must free it when done.
+pub fn renderWithOptions(allocator: Allocator, doc: AST.Document, opts: Options) ![]u8 {
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
+    try renderToWriterWithOptions(allocator, &aw.writer, doc, opts);
+    return aw.toOwnedSlice();
+}
+
 /// Render `doc` to a writer with CommonMark-compliant HTML.
 pub fn renderToWriter(allocator: Allocator, writer: *std.Io.Writer, doc: AST.Document) !void {
-    const ctx: RenderCtx = .{ .gfm = doc.gfm, .allocator = allocator };
-    for (doc.children.items) |child| try renderBlock(writer, child, &ctx);
+    return renderToWriterWithOptions(allocator, writer, doc, .{});
 }
 
 /// Render `doc` to a writer, converting mermaid fenced blocks to inline SVG
@@ -753,18 +877,14 @@ pub fn renderToWriterWithMermaid(
     doc: AST.Document,
     mermaid: ?*const fn (Allocator, []const u8) anyerror![]const u8,
 ) !void {
-    const ctx: RenderCtx = .{ .gfm = doc.gfm, .allocator = allocator, .mermaid = mermaid };
-    for (doc.children.items) |child| try renderBlock(writer, child, &ctx);
+    return renderToWriterWithOptions(allocator, writer, doc, .{ .mermaid = mermaid });
 }
 
 /// Render `doc` to an allocator-owned HTML byte slice.
 ///
 /// The caller owns the returned memory and must free it when done.
 pub fn render(allocator: Allocator, doc: AST.Document) ![]u8 {
-    var aw: std.Io.Writer.Allocating = .init(allocator);
-    defer aw.deinit();
-    try renderToWriter(allocator, &aw.writer, doc);
-    return aw.toOwnedSlice();
+    return renderWithOptions(allocator, doc, .{});
 }
 
 // - Misc

@@ -146,13 +146,14 @@ pub fn tryAtxHeading(allocator: Allocator, line: []const u8) ?HeadingResult {
     // Must not be 4+ spaces (that's an indented code block)
     if (pos < line.len and line[pos] == ' ') return null;
     if (pos >= line.len or line[pos] != '#') return null;
-    // Count # characters (1-6)
+    // Count # characters (1-6). Bail as soon as we pass 6 so a long run of
+    // '#' can neither overflow the counter nor waste time scanning it.
     var level: u8 = 0;
     while (pos < line.len and line[pos] == '#') {
         level += 1;
         pos += 1;
+        if (level > 6) return null;
     }
-    if (level > 6) return null;
     // After the #'s, must be end of line or a space/tab
     if (pos < line.len and line[pos] != ' ' and line[pos] != '\t') return null;
     // Skip spaces after #

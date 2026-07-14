@@ -8,6 +8,85 @@ same stability guarantee.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-07-13
+
+Production security & quality hardening for public release. The HTML and Typst
+renderers are now safe to point at untrusted Markdown, and the parser has
+resource limits that turn pathological input into clean errors instead of
+crashes.
+
+### Security
+
+- **XSS — dangerous URL schemes are now filtered by default.** Links, images,
+  and autolinks whose destination scheme is `javascript:`, `vbscript:`,
+  `file:`, or a non-image `data:` are emitted with an empty `href`/`src`.
+  Detection normalises the scheme the way a browser does (leading control/space
+  stripping, single-byte HTML-entity decoding so `java&#115;cript:` is caught,
+  tab/newline/CR stripping). A denylist — not an allowlist — is used, so
+  unknown-but-harmless schemes (e.g. the spec's `made-up-scheme://`) and
+  `data:image/{png,gif,jpeg,webp}` still pass through, and CommonMark/GFM
+  conformance is unchanged (652/652 + 24/24).
+- **XSS — footnote labels are now HTML-escaped.** `footnote_reference` and
+  `footnote_definition` previously interpolated the raw label into an attribute
+  and element text, allowing markup injection; both are now escaped.
+- **XSS — opt-in `safe` mode escapes raw HTML.** `html.Options{ .safe = true }`
+  (also `zigmark.renderHtmlWithOptions`, the `zigmark_render_html_safe` C ABI
+  export, and the CLI `--safe` flag) renders raw/inline HTML as visible text
+  instead of passing it through. Default output is byte-identical to before, so
+  spec conformance is preserved; downstream consumers of untrusted input should
+  enable it.
+- **Typst code injection — code spans and code blocks now use `raw()`.** Content
+  is emitted via `#raw("…")` / `#raw(block: true, …)` with the text in a Typst
+  string literal, so backticks or fences in the content can no longer break out
+  into executable Typst markup (Typst runs at compile time and can read local
+  files). Frontmatter-derived preamble fields are validated before
+  interpolation: `fontsize` must be a length literal, colours must be hex, and
+  string fields go through the string-literal escaper — invalid values fall
+  back to safe defaults.
+- **DoS — parser resource limits.** New `Parser.max_nesting_depth` (default
+  128) turns deeply nested blockquotes, lists, and inline links/images into
+  `error.NestingTooDeep` instead of a stack overflow; `Parser.max_input_bytes`
+  (default 16 MiB, `0` = unlimited) bounds `parseMarkdown`/`parseFromReader`
+  with `error.InputTooLarge`. Error paths now free the partial document/inline
+  tree (no leak on a rejected parse).
+- **Panic — ATX heading `#` counter no longer overflows.** A line of ≥256 `#`
+  characters previously overflowed a `u8` in ReleaseSafe; counting now bails at
+  7. Out-of-range frontmatter integers are coerced with `std.math.cast` instead
+  of a panicking `@intCast`.
+- **Frontmatter — malformed YAML no longer leaks or writes to stderr (#73).**
+  A YAML parse failure previously leaked the parser's error bundle, asserted on
+  parser internals, and printed diagnostics to stderr from library code — all
+  removed. The CLI's `frontmatter`/`markdown` formats degrade gracefully
+  (empty object / verbatim passthrough) instead of aborting. Note: the
+  underlying rejection of a plain scalar containing an inline `" - "` is an
+  upstream `zig-yaml` limitation and still needs a fork-level fix.
+
+### Added
+
+- `html.Options` / `renderToWriterWithOptions` / `renderWithOptions`,
+  `zigmark.HtmlOptions` / `zigmark.renderHtmlWithOptions`, the
+  `zigmark_render_html_safe` C ABI export, and the CLI `--safe` flag.
+- `Parser.max_nesting_depth` / `Parser.max_input_bytes` (with
+  `default_max_nesting_depth` / `default_max_input_bytes`).
+- `src/markdown/security_test.zig` — a security-regression suite run by
+  `zig build test`.
+- Fuzz smoke check in CI (`zig build fuzz` as a flake check); new fuzz targets
+  for safe-mode HTML, Typst document rendering, and ZON frontmatter.
+
+### Fixed
+
+- **Fuzz harness compiles again.** Every target used the pre-0.16
+  `fn (void, []const u8)` signature and never built against Zig 0.16's
+  `std.testing.fuzz`; targets now take a `*std.testing.Smith`. Fixed the
+  `fuzz--fuzz` typo in the `fuzz` dev-shell app.
+
+### Known limitations
+
+- The inline link/emphasis scanner is O(n²) on pathological unmatched-bracket
+  input, a CPU-DoS bounded (not eliminated) by `max_input_bytes`. Untrusted-
+  input deployments should set a conservative `max_input_bytes` and a call-site
+  timeout; a delimiter-stack rewrite is tracked for a follow-up.
+
 ## [0.7.4] — 2026-07-08
 
 ### Tests

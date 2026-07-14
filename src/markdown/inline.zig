@@ -753,8 +753,24 @@ fn indexOfBreakChar(input: []const u8, pos: usize, gfm: bool) usize {
     return input.len;
 }
 
+/// Maximum inline nesting depth (links/images within link text) before parsing
+/// bails with `error.NestingTooDeep`. Guards against stack overflow on crafted
+/// input such as deeply nested `[[[…](u)](u)` or `![![…](u)](u)`.
+pub const max_inline_nesting_depth: usize = 128;
+
 pub fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap, gfm: bool) !std.ArrayList(AST.Inline) {
+    return parseInlineElementsDepth(allocator, input, ref_map, gfm, 0);
+}
+
+fn parseInlineElementsDepth(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap, gfm: bool, depth: usize) anyerror!std.ArrayList(AST.Inline) {
+    if (depth > max_inline_nesting_depth) return error.NestingTooDeep;
     var inlines = std.ArrayList(AST.Inline).empty;
+    // On any error path, free what we accumulated so pathological input that
+    // trips the depth guard (or an OOM) does not leak the partial tree.
+    errdefer {
+        for (inlines.items) |*it| it.deinit(allocator);
+        inlines.deinit(allocator);
+    }
     var delimiters = std.ArrayList(Delimiter).empty;
     defer delimiters.deinit(allocator);
     var pos: usize = 0;
@@ -814,7 +830,7 @@ pub fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*c
         // Image ![alt](url) or ![alt][ref]
         if (c == '!' and pos + 1 < input.len and input[pos + 1] == '[') {
             if (tryParseLink(input, pos + 1)) |r| {
-                const alt = try flattenInlineText(allocator, r.text, ref_map, gfm);
+                const alt = try flattenInlineText(allocator, r.text, ref_map, gfm, depth);
                 try inlines.append(allocator, .{ .image = .{
                     .alt_text = alt,
                     .destination = .{
@@ -827,7 +843,7 @@ pub fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*c
                 continue;
             }
             if (ref_map) |rm| {
-                if (tryParseImageRefLink(allocator, input, pos, rm, gfm)) |r| {
+                if (tryParseImageRefLink(allocator, input, pos, rm, gfm, depth)) |r| {
                     try inlines.append(allocator, r.inline_node);
                     pos = r.end;
                     continue;
@@ -847,7 +863,7 @@ pub fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*c
                 }
             }
             if (tryParseLink(input, pos)) |r| {
-                var nested = try parseInlineElements(allocator, r.text, ref_map, gfm);
+                var nested = try parseInlineElementsDepth(allocator, r.text, ref_map, gfm, depth + 1);
                 if (containsLink(nested.items)) {
                     for (nested.items) |*item| item.deinit(allocator);
                     nested.deinit(allocator);
@@ -866,7 +882,7 @@ pub fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*c
                 continue;
             }
             if (ref_map) |rm| {
-                if (tryParseRefLink(allocator, input, pos, rm, gfm)) |r| {
+                if (tryParseRefLink(allocator, input, pos, rm, gfm, depth)) |r| {
                     try inlines.append(allocator, r.inline_node);
                     pos = r.end;
                     continue;
@@ -939,7 +955,10 @@ pub fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*c
                 while (domain_end > pos + 1 and input[domain_end - 1] == '.') domain_end -= 1;
                 const domain = input[pos + 1 .. domain_end];
                 var has_period = false;
-                for (domain) |ch| if (ch == '.') { has_period = true; break; };
+                for (domain) |ch| if (ch == '.') {
+                    has_period = true;
+                    break;
+                };
                 const last_ok = domain.len > 0 and domain[domain.len - 1] != '-' and domain[domain.len - 1] != '_';
                 if (has_period and last_ok) {
                     // Strip already-emitted local-part chars from inlines/delimiters
@@ -1069,13 +1088,19 @@ fn gfmWwwLinkEnd(text: []const u8, after_www: usize) ?usize {
     const domain_part = trimmed[4..]; // after "www."
     var has_period = false;
     for (domain_part) |ch| {
-        if (ch == '.' and ch != domain_part[0]) { has_period = true; break; }
+        if (ch == '.' and ch != domain_part[0]) {
+            has_period = true;
+            break;
+        }
         if (ch == '/' or ch == '?' or ch == '#') break;
         if (ch == '.') has_period = true;
     }
     // Simpler: check if there's any '.' in domain_part
     for (domain_part) |ch| {
-        if (ch == '.') { has_period = true; break; }
+        if (ch == '.') {
+            has_period = true;
+            break;
+        }
         if (ch == '/' or ch == '?' or ch == '#') break;
     }
     if (!has_period) return null;
@@ -1126,7 +1151,10 @@ fn gfmEmailMatch(text: []const u8, at_pos: usize) ?struct { start: usize, end: u
 
     // Domain must have at least one period
     var has_period = false;
-    for (domain) |ch| if (ch == '.') { has_period = true; break; };
+    for (domain) |ch| if (ch == '.') {
+        has_period = true;
+        break;
+    };
     if (!has_period) return null;
 
     // Domain last char must not be '-' or '_'
@@ -1280,8 +1308,8 @@ fn tryParseCodeSpan(allocator: Allocator, input: []const u8, pos: usize) ?struct
     return null;
 }
 
-fn flattenInlineText(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap, gfm: bool) Allocator.Error![]const u8 {
-    var inlines = try parseInlineElements(allocator, input, ref_map, gfm);
+fn flattenInlineText(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap, gfm: bool, depth: usize) anyerror![]const u8 {
+    var inlines = try parseInlineElementsDepth(allocator, input, ref_map, gfm, depth + 1);
     defer {
         for (inlines.items) |*item| item.deinit(allocator);
         inlines.deinit(allocator);
@@ -1407,7 +1435,7 @@ pub fn tryParseHtmlTag(input: []const u8, pos: usize) ?usize {
 
 const InlineParseResult = struct { inline_node: AST.Inline, end: usize };
 
-fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap, gfm: bool) ?InlineParseResult {
+fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap, gfm: bool, depth: usize) ?InlineParseResult {
     if (start >= input.len or input[start] != '!' or start + 1 >= input.len or input[start + 1] != '[') return null;
     const be = findClosingBracket(input, start + 2) orelse return null;
     const raw_alt = input[start + 2 .. be];
@@ -1417,7 +1445,7 @@ fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, r
         // Collapsed: ![alt][]
         if (be + 2 < input.len and input[be + 2] == ']') {
             if (resolveRef(allocator, rm, raw_alt)) |ref| {
-                const flat = flattenInlineText(allocator, raw_alt, rm, gfm) catch return null;
+                const flat = flattenInlineText(allocator, raw_alt, rm, gfm, depth) catch return null;
                 return .{ .inline_node = .{ .image = .{ .alt_text = flat, .destination = .{ .url = ref.url, .title = ref.title }, .link_type = .collapsed } }, .end = be + 3 };
             }
         } else {
@@ -1425,7 +1453,7 @@ fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, r
             while (le < input.len and input[le] != ']') le += 1;
             if (le < input.len) {
                 if (resolveRef(allocator, rm, input[be + 2 .. le])) |ref| {
-                    const flat = flattenInlineText(allocator, raw_alt, rm, gfm) catch return null;
+                    const flat = flattenInlineText(allocator, raw_alt, rm, gfm, depth) catch return null;
                     return .{ .inline_node = .{ .image = .{ .alt_text = flat, .destination = .{ .url = ref.url, .title = ref.title }, .link_type = .reference } }, .end = le + 1 };
                 }
             }
@@ -1433,13 +1461,13 @@ fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, r
     }
     // Shortcut: ![alt]
     if (resolveRef(allocator, rm, raw_alt)) |ref| {
-        const flat = flattenInlineText(allocator, raw_alt, rm, gfm) catch return null;
+        const flat = flattenInlineText(allocator, raw_alt, rm, gfm, depth) catch return null;
         return .{ .inline_node = .{ .image = .{ .alt_text = flat, .destination = .{ .url = ref.url, .title = ref.title }, .link_type = .shortcut } }, .end = be + 1 };
     }
     return null;
 }
 
-fn tryParseRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap, gfm: bool) ?InlineParseResult {
+fn tryParseRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap, gfm: bool, depth: usize) ?InlineParseResult {
     if (start >= input.len or input[start] != '[') return null;
     const be = findClosingBracket(input, start + 1) orelse return null;
     const link_text = input[start + 1 .. be];
@@ -1450,21 +1478,21 @@ fn tryParseRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *c
         // Collapsed: [text][]
         if (be + 2 < input.len and input[be + 2] == ']') {
             if (resolveRef(allocator, rm, link_text)) |ref|
-                return buildRefLink(allocator, link_text, ref, .collapsed, be + 3, rm, gfm);
+                return buildRefLink(allocator, link_text, ref, .collapsed, be + 3, rm, gfm, depth);
         } else {
             // Full: [text][label]
             var le: usize = be + 2;
             while (le < input.len and input[le] != ']') le += 1;
             if (le < input.len) {
                 if (resolveRef(allocator, rm, input[be + 2 .. le])) |ref|
-                    return buildRefLink(allocator, link_text, ref, .reference, le + 1, rm, gfm);
+                    return buildRefLink(allocator, link_text, ref, .reference, le + 1, rm, gfm, depth);
             }
         }
     }
     // Shortcut: [text]
     if (!tried_full) {
         if (resolveRef(allocator, rm, link_text)) |ref|
-            return buildRefLink(allocator, link_text, ref, .shortcut, be + 1, rm, gfm);
+            return buildRefLink(allocator, link_text, ref, .shortcut, be + 1, rm, gfm, depth);
     }
     return null;
 }
@@ -1477,9 +1505,10 @@ fn buildRefLink(
     end: usize,
     rm: ?*const RefMap,
     gfm: bool,
+    depth: usize,
 ) ?InlineParseResult {
     var link = AST.Link.init(allocator, .{ .url = ref.url, .title = ref.title }, link_type);
-    var nested = parseInlineElements(allocator, text, rm, gfm) catch return null;
+    var nested = parseInlineElementsDepth(allocator, text, rm, gfm, depth + 1) catch return null;
     if (containsLink(nested.items)) {
         // Can't nest links — free the ref-owned url/title and nested inlines.
         for (nested.items) |*item| item.deinit(allocator);

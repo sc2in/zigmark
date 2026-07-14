@@ -25,6 +25,8 @@ pub fn main(init: std.process.Init) !void {
         \\-f, --format <str>        Output format: "html" (default), "ast", "ai", "terminal",
         \\                          "frontmatter", "markdown", "normalize", or "typst".
         \\-o, --output <str>        Write output to FILE instead of stdout.
+        \\--safe                    HTML format: escape raw/inline HTML to visible text
+        \\                          (for untrusted input). URL-scheme filtering is always on.
         \\-s, --set <str>...        Set a frontmatter field (KEY=VALUE). Repeatable.
         \\                          Applies to: markdown, normalize, frontmatter formats.
         \\-d, --delete <str>...     Delete a frontmatter field (dot-path). Repeatable.
@@ -152,9 +154,12 @@ pub fn main(init: std.process.Init) !void {
         const body = input[body_off..];
 
         if (body_off > 0) {
-            var fm = zigmark.Frontmatter.initFromMarkdown(alloc, input) catch |err| {
-                std.debug.print("error: failed to parse frontmatter: {}\n", .{err});
-                return err;
+            var fm = zigmark.Frontmatter.initFromMarkdown(alloc, input) catch {
+                // Malformed frontmatter (e.g. upstream YAML quirk, #73): fall
+                // back to emitting the document verbatim rather than failing.
+                writer.interface.writeAll(input) catch {};
+                writer.interface.flush() catch {};
+                return;
             };
             defer fm.deinit();
             applyFrontmatterMods(&fm, res.args.set, res.args.delete);
@@ -175,7 +180,10 @@ pub fn main(init: std.process.Init) !void {
     // ── Frontmatter JSON dump ("frontmatter") ────────────────────────────────
     if (std.mem.eql(u8, format, "frontmatter")) {
         var fm = zigmark.Frontmatter.initFromMarkdown(alloc, input) catch |err| switch (err) {
-            error.InvalidFrontMatter => {
+            // No usable frontmatter — including malformed frontmatter that the
+            // parser rejects (e.g. the upstream YAML plain-scalar quirk, #73).
+            // Emit an empty object rather than aborting the command.
+            error.InvalidFrontMatter, error.ParseFailure, error.EmptyDocument => {
                 writer.interface.writeAll("{}\n") catch {};
                 writer.interface.flush() catch {};
                 return;
@@ -261,7 +269,10 @@ pub fn main(init: std.process.Init) !void {
 
     // ── HTML ─────────────────────────────────────────────────────────────────
     if (std.mem.eql(u8, format, "html")) {
-        zigmark.renderHtmlWithMermaid(alloc, &writer.interface, doc, &pozeiden.render) catch |err| {
+        zigmark.renderHtmlWithOptions(alloc, &writer.interface, doc, .{
+            .safe = res.args.safe != 0,
+            .mermaid = &pozeiden.render,
+        }) catch |err| {
             std.debug.print("error: failed to render HTML: {}\n", .{err});
             return err;
         };
@@ -315,6 +326,8 @@ pub fn main(init: std.process.Init) !void {
 /// Coerce a `std.json.Value` to `bool`, handling both native `.bool` values
 /// and string scalars (`"true"` / `"false"`) as produced by the YAML parser.
 fn jsonAsBool(v: std.json.Value) ?bool {
+    // Aligned prongs are intentional
+    // zig fmt: off
     return switch (v) {
         .bool   => |b| b,
         .string => |s| if (std.mem.eql(u8, s, "true") or std.mem.eql(u8, s, "yes"))
@@ -325,6 +338,7 @@ fn jsonAsBool(v: std.json.Value) ?bool {
             null,
         else => null,
     };
+    // zig fmt: on
 }
 
 /// Map YAML/TOML/JSON frontmatter fields to `DocumentOptions`.
@@ -333,6 +347,8 @@ fn jsonAsBool(v: std.json.Value) ?bool {
 fn frontmatterToTypstOpts(fm: *const zigmark.Frontmatter) zigmark.typst.DocumentOptions {
     var opts: zigmark.typst.DocumentOptions = .{};
 
+    // Hand-aligned frontmatter → options mapping
+    // zig fmt: off
     if (fm.get("title"))    |v| if (v == .string) { opts.title    = v.string; };
     if (fm.get("subtitle")) |v| if (v == .string) { opts.subtitle = v.string; };
     if (fm.get("date"))     |v| if (v == .string) { opts.date     = v.string; };
@@ -354,12 +370,12 @@ fn frontmatterToTypstOpts(fm: *const zigmark.Frontmatter) zigmark.typst.Document
     if (fm.get("titlepage-color"))      |v| if (v == .string) { opts.titlepage_color      = v.string; };
     if (fm.get("titlepage-text-color")) |v| if (v == .string) { opts.titlepage_text_color = v.string; };
     if (fm.get("titlepage-rule-color")) |v| if (v == .string) { opts.titlepage_rule_color = v.string; };
-    if (fm.get("titlepage-rule-height"))|v| if (v == .integer) { opts.titlepage_rule_height = @intCast(v.integer); };
+    if (fm.get("titlepage-rule-height"))|v| if (v == .integer) { if (std.math.cast(u32, v.integer)) |n| { opts.titlepage_rule_height = n; } };
 
     // ── TOC ───────────────────────────────────────────────────────────────────
     if (fm.get("toc"))       |v| { if (jsonAsBool(v)) |b| opts.toc       = b; }
     if (fm.get("toc-title")) |v| if (v == .string)  { opts.toc_title = v.string; };
-    if (fm.get("toc-depth")) |v| if (v == .integer) { opts.toc_depth = @intCast(v.integer); };
+    if (fm.get("toc-depth")) |v| if (v == .integer) { if (std.math.cast(u8, v.integer)) |n| { opts.toc_depth = n; } };
 
     // ── Sections / links ──────────────────────────────────────────────────────
     if (fm.get("numbersections")) |v| { if (jsonAsBool(v)) |b| opts.numbersections = b; }
@@ -375,6 +391,7 @@ fn frontmatterToTypstOpts(fm: *const zigmark.Frontmatter) zigmark.typst.Document
     if (fm.get("footer-left"))   |v| if (v == .string) { opts.footer_left   = v.string; };
     if (fm.get("footer-center")) |v| if (v == .string) { opts.footer_center = v.string; };
     if (fm.get("footer-right"))  |v| if (v == .string) { opts.footer_right  = v.string; };
+    // zig fmt: on
 
     return opts;
 }

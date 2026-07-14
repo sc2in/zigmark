@@ -457,8 +457,7 @@ test "library: multiple fm filters AND semantics" {
     defer tst.allocator.free(results.?);
 
     try tst.expectEqual(@as(usize, 1), results.?.len);
-    try tst.expectEqualStrings("Access Control Policy",
-        results.?[0].entry.frontmatter.?.get("title").?.string);
+    try tst.expectEqualStrings("Access Control Policy", results.?[0].entry.frontmatter.?.get("title").?.string);
 }
 
 test "library: multiple fm filters partial match excluded" {
@@ -501,10 +500,8 @@ test "library: sortBy field ascending" {
 
     Library.sortBy(results.?, "title", true);
 
-    try tst.expectEqualStrings("Access Control Policy",
-        results.?[0].entry.frontmatter.?.get("title").?.string);
-    try tst.expectEqualStrings("HR Policy",
-        results.?[1].entry.frontmatter.?.get("title").?.string);
+    try tst.expectEqualStrings("Access Control Policy", results.?[0].entry.frontmatter.?.get("title").?.string);
+    try tst.expectEqualStrings("HR Policy", results.?[1].entry.frontmatter.?.get("title").?.string);
 }
 
 test "library: sortBy field descending" {
@@ -519,10 +516,8 @@ test "library: sortBy field descending" {
 
     Library.sortBy(results.?, "title", false);
 
-    try tst.expectEqualStrings("HR Policy",
-        results.?[0].entry.frontmatter.?.get("title").?.string);
-    try tst.expectEqualStrings("Access Control Policy",
-        results.?[1].entry.frontmatter.?.get("title").?.string);
+    try tst.expectEqualStrings("HR Policy", results.?[0].entry.frontmatter.?.get("title").?.string);
+    try tst.expectEqualStrings("Access Control Policy", results.?[1].entry.frontmatter.?.get("title").?.string);
 }
 
 test "library: sortBy missing field sorts last" {
@@ -530,7 +525,7 @@ test "library: sortBy missing field sorts last" {
     defer lib.deinit();
 
     try lib.add(no_frontmatter, null); // no title
-    try lib.add(policy_a, null);       // "Access Control Policy"
+    try lib.add(policy_a, null); // "Access Control Policy"
 
     const results = try lib.query(tst.allocator, "");
     defer tst.allocator.free(results.?);
