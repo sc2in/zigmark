@@ -185,6 +185,8 @@ fn printResultsTable(
         if (t == 0) continue;
         const ms: f64 = @as(f64, @floatFromInt(s.result.time_ns)) / @as(f64, @floatFromInt(std.time.ns_per_ms));
 
+        // Aligned bindings are intentional
+        // zig fmt: off
         const pass_s  = try std.fmt.allocPrint(allocator, "{d}", .{s.result.passed});
         defer allocator.free(pass_s);
         const fail_s  = try std.fmt.allocPrint(allocator, "{d}", .{s.result.failed});
@@ -193,6 +195,7 @@ fn printResultsTable(
         defer allocator.free(total_s);
         const ms_s    = try std.fmt.allocPrint(allocator, "{d:.2}", .{ms});
         defer allocator.free(ms_s);
+        // zig fmt: on
 
         const row = try zigmark.AST.TableRow.fromStrings(
             allocator,
@@ -204,6 +207,8 @@ fn printResultsTable(
     // TOTAL row (bold via inline Markdown in the cell text).
     {
         const total_ms: f64 = @as(f64, @floatFromInt(total_time_ns)) / @as(f64, @floatFromInt(std.time.ns_per_ms));
+        // Aligned bindings are intentional
+        // zig fmt: off
         const pass_s  = try std.fmt.allocPrint(allocator, "{d}", .{all.passed});
         defer allocator.free(pass_s);
         const fail_s  = try std.fmt.allocPrint(allocator, "{d}", .{all.failed});
@@ -212,6 +217,7 @@ fn printResultsTable(
         defer allocator.free(total_s);
         const ms_s    = try std.fmt.allocPrint(allocator, "{d:.2}", .{total_ms});
         defer allocator.free(ms_s);
+        // zig fmt: on
 
         const row = try zigmark.AST.TableRow.fromStrings(
             allocator,

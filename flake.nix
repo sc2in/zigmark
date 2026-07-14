@@ -94,13 +94,29 @@
       }
     );
 
-    # `nix flake check` / omnix ci — runs `zig build test` + `zig build wasm`
+    # `nix flake check` / omnix ci — runs `zig build test` + `zig build fuzz` + `zig build wasm`
     checks = forAllSystems (system: {
       test = self.packages.${system}.default.overrideAttrs (old: {
         pname = "zigmark-test";
         buildPhase = "zig build test -Dversion=${version}";
         installPhase = "touch $out";
         meta = (old.meta or {}) // {description = "Run zig build test — unit tests + CommonMark spec + GFM spec";};
+      });
+      # Fuzz smoke: compile every fuzz target and run each once so the harness
+      # cannot silently rot (coverage-guided runs still use `zig build fuzz --fuzz`).
+      fuzz = self.packages.${system}.default.overrideAttrs (old: {
+        pname = "zigmark-fuzz-smoke";
+        buildPhase = "zig build fuzz -Dversion=${version}";
+        installPhase = "touch $out";
+        meta = (old.meta or {}) // {description = "Run zig build fuzz smoke — each fuzz target once";};
+      });
+      # Formatting gate. Deliberate hand-alignment is preserved with
+      # `// zig fmt: off` / `// zig fmt: on` guards, so this stays green.
+      fmt = self.packages.${system}.default.overrideAttrs (old: {
+        pname = "zigmark-fmt-check";
+        buildPhase = "zig fmt --check build.zig src examples";
+        installPhase = "touch $out";
+        meta = (old.meta or {}) // {description = "Run zig fmt --check";};
       });
       wasm = self.packages.${system}.default.overrideAttrs (old: {
         pname = "zigmark-wasm-check";
@@ -133,7 +149,7 @@
           text = ''
             PORT="''${1:-8080}"
             echo "▸ Starting fuzzer — web UI at http://127.0.0.1:$PORT"
-            zig build  --listen fuzz--fuzz --webui="127.0.0.1:$PORT"
+            zig build --listen fuzz --fuzz --webui="127.0.0.1:$PORT"
           '';
         };
       in {

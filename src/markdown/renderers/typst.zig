@@ -90,6 +90,8 @@ pub const DocumentOptions = struct {
 /// `\`, `*`, `_`, `` ` ``, `#`, `$`, `@`, `<`, `[`, `]`, `~`
 fn writeEscaped(writer: anytype, s: []const u8) !void {
     for (s) |c| {
+        // Aligned prongs are intentional
+        // zig fmt: off
         switch (c) {
             '\\' => try writer.writeAll("\\\\"),
             '*'  => try writer.writeAll("\\*"),
@@ -104,6 +106,7 @@ fn writeEscaped(writer: anytype, s: []const u8) !void {
             '~'  => try writer.writeAll("\\~"),
             else => try writer.writeByte(c),
         }
+        // zig fmt: on
     }
 }
 
@@ -111,12 +114,59 @@ fn writeEscaped(writer: anytype, s: []const u8) !void {
 /// Only `"` and `\` need escaping in this context.
 fn writeStringLiteral(writer: anytype, s: []const u8) !void {
     for (s) |c| {
+        // Aligned prongs are intentional
+        // zig fmt: off
         switch (c) {
             '"'  => try writer.writeAll("\\\""),
             '\\' => try writer.writeAll("\\\\"),
             else => try writer.writeByte(c),
         }
+        // zig fmt: on
     }
+}
+
+// ── Preamble field validation (Typst code-injection guards) ───────────────────
+//
+// Frontmatter-derived option fields flow into the Typst preamble. Typst runs at
+// compile time and can read local files, so any untrusted value interpolated
+// into Typst code — even inside a string literal, which can be closed with `"` —
+// must be validated or escaped. String fields go through `writeStringLiteral`;
+// the guards below cover the two fields emitted in non-string positions:
+// colours (inside `rgb("#…")`) and the *unquoted* `fontsize` expression.
+
+/// True if `s` is a valid hex colour body (3/4/6/8 hex digits, no `#`).
+fn isHexColor(s: []const u8) bool {
+    if (s.len != 3 and s.len != 4 and s.len != 6 and s.len != 8) return false;
+    for (s) |c| if (!std.ascii.isHex(c)) return false;
+    return true;
+}
+
+/// Return `s` if it is a valid hex colour, otherwise `default`.
+fn hexColorOr(s: []const u8, default: []const u8) []const u8 {
+    return if (isHexColor(s)) s else default;
+}
+
+/// True if `s` is a bare Typst length literal: digits, an optional fractional
+/// part, and a known unit. `fontsize` is emitted as an unquoted expression, so
+/// it must be validated as a length token rather than string-escaped.
+fn isTypstLength(s: []const u8) bool {
+    var i: usize = 0;
+    var saw_digit = false;
+    while (i < s.len and s[i] >= '0' and s[i] <= '9') : (i += 1) saw_digit = true;
+    if (i < s.len and s[i] == '.') {
+        i += 1;
+        while (i < s.len and s[i] >= '0' and s[i] <= '9') : (i += 1) saw_digit = true;
+    }
+    if (!saw_digit) return false;
+    const unit = s[i..];
+    const units = [_][]const u8{ "pt", "mm", "cm", "in", "em" };
+    for (units) |u| if (std.mem.eql(u8, unit, u)) return true;
+    return false;
+}
+
+/// Return `s` if it is a valid Typst length literal, otherwise `default`.
+fn lengthOr(s: []const u8, default: []const u8) []const u8 {
+    return if (isTypstLength(s)) s else default;
 }
 
 // ── Render context ────────────────────────────────────────────────────────────
@@ -155,9 +205,12 @@ fn renderInline(writer: *std.Io.Writer, item: AST.Inline, ctx: *const Ctx) anyer
         .hard_break => try writer.writeAll("\\\n"),
 
         .code_span => |cs| {
-            try writer.writeByte('`');
-            try writer.writeAll(cs.content);
-            try writer.writeByte('`');
+            // Use Typst's `raw()` with a string literal so backticks in the
+            // content cannot break out of raw mode into executable Typst markup
+            // (Typst runs at compile time and can read local files).
+            try writer.writeAll("#raw(\"");
+            try writeStringLiteral(writer, cs.content);
+            try writer.writeAll("\")");
         },
 
         .emphasis => |e| {
@@ -281,11 +334,11 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, ctx: *const Ctx) anyerr
 
         // ── Code blocks ──────────────────────────────────────────────────────
         .code_block => |cb| {
-            try writer.writeAll("```\n");
-            try writer.writeAll(cb.content);
-            if (cb.content.len == 0 or cb.content[cb.content.len - 1] != '\n')
-                try writer.writeByte('\n');
-            try writer.writeAll("```\n\n");
+            // `raw(block: true, "…")` with a string literal: content cannot
+            // close the block early and inject Typst markup.
+            try writer.writeAll("#raw(block: true, \"");
+            try writeStringLiteral(writer, cb.content);
+            try writer.writeAll("\")\n\n");
         },
 
         .fenced_code_block => |fcb| {
@@ -304,6 +357,8 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, ctx: *const Ctx) anyerr
                     // width, matching how LaTeX pipelines size images.
                     try writer.writeAll("#{\n  let d = bytes(\"");
                     try writeStringLiteral(writer, svg);
+                    // Flat string-concat indentation is intentional
+                    // zig fmt: off
                     try writer.writeAll(
                         "\")\n" ++
                         "  layout(size => {\n" ++
@@ -312,29 +367,34 @@ fn renderBlock(writer: *std.Io.Writer, block: AST.Block, ctx: *const Ctx) anyerr
                         "  })\n" ++
                         "}\n\n",
                     );
+                    // zig fmt: on
                     return;
                 }
             }
-            try writer.writeAll("```");
-            if (fcb.language) |lang| try writer.writeAll(lang);
-            try writer.writeByte('\n');
-            if (fcb.content.len > 0) {
-                try writer.writeAll(fcb.content);
-                if (fcb.content[fcb.content.len - 1] != '\n') try writer.writeByte('\n');
+            try writer.writeAll("#raw(block: true");
+            if (fcb.language) |lang| {
+                try writer.writeAll(", lang: \"");
+                try writeStringLiteral(writer, lang);
+                try writer.writeByte('"');
             }
-            try writer.writeAll("```\n\n");
+            try writer.writeAll(", \"");
+            try writeStringLiteral(writer, fcb.content);
+            try writer.writeAll("\")\n\n");
         },
 
         // ── Blockquote ───────────────────────────────────────────────────────
         // Render as a left-bordered block with grey text, matching the
         // Eisvogel `mdframed`-based blockquote style.
         .blockquote => |bq| {
+            // Flat string-concat indentation is intentional
+            // zig fmt: off
             try writer.writeAll(
                 "#block(\n" ++
                 "  inset: (left: 12pt, top: 4pt, bottom: 4pt),\n" ++
                 "  stroke: (left: (thickness: 3pt, paint: rgb(\"#DDDDDD\"))),\n" ++
                 "  text(fill: rgb(\"#777777\"))[\n",
             );
+            // zig fmt: on
             for (bq.children.items) |child| {
                 try renderBlockInline(writer, child, ctx);
                 try writer.writeByte('\n');
@@ -445,12 +505,15 @@ fn renderTable(writer: *std.Io.Writer, tbl: AST.Table, ctx: *const Ctx) anyerror
     try writer.writeAll("  align: (");
     for (tbl.alignments.items, 0..) |col_align, i| {
         if (i > 0) try writer.writeAll(", ");
+        // Aligned prongs are intentional
+        // zig fmt: off
         switch (col_align) {
             .none   => try writer.writeAll("auto"),
             .left   => try writer.writeAll("left"),
             .center => try writer.writeAll("center"),
             .right  => try writer.writeAll("right"),
         }
+        // zig fmt: on
     }
     try writer.writeAll("),\n");
 
@@ -493,6 +556,8 @@ fn renderTable(writer: *std.Io.Writer, tbl: AST.Table, ctx: *const Ctx) anyerror
 /// Write the Eisvogel-inspired Typst preamble (all `#set` / `#show` rules
 /// and the title page) to `writer` according to `opts`.
 fn writePreamble(writer: anytype, opts: DocumentOptions) !void {
+    // Hand-formatted Typst emission; keep exact string indentation
+    // zig fmt: off
     // ── Document metadata ────────────────────────────────────────────────────
     try writer.writeAll("#set document(\n");
     if (opts.title) |t| {
@@ -509,7 +574,9 @@ fn writePreamble(writer: anytype, opts: DocumentOptions) !void {
 
     // ── Page layout ──────────────────────────────────────────────────────────
     try writer.writeAll("#set page(\n");
-    try writer.print("  paper: \"{s}\",\n", .{opts.paper});
+    try writer.writeAll("  paper: \"");
+    try writeStringLiteral(writer, opts.paper);
+    try writer.writeAll("\",\n");
     try writer.writeAll("  margin: (x: 2.5cm, y: 2.5cm),\n");
 
     if (!opts.disable_header_and_footer) {
@@ -581,14 +648,17 @@ fn writePreamble(writer: anytype, opts: DocumentOptions) !void {
     try writer.writeAll(")\n\n");
 
     // ── Text / font settings ─────────────────────────────────────────────────
-    try writer.print(
+    // `size:` is an unquoted Typst expression — validate it as a length literal.
+    // `lang:` is a string literal — escape it.
+    try writer.writeAll(
         "#set text(\n" ++
         "  font: (\"Source Sans Pro\", \"Helvetica\", \"Arial\"),\n" ++
-        "  size: {s},\n" ++
-        "  lang: \"{s}\",\n" ++
-        ")\n\n",
-        .{ opts.fontsize, opts.lang },
+        "  size: ",
     );
+    try writer.writeAll(lengthOr(opts.fontsize, "11pt"));
+    try writer.writeAll(",\n  lang: \"");
+    try writeStringLiteral(writer, opts.lang);
+    try writer.writeAll("\",\n)\n\n");
 
     // Monospace font for raw / code.
     try writer.writeAll(
@@ -626,7 +696,7 @@ fn writePreamble(writer: anytype, opts: DocumentOptions) !void {
     if (opts.colorlinks) {
         try writer.print(
             "#show link: set text(fill: rgb(\"#{s}\"))\n\n",
-            .{opts.linkcolor},
+            .{hexColorOr(opts.linkcolor, "A50000")},
         );
     }
 
@@ -650,13 +720,13 @@ fn writePreamble(writer: anytype, opts: DocumentOptions) !void {
         // Full-page coloured background.
         try writer.print(
             "  #rect(width: 100%, height: 100%, fill: rgb(\"#{s}\"))[\n",
-            .{opts.titlepage_color},
+            .{hexColorOr(opts.titlepage_color, "1E3A5F")},
         );
 
         // Title text block.
         try writer.print(
             "    #set text(fill: rgb(\"#{s}\"))\n",
-            .{opts.titlepage_text_color},
+            .{hexColorOr(opts.titlepage_text_color, "FFFFFF")},
         );
         try writer.writeAll("    #align(horizon)[\n");
         try writer.writeAll("      #pad(left: 2.5cm, right: 2.5cm)[\n");
@@ -676,7 +746,7 @@ fn writePreamble(writer: anytype, opts: DocumentOptions) !void {
         // Coloured rule.
         try writer.print(
             "        #line(length: 100%, stroke: {d}pt + rgb(\"#{s}\"))\n\n",
-            .{ opts.titlepage_rule_height, opts.titlepage_rule_color },
+            .{ opts.titlepage_rule_height, hexColorOr(opts.titlepage_rule_color, "AAAAAA") },
         );
 
         if (opts.author) |a| {
@@ -696,14 +766,11 @@ fn writePreamble(writer: anytype, opts: DocumentOptions) !void {
 
     // ── Table of contents ────────────────────────────────────────────────────
     if (opts.toc) {
-        try writer.print(
-            "#outline(\n" ++
-            "  title: \"{s}\",\n" ++
-            "  depth: {d},\n" ++
-            ")\n\n",
-            .{ opts.toc_title, opts.toc_depth },
-        );
+        try writer.writeAll("#outline(\n  title: \"");
+        try writeStringLiteral(writer, opts.toc_title);
+        try writer.print("\",\n  depth: {d},\n)\n\n", .{opts.toc_depth});
     }
+    // zig fmt: on
 }
 
 // ── Footnote pre-pass ─────────────────────────────────────────────────────────
@@ -857,15 +924,29 @@ test "strikethrough" {
 }
 
 test "code span" {
-    try ok("`code`", "`code`\n\n");
+    // Emitted via `raw()` so backticks in content cannot break out into markup.
+    try ok("`code`", "#raw(\"code\")\n\n");
 }
 
 test "fenced code block no lang" {
-    try ok("```\nhello\n```", "```\nhello\n```\n\n");
+    try ok("```\nhello\n```", "#raw(block: true, \"hello\")\n\n");
 }
 
 test "fenced code block with lang" {
-    try ok("```zig\nconst x = 1;\n```", "```zig\nconst x = 1;\n```\n\n");
+    try ok("```zig\nconst x = 1;\n```", "#raw(block: true, lang: \"zig\", \"const x = 1;\")\n\n");
+}
+
+test "code span with backtick cannot break out of raw" {
+    // A backtick in the content is escaped inside the string literal, not
+    // treated as a raw-mode delimiter.
+    try ok("`` a`b ``", "#raw(\"a`b\")\n\n");
+}
+
+test "fenced code block content with closing fence stays contained" {
+    try ok(
+        "````\n```\n#read(\"/etc/passwd\")\n````",
+        "#raw(block: true, \"```\n#read(\\\"/etc/passwd\\\")\")\n\n",
+    );
 }
 
 test "thematic break" {
@@ -996,7 +1077,7 @@ test "mermaid renderer error falls back to code block" {
     try okMermaid(
         "```mermaid\ngraph LR\nA-->B\n```",
         stubSvgError,
-        "```mermaid\ngraph LR\nA-->B\n```\n\n",
+        "#raw(block: true, lang: \"mermaid\", \"graph LR\nA-->B\")\n\n",
     );
 }
 
@@ -1004,7 +1085,7 @@ test "mermaid null renderer falls back to code block" {
     try okMermaid(
         "```mermaid\ngraph LR\nA-->B\n```",
         null,
-        "```mermaid\ngraph LR\nA-->B\n```\n\n",
+        "#raw(block: true, lang: \"mermaid\", \"graph LR\nA-->B\")\n\n",
     );
 }
 
@@ -1012,7 +1093,7 @@ test "non-mermaid lang unaffected by mermaid renderer" {
     try okMermaid(
         "```zig\nconst x = 1;\n```",
         stubSvg,
-        "```zig\nconst x = 1;\n```\n\n",
+        "#raw(block: true, lang: \"zig\", \"const x = 1;\")\n\n",
     );
 }
 

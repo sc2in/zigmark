@@ -48,6 +48,17 @@ pub const parsers = @import("combinators.zig");
 
 const RefMap = Inline.RefMap;
 
+// Resource limits (DoS guards).
+
+/// Default maximum block nesting depth (blockquotes/lists). Beyond this the
+/// parser returns `error.NestingTooDeep` instead of recursing until the native
+/// stack overflows. See `Parser.max_nesting_depth`.
+pub const default_max_nesting_depth: usize = 128;
+
+/// Default maximum input size accepted by `parseMarkdown`/`parseFromReader`,
+/// in bytes (16 MiB, `0` = unlimited). See `Parser.max_input_bytes`.
+pub const default_max_input_bytes: usize = 16 * 1024 * 1024;
+
 // ── Small shared helpers ─────────────────────────────────────────────────────
 
 fn trimLine(line: []const u8) []const u8 {
@@ -261,6 +272,14 @@ const Self = @This();
 /// continuation lines which must not form setext headings.
 has_lazy_setext: bool = false,
 gfm: bool = true,
+/// Maximum block nesting depth before parsing bails with `error.NestingTooDeep`
+/// (DoS guard against stack overflow on deeply nested blockquotes/lists).
+max_nesting_depth: usize = default_max_nesting_depth,
+/// Maximum input size in bytes for `parseMarkdown`/`parseFromReader`
+/// (`0` = unlimited); larger input yields `error.InputTooLarge`.
+max_input_bytes: usize = default_max_input_bytes,
+/// Current block-nesting depth (internal; incremented on each recursion).
+depth: usize = 0,
 
 pub fn init() Self {
     return Self{};
@@ -274,6 +293,7 @@ fn appendInlines(allocator: Allocator, dest: *std.ArrayList(AST.Inline), content
 }
 
 pub fn parseMarkdown(self: Self, allocator: Allocator, input: []const u8) !AST.Document {
+    if (self.max_input_bytes != 0 and input.len > self.max_input_bytes) return error.InputTooLarge;
     var ref_map = RefMap.init(allocator);
     defer {
         var it = ref_map.iterator();
@@ -299,7 +319,11 @@ pub fn parseMarkdown(self: Self, allocator: Allocator, input: []const u8) !AST.D
 pub fn parseFromReader(self: Self, allocator: Allocator, reader: *std.Io.Reader) !AST.Document {
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(allocator);
-    try reader.appendRemainingUnlimited(allocator, &buf);
+    const limit: std.Io.Limit = if (self.max_input_bytes == 0) .unlimited else .limited(self.max_input_bytes);
+    reader.appendRemaining(allocator, &buf, limit) catch |err| switch (err) {
+        error.StreamTooLong => return error.InputTooLarge,
+        else => |e| return e,
+    };
     return self.parseMarkdown(allocator, buf.items);
 }
 
@@ -635,6 +659,7 @@ fn stripIndent(line: []const u8, n: usize) StripResult {
 }
 
 fn parseList(
+    parent: Self,
     allocator: Allocator,
     lines: []const []const u8,
     start: usize,
@@ -697,6 +722,8 @@ fn parseList(
 
         if (trimLine(effective_content).len > 0) {
             var inner = init();
+            inner.max_nesting_depth = parent.max_nesting_depth;
+            inner.depth = parent.depth + 1;
             var inner_doc = try inner.parseMarkdownWithRefs(allocator, effective_content, ref_map);
             for (inner_doc.children.items) |block| try item.children.append(allocator, block);
             // Free the ArrayList backing memory without deiniting moved children.
@@ -919,7 +946,11 @@ fn htmlBlockTypeEndFound(line: []const u8, block_type: HtmlBlockType) bool {
 }
 
 fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, ref_map: *const RefMap) !AST.Document {
+    if (self.depth > self.max_nesting_depth) return error.NestingTooDeep;
     var doc = AST.Document.init(allocator);
+    // Free the partially-built document if parsing fails partway (e.g. a nested
+    // block trips the depth guard), so callers using a plain gpa don't leak.
+    errdefer doc.deinit(allocator);
     doc.gfm = self.gfm;
     var lines_list = try splitLines(allocator, input);
     defer lines_list.deinit(allocator);
@@ -948,7 +979,10 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
             var heading = AST.Heading.init(allocator, h.level);
             const owned_content = try allocator.dupe(u8, h.content);
             heading.inline_source = owned_content;
-            try appendInlines(allocator, &heading.children, owned_content, ref_map, self.gfm);
+            appendInlines(allocator, &heading.children, owned_content, ref_map, self.gfm) catch |err| {
+                heading.deinit(allocator);
+                return err;
+            };
             try doc.children.append(allocator, .{ .heading = heading });
             i += 1;
             continue;
@@ -1071,6 +1105,8 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
             defer allocator.free(bq_str);
             var inner = init();
             inner.has_lazy_setext = has_lazy_setext_line;
+            inner.max_nesting_depth = self.max_nesting_depth;
+            inner.depth = self.depth + 1;
             var inner_doc = try inner.parseMarkdownWithRefs(allocator, bq_str, ref_map);
             var bq = AST.Blockquote.init(allocator);
             for (inner_doc.children.items) |block| try bq.children.append(allocator, block);
@@ -1082,7 +1118,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
 
         // Unordered list
         if (bulletListContentColumn(raw)) |first| {
-            const result = try parseList(allocator, lines, i, ref_map, .{ .list_type = .unordered, .marker = first.marker, .delimiter = 0, .start_num = 0 });
+            const result = try parseList(self, allocator, lines, i, ref_map, .{ .list_type = .unordered, .marker = first.marker, .delimiter = 0, .start_num = 0 });
             try doc.children.append(allocator, .{ .list = result.list });
             i = result.next_line;
             continue;
@@ -1090,7 +1126,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
 
         // Ordered list
         if (orderedListContentColumn(raw)) |first| {
-            const result = try parseList(allocator, lines, i, ref_map, .{ .list_type = .ordered, .marker = 0, .delimiter = first.delimiter, .start_num = first.num });
+            const result = try parseList(self, allocator, lines, i, ref_map, .{ .list_type = .ordered, .marker = 0, .delimiter = first.delimiter, .start_num = first.num });
             try doc.children.append(allocator, .{ .list = result.list });
             i = result.next_line;
             continue;
@@ -1127,7 +1163,11 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
             var para = AST.Paragraph.init(allocator);
             const fn_pc = try allocator.dupe(u8, fd.content);
             para.inline_source = fn_pc;
-            try appendInlines(allocator, &para.children, fn_pc, ref_map, self.gfm);
+            appendInlines(allocator, &para.children, fn_pc, ref_map, self.gfm) catch |err| {
+                para.deinit(allocator);
+                fn_def.deinit(allocator);
+                return err;
+            };
             try fn_def.children.append(allocator, .{ .paragraph = para });
             try doc.children.append(allocator, .{ .footnote_definition = fn_def });
             i += 1;
@@ -1178,8 +1218,11 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
                 }
                 const pc = try allocator.dupe(u8, content);
                 para_buf.deinit(allocator);
-                try appendInlines(allocator, &para.children, pc, ref_map, self.gfm);
                 para.inline_source = pc;
+                appendInlines(allocator, &para.children, pc, ref_map, self.gfm) catch |err| {
+                    para.deinit(allocator);
+                    return err;
+                };
             }
             if (is_setext and para.children.items.len > 0) {
                 const st = trimLine(lines[i]);
@@ -1272,13 +1315,19 @@ fn parseTableDelimiter(line: []const u8) ?TableDelimResult {
         var left_colon = false;
         var right_colon = false;
 
-        if (t[i] == ':') { left_colon = true; i += 1; }
+        if (t[i] == ':') {
+            left_colon = true;
+            i += 1;
+        }
 
         var dash_count: usize = 0;
         while (i < t.len and t[i] == '-') : (i += 1) dash_count += 1;
         if (dash_count < 1) return null;
 
-        if (i < t.len and t[i] == ':') { right_colon = true; i += 1; }
+        if (i < t.len and t[i] == ':') {
+            right_colon = true;
+            i += 1;
+        }
 
         if (result.count >= result.alignments.len) return null;
         result.alignments[result.count] = if (left_colon and right_colon)
@@ -1453,5 +1502,6 @@ fn tryTableStart(
 
 test {
     _ = @import("test.zig");
+    _ = @import("security_test.zig");
     tst.refAllDecls(@This());
 }
