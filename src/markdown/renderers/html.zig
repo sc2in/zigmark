@@ -633,6 +633,14 @@ fn renderInline(writer: anytype, item: AST.Inline, ctx: *const RenderCtx) !void 
             try writer.writeAll("</a>");
         },
         .html_in_line => |hi| try writeHtmlFiltered(writer, hi.content, ctx.gfm, ctx.safe),
+        .math => |m| {
+            // Preserve the original delimiters (HTML-escaped) so client-side
+            // renderers such as KaTeX auto-render / MathJax pick them up.
+            const delim: []const u8 = if (m.display) "$$" else "$";
+            try writer.writeAll(delim);
+            try writeEscaped(writer, m.content);
+            try writer.writeAll(delim);
+        },
     }
 }
 
@@ -1048,6 +1056,25 @@ fn ok(s: []const u8, expected: []const u8) !void {
     const out = try render(allocator, res);
     defer allocator.free(out);
     try tst.expectEqualStrings(expected, out);
+}
+
+fn okMath(s: []const u8, expected: []const u8) !void {
+    const allocator = tst.allocator;
+    var parser = Parser.init();
+    parser.math = true;
+    defer parser.deinit(allocator);
+    var res = try parser.parseMarkdown(allocator, s);
+    defer res.deinit(allocator);
+    const out = try render(allocator, res);
+    defer allocator.free(out);
+    try tst.expectEqualStrings(expected, out);
+}
+
+test "math keeps original delimiters for client-side rendering (KaTeX/MathJax)" {
+    try okMath("$E=mc^2$", "<p>$E=mc^2$</p>\n");
+    try okMath("$$\\frac{a}{b}$$", "<p>$$\\frac{a}{b}$$</p>\n");
+    // Content is HTML-escaped so TeX like `a<b` cannot inject markup.
+    try okMath("$a<b$", "<p>$a&lt;b$</p>\n");
 }
 
 test "heading" {

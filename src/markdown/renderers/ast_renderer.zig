@@ -205,6 +205,9 @@ fn renderInline(writer: anytype, inl: AST.Inline, prefix: []const u8, is_last: b
         .code_span => |cs| {
             try writer.print("CodeSpan \"{s}\"\n", .{cs.content});
         },
+        .math => |m| {
+            try writer.print("Math ({s}) \"{s}\"\n", .{ if (m.display) "display" else "inline", m.content });
+        },
         .link => |lnk| {
             try writer.print("Link url=\"{s}\"\n", .{lnk.destination.url});
             const new_prefix = try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, child_ext });
@@ -266,6 +269,19 @@ fn ok(s: []const u8, expected: []const u8) !void {
     const out = try render(allocator, res);
     defer allocator.free(out);
     try tst.expectEqualStrings(expected, out);
+}
+
+test "ast: math node shows type and display flag" {
+    const allocator = tst.allocator;
+    var parser = Parser.init();
+    parser.math = true;
+    defer parser.deinit(allocator);
+    var res = try parser.parseMarkdown(allocator, "$x$ and $$y$$");
+    defer res.deinit(allocator);
+    const out = try render(allocator, res);
+    defer allocator.free(out);
+    try tst.expect(std.mem.indexOf(u8, out, "Math (inline) \"x\"") != null);
+    try tst.expect(std.mem.indexOf(u8, out, "Math (display) \"y\"") != null);
 }
 
 test "ast: heading" {

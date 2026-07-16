@@ -11,6 +11,14 @@ const AST = @import("ast.zig");
 
 pub const RefMap = std.StringHashMap(struct { url: []const u8, title: ?[]const u8 });
 
+/// Inline-parsing options threaded from the block parser.
+pub const Options = struct {
+    /// GFM extensions (strikethrough, extended autolinks, tables, …).
+    gfm: bool = true,
+    /// Opt-in TeX math: `$…$` (inline) and `$$…$$` (display).
+    math: bool = false,
+};
+
 // ── ASCII punctuation table ───────────────────────────────────────────────────
 
 // Comptime truth-table: O(1) ASCII punctuation test — single array load,
@@ -42,6 +50,17 @@ const inline_break_cm: [256]bool = blk: {
 const inline_break_gfm: [256]bool = blk: {
     var t = inline_break_cm;
     t['@'] = true;
+    break :blk t;
+};
+// Math variants: '$' is a scan-stop character only when math is enabled.
+const inline_break_cm_math: [256]bool = blk: {
+    var t = inline_break_cm;
+    t['$'] = true;
+    break :blk t;
+};
+const inline_break_gfm_math: [256]bool = blk: {
+    var t = inline_break_gfm;
+    t['$'] = true;
     break :blk t;
 };
 
@@ -722,9 +741,12 @@ fn processEmphasis(allocator: Allocator, inlines: *std.ArrayList(AST.Inline), de
 /// SIMD-accelerated scan for the first "break" character in inline text.
 /// Uses @Vector comparisons (PCMPEQB/VPCMPEQB) to process `vlen` bytes per
 /// iteration — up to 32x throughput vs scalar for long plain-text spans.
-fn indexOfBreakChar(input: []const u8, pos: usize, gfm: bool) usize {
+fn indexOfBreakChar(input: []const u8, pos: usize, opts: Options) usize {
     const vlen = std.simd.suggestVectorLength(u8) orelse 1;
-    const fallback = if (gfm) &inline_break_gfm else &inline_break_cm;
+    const fallback = if (opts.gfm)
+        (if (opts.math) &inline_break_gfm_math else &inline_break_gfm)
+    else
+        (if (opts.math) &inline_break_cm_math else &inline_break_cm);
     var i = pos;
     // SIMD path: only when vlen > 1; vlen == 1 means no vector support (e.g. WASM).
     if (comptime vlen > 1) {
@@ -743,7 +765,8 @@ fn indexOfBreakChar(input: []const u8, pos: usize, gfm: bool) usize {
             var hits = (blk == s_star) | (blk == s_under) | (blk == s_tilde) |
                 (blk == s_lbrack) | (blk == s_bang) | (blk == s_btick) |
                 (blk == s_lt) | (blk == s_bslash) | (blk == s_nl);
-            if (gfm) hits = hits | (blk == @as(Vec, @splat('@')));
+            if (opts.gfm) hits = hits | (blk == @as(Vec, @splat('@')));
+            if (opts.math) hits = hits | (blk == @as(Vec, @splat('$')));
             if (@reduce(.Or, hits)) return i + std.simd.firstTrue(hits).?;
             i += vlen;
         }
@@ -758,11 +781,11 @@ fn indexOfBreakChar(input: []const u8, pos: usize, gfm: bool) usize {
 /// input such as deeply nested `[[[…](u)](u)` or `![![…](u)](u)`.
 pub const max_inline_nesting_depth: usize = 128;
 
-pub fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap, gfm: bool) !std.ArrayList(AST.Inline) {
-    return parseInlineElementsDepth(allocator, input, ref_map, gfm, 0);
+pub fn parseInlineElements(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap, opts: Options) !std.ArrayList(AST.Inline) {
+    return parseInlineElementsDepth(allocator, input, ref_map, opts, 0);
 }
 
-fn parseInlineElementsDepth(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap, gfm: bool, depth: usize) anyerror!std.ArrayList(AST.Inline) {
+fn parseInlineElementsDepth(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap, opts: Options, depth: usize) anyerror!std.ArrayList(AST.Inline) {
     if (depth > max_inline_nesting_depth) return error.NestingTooDeep;
     var inlines = std.ArrayList(AST.Inline).empty;
     // On any error path, free what we accumulated so pathological input that
@@ -830,7 +853,7 @@ fn parseInlineElementsDepth(allocator: Allocator, input: []const u8, ref_map: ?*
         // Image ![alt](url) or ![alt][ref]
         if (c == '!' and pos + 1 < input.len and input[pos + 1] == '[') {
             if (tryParseLink(input, pos + 1)) |r| {
-                const alt = try flattenInlineText(allocator, r.text, ref_map, gfm, depth);
+                const alt = try flattenInlineText(allocator, r.text, ref_map, opts, depth);
                 try inlines.append(allocator, .{ .image = .{
                     .alt_text = alt,
                     .destination = .{
@@ -843,7 +866,7 @@ fn parseInlineElementsDepth(allocator: Allocator, input: []const u8, ref_map: ?*
                 continue;
             }
             if (ref_map) |rm| {
-                if (tryParseImageRefLink(allocator, input, pos, rm, gfm, depth)) |r| {
+                if (tryParseImageRefLink(allocator, input, pos, rm, opts, depth)) |r| {
                     try inlines.append(allocator, r.inline_node);
                     pos = r.end;
                     continue;
@@ -863,7 +886,7 @@ fn parseInlineElementsDepth(allocator: Allocator, input: []const u8, ref_map: ?*
                 }
             }
             if (tryParseLink(input, pos)) |r| {
-                var nested = try parseInlineElementsDepth(allocator, r.text, ref_map, gfm, depth + 1);
+                var nested = try parseInlineElementsDepth(allocator, r.text, ref_map, opts, depth + 1);
                 if (containsLink(nested.items)) {
                     for (nested.items) |*item| item.deinit(allocator);
                     nested.deinit(allocator);
@@ -882,11 +905,24 @@ fn parseInlineElementsDepth(allocator: Allocator, input: []const u8, ref_map: ?*
                 continue;
             }
             if (ref_map) |rm| {
-                if (tryParseRefLink(allocator, input, pos, rm, gfm, depth)) |r| {
+                if (tryParseRefLink(allocator, input, pos, rm, opts, depth)) |r| {
                     try inlines.append(allocator, r.inline_node);
                     pos = r.end;
                     continue;
                 }
+            }
+        }
+
+        // TeX math: $…$ (inline) / $$…$$ (display) — opt-in.
+        // Backslash escapes (`\$`) run first above, and `$` inside code spans
+        // never reaches here (code spans parse earlier), so a `$` at this
+        // point is a genuine delimiter candidate.  On no match the `$` falls
+        // through to the plain-text path below and stays literal.
+        if (opts.math and c == '$') {
+            if (tryParseMath(input, pos)) |r| {
+                try inlines.append(allocator, .{ .math = .{ .content = r.content, .display = r.display } });
+                pos = r.end;
+                continue;
             }
         }
 
@@ -941,7 +977,7 @@ fn parseInlineElementsDepth(allocator: Allocator, input: []const u8, ref_map: ?*
         }
 
         // GFM email autolink — detect '@' using raw input for full local-part
-        if (gfm and c == '@') {
+        if (opts.gfm and c == '@') {
             var local_start = pos;
             while (local_start > 0 and isEmailLocalChar(input[local_start - 1])) local_start -= 1;
             // Don't fire if local-part starts right after a backslash escape
@@ -977,7 +1013,7 @@ fn parseInlineElementsDepth(allocator: Allocator, input: []const u8, ref_map: ?*
         }
 
         // Plain text — SIMD scan; processes vlen bytes per iteration.
-        const te = indexOfBreakChar(input, pos, gfm);
+        const te = indexOfBreakChar(input, pos, opts);
         if (te > pos) {
             try inlines.append(allocator, .{ .text = .{ .content = input[pos..te] } });
             pos = te;
@@ -1005,7 +1041,7 @@ fn parseInlineElementsDepth(allocator: Allocator, input: []const u8, ref_map: ?*
         }
     }
 
-    if (gfm) try expandGfmAutolinks(allocator, &inlines);
+    if (opts.gfm) try expandGfmAutolinks(allocator, &inlines);
     try processEmphasis(allocator, &inlines, &delimiters);
     return inlines;
 }
@@ -1308,8 +1344,58 @@ fn tryParseCodeSpan(allocator: Allocator, input: []const u8, pos: usize) ?struct
     return null;
 }
 
-fn flattenInlineText(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap, gfm: bool, depth: usize) anyerror![]const u8 {
-    var inlines = try parseInlineElementsDepth(allocator, input, ref_map, gfm, depth + 1);
+/// Try to parse a math span starting at `pos` (which points to the first `$`).
+///
+/// Delimiter rules (Pandoc / KaTeX auto-render parity):
+///   * `$$…$$` is display math; the closer is the next unescaped `$$`.
+///   * `$…$` is inline math; the opener `$` must not be followed by
+///     whitespace, and the closer `$` must not be preceded by whitespace and
+///     must not be followed by an ASCII digit (so `$5 and $6` stays text).
+///   * `\$` never opens or closes math (escapes are consumed earlier in the
+///     inline loop; inside a span a backslash consumes the next byte).
+///
+/// Returns null when no valid closer exists — the caller leaves the `$`
+/// as literal text.
+fn tryParseMath(input: []const u8, pos: usize) ?struct { content: []const u8, display: bool, end: usize } {
+    if (pos + 1 < input.len and input[pos + 1] == '$') {
+        // Display math: $$…$$ (content may span soft breaks within the block,
+        // but never a blank line — inline sources contain no blank lines).
+        var se = pos + 2;
+        while (se + 1 < input.len) {
+            if (input[se] == '\\') {
+                se += 2;
+                continue;
+            }
+            if (input[se] == '$' and input[se + 1] == '$')
+                return .{ .content = input[pos + 2 .. se], .display = true, .end = se + 2 };
+            se += 1;
+        }
+        return null;
+    }
+    // Inline math: $…$
+    if (pos + 1 >= input.len) return null;
+    const first = input[pos + 1];
+    if (first == ' ' or first == '\t' or first == '\n') return null;
+    var se = pos + 1;
+    while (se < input.len) {
+        if (input[se] == '\\') {
+            se += 2;
+            continue;
+        }
+        if (input[se] == '$') {
+            const prev = input[se - 1];
+            const prev_ws = prev == ' ' or prev == '\t' or prev == '\n';
+            const next_digit = se + 1 < input.len and input[se + 1] >= '0' and input[se + 1] <= '9';
+            if (!prev_ws and !next_digit)
+                return .{ .content = input[pos + 1 .. se], .display = false, .end = se + 1 };
+        }
+        se += 1;
+    }
+    return null;
+}
+
+fn flattenInlineText(allocator: Allocator, input: []const u8, ref_map: ?*const RefMap, opts: Options, depth: usize) anyerror![]const u8 {
+    var inlines = try parseInlineElementsDepth(allocator, input, ref_map, opts, depth + 1);
     defer {
         for (inlines.items) |*item| item.deinit(allocator);
         inlines.deinit(allocator);
@@ -1333,6 +1419,7 @@ fn flattenInline(allocator: Allocator, buf: *std.ArrayList(u8), item: AST.Inline
             for (l.children.items) |child| try flattenInline(allocator, buf, child);
         },
         .image => |img| try buf.appendSlice(allocator, img.alt_text),
+        .math => |m| try buf.appendSlice(allocator, m.content),
         .soft_break => try buf.appendSlice(allocator, "\n"),
         .strikethrough => |s| {
             for (s.children.items) |child| try flattenInline(allocator, buf, child);
@@ -1435,7 +1522,7 @@ pub fn tryParseHtmlTag(input: []const u8, pos: usize) ?usize {
 
 const InlineParseResult = struct { inline_node: AST.Inline, end: usize };
 
-fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap, gfm: bool, depth: usize) ?InlineParseResult {
+fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap, opts: Options, depth: usize) ?InlineParseResult {
     if (start >= input.len or input[start] != '!' or start + 1 >= input.len or input[start + 1] != '[') return null;
     const be = findClosingBracket(input, start + 2) orelse return null;
     const raw_alt = input[start + 2 .. be];
@@ -1445,7 +1532,7 @@ fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, r
         // Collapsed: ![alt][]
         if (be + 2 < input.len and input[be + 2] == ']') {
             if (resolveRef(allocator, rm, raw_alt)) |ref| {
-                const flat = flattenInlineText(allocator, raw_alt, rm, gfm, depth) catch return null;
+                const flat = flattenInlineText(allocator, raw_alt, rm, opts, depth) catch return null;
                 return .{ .inline_node = .{ .image = .{ .alt_text = flat, .destination = .{ .url = ref.url, .title = ref.title }, .link_type = .collapsed } }, .end = be + 3 };
             }
         } else {
@@ -1453,7 +1540,7 @@ fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, r
             while (le < input.len and input[le] != ']') le += 1;
             if (le < input.len) {
                 if (resolveRef(allocator, rm, input[be + 2 .. le])) |ref| {
-                    const flat = flattenInlineText(allocator, raw_alt, rm, gfm, depth) catch return null;
+                    const flat = flattenInlineText(allocator, raw_alt, rm, opts, depth) catch return null;
                     return .{ .inline_node = .{ .image = .{ .alt_text = flat, .destination = .{ .url = ref.url, .title = ref.title }, .link_type = .reference } }, .end = le + 1 };
                 }
             }
@@ -1461,13 +1548,13 @@ fn tryParseImageRefLink(allocator: Allocator, input: []const u8, start: usize, r
     }
     // Shortcut: ![alt]
     if (resolveRef(allocator, rm, raw_alt)) |ref| {
-        const flat = flattenInlineText(allocator, raw_alt, rm, gfm, depth) catch return null;
+        const flat = flattenInlineText(allocator, raw_alt, rm, opts, depth) catch return null;
         return .{ .inline_node = .{ .image = .{ .alt_text = flat, .destination = .{ .url = ref.url, .title = ref.title }, .link_type = .shortcut } }, .end = be + 1 };
     }
     return null;
 }
 
-fn tryParseRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap, gfm: bool, depth: usize) ?InlineParseResult {
+fn tryParseRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *const RefMap, opts: Options, depth: usize) ?InlineParseResult {
     if (start >= input.len or input[start] != '[') return null;
     const be = findClosingBracket(input, start + 1) orelse return null;
     const link_text = input[start + 1 .. be];
@@ -1478,21 +1565,21 @@ fn tryParseRefLink(allocator: Allocator, input: []const u8, start: usize, rm: *c
         // Collapsed: [text][]
         if (be + 2 < input.len and input[be + 2] == ']') {
             if (resolveRef(allocator, rm, link_text)) |ref|
-                return buildRefLink(allocator, link_text, ref, .collapsed, be + 3, rm, gfm, depth);
+                return buildRefLink(allocator, link_text, ref, .collapsed, be + 3, rm, opts, depth);
         } else {
             // Full: [text][label]
             var le: usize = be + 2;
             while (le < input.len and input[le] != ']') le += 1;
             if (le < input.len) {
                 if (resolveRef(allocator, rm, input[be + 2 .. le])) |ref|
-                    return buildRefLink(allocator, link_text, ref, .reference, le + 1, rm, gfm, depth);
+                    return buildRefLink(allocator, link_text, ref, .reference, le + 1, rm, opts, depth);
             }
         }
     }
     // Shortcut: [text]
     if (!tried_full) {
         if (resolveRef(allocator, rm, link_text)) |ref|
-            return buildRefLink(allocator, link_text, ref, .shortcut, be + 1, rm, gfm, depth);
+            return buildRefLink(allocator, link_text, ref, .shortcut, be + 1, rm, opts, depth);
     }
     return null;
 }
@@ -1504,11 +1591,11 @@ fn buildRefLink(
     link_type: AST.LinkType,
     end: usize,
     rm: ?*const RefMap,
-    gfm: bool,
+    opts: Options,
     depth: usize,
 ) ?InlineParseResult {
     var link = AST.Link.init(allocator, .{ .url = ref.url, .title = ref.title }, link_type);
-    var nested = parseInlineElementsDepth(allocator, text, rm, gfm, depth + 1) catch return null;
+    var nested = parseInlineElementsDepth(allocator, text, rm, opts, depth + 1) catch return null;
     if (containsLink(nested.items)) {
         // Can't nest links — free the ref-owned url/title and nested inlines.
         for (nested.items) |*item| item.deinit(allocator);

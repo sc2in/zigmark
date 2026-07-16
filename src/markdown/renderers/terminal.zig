@@ -367,6 +367,13 @@ fn renderInline(w: anytype, inl: AST.Inline, allocator: Allocator) !void {
             try w.writeAll(hi.content);
             try w.writeAll(RESET);
         },
+        .math => |m| {
+            // No TeX rendering in a terminal — show the source with delimiters.
+            const delim: []const u8 = if (m.display) "$$" else "$";
+            try w.writeAll(delim);
+            try w.writeAll(m.content);
+            try w.writeAll(delim);
+        },
     }
 }
 

@@ -224,6 +224,106 @@ test "image" {
     try tst.expectEqualStrings("alt text", para.children.items[0].image.alt_text);
 }
 
+test "math opt-in: inline and display nodes" {
+    const alloc = tst.allocator;
+    var p = Parser.init();
+    p.math = true;
+    {
+        var doc = try p.parseMarkdown(alloc, "$E=mc^2$\n");
+        defer doc.deinit(alloc);
+        const para = doc.children.items[0].paragraph;
+        try tst.expect(para.children.items[0] == .math);
+        try tst.expectEqualStrings("E=mc^2", para.children.items[0].math.content);
+        try tst.expect(!para.children.items[0].math.display);
+    }
+    {
+        var doc = try p.parseMarkdown(alloc, "$$\\sum_{i=0}^n i$$\n");
+        defer doc.deinit(alloc);
+        const para = doc.children.items[0].paragraph;
+        try tst.expect(para.children.items[0] == .math);
+        try tst.expectEqualStrings("\\sum_{i=0}^n i", para.children.items[0].math.content);
+        try tst.expect(para.children.items[0].math.display);
+    }
+}
+
+test "math disabled by default: dollars stay text" {
+    const alloc = tst.allocator;
+    var p = Parser.init();
+    var doc = try p.parseMarkdown(alloc, "$E=mc^2$ and $$x$$\n");
+    defer doc.deinit(alloc);
+    for (doc.children.items[0].paragraph.children.items) |item| try tst.expect(item != .math);
+}
+
+test "math delimiter rules reject non-math dollars" {
+    const alloc = tst.allocator;
+    var p = Parser.init();
+    p.math = true;
+    // Opener followed by space; currency; escaped; unterminated; in code span.
+    const cases = [_][]const u8{ "a $ b\n", "$5 and $6\n", "\\$not math\\$\n", "$x\n", "`$x$` code\n" };
+    for (cases) |src| {
+        var doc = try p.parseMarkdown(alloc, src);
+        defer doc.deinit(alloc);
+        for (doc.children.items[0].paragraph.children.items) |item| try tst.expect(item != .math);
+    }
+}
+
+test "display math spans soft-wrapped lines but not blank lines" {
+    const alloc = tst.allocator;
+    var p = Parser.init();
+    p.math = true;
+    {
+        var doc = try p.parseMarkdown(alloc, "$$a +\nb$$\n");
+        defer doc.deinit(alloc);
+        const para = doc.children.items[0].paragraph;
+        try tst.expect(para.children.items[0] == .math);
+        try tst.expectEqualStrings("a +\nb", para.children.items[0].math.content);
+    }
+    {
+        var doc = try p.parseMarkdown(alloc, "$$a\n\nb$$\n");
+        defer doc.deinit(alloc);
+        for (doc.children.items) |block| {
+            for (block.paragraph.children.items) |item| try tst.expect(item != .math);
+        }
+    }
+}
+
+test "math propagates into list items and blockquotes" {
+    const alloc = tst.allocator;
+    var p = Parser.init();
+    p.math = true;
+    {
+        var doc = try p.parseMarkdown(alloc, "- item $x$\n");
+        defer doc.deinit(alloc);
+        const para = doc.children.items[0].list.items.items[0].children.items[0].paragraph;
+        var found = false;
+        for (para.children.items) |item| {
+            if (item == .math) found = true;
+        }
+        try tst.expect(found);
+    }
+    {
+        var doc = try p.parseMarkdown(alloc, "> quote $y$\n");
+        defer doc.deinit(alloc);
+        const para = doc.children.items[0].blockquote.children.items[0].paragraph;
+        var found = false;
+        for (para.children.items) |item| {
+            if (item == .math) found = true;
+        }
+        try tst.expect(found);
+    }
+}
+
+test "math in table cell" {
+    const alloc = tst.allocator;
+    var p = Parser.init();
+    p.math = true;
+    var doc = try p.parseMarkdown(alloc, "| $x$ |\n| --- |\n| $y$ |\n");
+    defer doc.deinit(alloc);
+    const tbl = doc.children.items[0].table;
+    try tst.expect(tbl.header.cells.items[0].children.items[0] == .math);
+    try tst.expect(tbl.body.items[0].cells.items[0].children.items[0] == .math);
+}
+
 test "CommonMark spec compliance" {
     const root = @import("../root.zig");
     const allocator = std.testing.allocator;

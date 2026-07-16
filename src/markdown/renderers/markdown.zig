@@ -161,6 +161,14 @@ fn renderInline(writer: anytype, item: AST.Inline) !void {
         },
 
         .html_in_line => |hi| try writer.writeAll(hi.content),
+
+        .math => |m| {
+            // Round-trip the original delimiters and TeX source verbatim.
+            const delim: []const u8 = if (m.display) "$$" else "$";
+            try writer.writeAll(delim);
+            try writer.writeAll(m.content);
+            try writer.writeAll(delim);
+        },
     }
 }
 
@@ -480,6 +488,22 @@ fn expectMd(input: []const u8, expected: []const u8) !void {
     const out = try roundtrip(alloc, input);
     defer alloc.free(out);
     try tst.expectEqualStrings(expected, out);
+}
+
+fn expectMdMath(input: []const u8, expected: []const u8) !void {
+    const alloc = tst.allocator;
+    var parser = Parser.init();
+    parser.math = true;
+    defer parser.deinit(alloc);
+    var doc = try parser.parseMarkdown(alloc, input);
+    defer doc.deinit(alloc);
+    const out = try render(alloc, doc);
+    defer alloc.free(out);
+    try tst.expectEqualStrings(expected, out);
+}
+
+test "math round-trips verbatim" {
+    try expectMdMath("Inline $a+b$ and $$\\frac{a}{b}$$", "Inline $a+b$ and $$\\frac{a}{b}$$\n");
 }
 
 test "atx heading round-trip" {
