@@ -374,6 +374,12 @@ fn renderInline(w: anytype, inl: AST.Inline, depth: usize, allocator: Allocator)
             try writeQuoted(w, cs.content);
             try w.writeByte('\n');
         },
+        .math => |m| {
+            try writeIndent(w, depth);
+            try w.writeAll(if (m.display) "$$ " else "$ ");
+            try writeQuoted(w, m.content);
+            try w.writeByte('\n');
+        },
         .link => |lnk| {
             try writeIndent(w, depth);
             try w.writeAll("L(");

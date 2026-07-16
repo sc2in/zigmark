@@ -333,6 +333,36 @@ const full = try zigmark.typst.renderDocument(allocator, doc, opts);
 defer allocator.free(full);
 ```
 
+### TeX Math (opt-in)
+
+Enable `$…$` (inline) and `$$…$$` (display) math with `Parser{ .math = true }`
+(off by default — `$` stays plain text otherwise). Delimiter rules follow
+Pandoc / KaTeX auto-render: the opener `$` must not be followed by whitespace,
+the closer must not be preceded by whitespace nor followed by a digit
+(`$5 and $6` stays text), and `\$` or code spans never open math.
+
+The Typst renderer emits `#mi("…")` / `#mitex("…")` for the
+[mitex](https://typst.app/universe/package/mitex) package but does **not**
+emit the import — add it to your preamble when the document needs it:
+
+```zig
+var parser = zigmark.Parser{ .math = true };
+var doc = try parser.parseMarkdown(allocator, "Euler: $e^{i\\pi}+1=0$");
+defer doc.deinit(allocator);
+
+if (zigmark.docHasMath(&doc)) {
+    // Prepend to your Typst preamble:
+    // #import "@preview/mitex:0.2.5": mi, mitex
+}
+const markup = try zigmark.TypstRenderer.render(allocator, doc);
+defer allocator.free(markup);
+// => Euler: #mi("e^{i\\pi}+1=0")
+```
+
+The HTML renderer keeps the original delimiters (HTML-escaped) so client-side
+KaTeX/MathJax continues to work; the Markdown renderer round-trips math
+verbatim.
+
 ### AST Query System
 
 Navigate the parsed document with jQuery-like selectors:

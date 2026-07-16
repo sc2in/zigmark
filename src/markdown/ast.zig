@@ -309,6 +309,7 @@ pub const Inline = union(enum) {
     hard_break: HardBreak,
     soft_break: SoftBreak,
     html_in_line: HtmlInline,
+    math: Math,
 
     /// Recursively free this inline and any children it owns.
     pub fn deinit(self: *Inline, allocator: std.mem.Allocator) void {
@@ -823,6 +824,23 @@ pub const HtmlInline = struct {
     /// Wrap raw inline HTML `content` in a node.
     pub fn init(content: []const u8) HtmlInline {
         return HtmlInline{ .content = content };
+    }
+};
+
+/// Inline or display TeX math (opt-in extension; see `Parser.math`).
+///
+/// Produced from `$…$` (inline) and `$$…$$` (display) delimiters when the
+/// parser's `math` option is enabled.  `content` is the raw TeX source
+/// between the delimiters — a borrowed slice of the block's inline source
+/// (like `Text`), so no per-node allocation is owned here.
+pub const Math = struct {
+    content: []const u8,
+    /// True for display math (`$$…$$`), false for inline math (`$…$`).
+    display: bool,
+
+    /// Wrap a TeX source slice in a math node.
+    pub fn init(content: []const u8, display: bool) Math {
+        return Math{ .content = content, .display = display };
     }
 };
 

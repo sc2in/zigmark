@@ -67,6 +67,13 @@ pub const TypstRenderer = Renderer.create(typst_mod);
 /// the Eisvogel-inspired preamble with title page, header/footer, etc.
 pub const typst = typst_mod;
 
+/// True if `doc` contains any math inline (`AST.Math`).  Math nodes are only
+/// produced when parsing with `Parser{ .math = true }`.  The Typst renderer
+/// emits math as `#mi(…)` / `#mitex(…)` but never emits the mitex `#import`
+/// itself — consumers use this to decide whether their preamble needs
+/// `#import "@preview/mitex:0.2.5": mi, mitex` (or equivalent).
+pub const docHasMath = typst_mod.docHasMath;
+
 /// Function pointer type for an optional mermaid diagram renderer.
 /// Pass a function matching this signature to `renderHtmlWithMermaid`,
 /// `renderTypstWithMermaid`, or `renderTypstDocWithMermaid` to have mermaid

@@ -8,6 +8,38 @@ same stability guarantee.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-07-16
+
+### Added
+
+- **Opt-in TeX math** (`Parser{ .math = true }`; off by default). `$…$` parses
+  to an inline `AST.Math` node and `$$…$$` to a display one, with
+  Pandoc/KaTeX-auto-render delimiter rules: the opener `$` must not be
+  followed by whitespace, the closer must not be preceded by whitespace nor
+  followed by an ASCII digit (so `$5 and $6` stays text), `\$` never opens
+  math, `$` inside code spans is untouched, and an unmatched `$` falls back to
+  literal text. With the flag off (the default), output is byte-identical to
+  0.8.0 and CommonMark/GFM conformance is unchanged (652/652 + 24/24).
+- **Math rendering across all renderers.** Typst emits `#mi("…")` /
+  `#mitex("…")` with the TeX source in an injection-safe string literal;
+  zigmark never emits the mitex `#import` — consumers add it to their own
+  preamble, using the new `docHasMath(&doc)` helper (exported from the root
+  module and `typst`) to decide. HTML preserves the original `$…$` / `$$…$$`
+  delimiters (HTML-escaped) so client-side KaTeX/MathJax keeps working; the
+  Markdown renderer round-trips math verbatim; terminal/AI/AST renderers show
+  the TeX source.
+- **Markdown image alt text now maps to Typst `image(alt:)`** (both the
+  `#figure(image(…))` and bare `#image(…)` forms), string-literal-escaped, and
+  omitted when empty. Typst embeds it as the PDF alt text, which PDF/UA
+  validation requires for images. Caption selection (title, else alt) is
+  unchanged — the alt parameter is additive.
+
+### Changed
+
+- `inline.parseInlineElements` now takes an `Options` struct
+  (`.{ .gfm, .math }`) instead of a bare `gfm: bool` (API break for direct
+  callers of the inline parser; `Parser` usage is unaffected).
+
 ## [0.8.0] — 2026-07-13
 
 Production security & quality hardening for public release. The HTML and Typst

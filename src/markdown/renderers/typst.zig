@@ -125,6 +125,17 @@ fn writeStringLiteral(writer: anytype, s: []const u8) !void {
     }
 }
 
+/// Write the `alt:` argument for a Typst `image(…)` call when the Markdown
+/// alt text is non-empty (Typst embeds it as the PDF alt text for
+/// accessibility / PDF-UA).  Emitted via `writeStringLiteral` so the value
+/// cannot escape the string literal.
+fn writeImageAlt(writer: anytype, alt_text: []const u8) !void {
+    if (alt_text.len == 0) return;
+    try writer.writeAll(", alt: \"");
+    try writeStringLiteral(writer, alt_text);
+    try writer.writeByte('"');
+}
+
 // ── Preamble field validation (Typst code-injection guards) ───────────────────
 //
 // Frontmatter-derived option fields flow into the Typst preamble. Typst runs at
@@ -213,6 +224,20 @@ fn renderInline(writer: *std.Io.Writer, item: AST.Inline, ctx: *const Ctx) anyer
             try writer.writeAll("\")");
         },
 
+        .math => |m| {
+            // TeX math rendered via mitex (https://typst.app/universe/package/mitex):
+            // `#mi(…)` for inline math, `#mitex(…)` for display math.  The TeX
+            // source goes inside a Typst string literal (same injection-safe
+            // pattern as `raw()` above), so `"`/`\` cannot escape into markup —
+            // Typst unescapes `\\` back to `\` before mitex sees the TeX.
+            // zigmark does not emit the `#import "@preview/mitex..."` line;
+            // the consumer's preamble must provide `mi`/`mitex` (use
+            // `docHasMath` to decide whether the import is needed).
+            try writer.writeAll(if (m.display) "#mitex(\"" else "#mi(\"");
+            try writeStringLiteral(writer, m.content);
+            try writer.writeAll("\")");
+        },
+
         .emphasis => |e| {
             try writer.writeByte('_');
             for (e.children.items) |child| try renderInline(writer, child, ctx);
@@ -247,7 +272,9 @@ fn renderInline(writer: *std.Io.Writer, item: AST.Inline, ctx: *const Ctx) anyer
             if (has_caption) {
                 try writer.writeAll("#figure(image(\"");
                 try writeStringLiteral(writer, img.destination.url);
-                try writer.writeAll("\"), caption: [");
+                try writer.writeByte('"');
+                try writeImageAlt(writer, img.alt_text);
+                try writer.writeAll("), caption: [");
                 if (img.destination.title) |t| {
                     try writeEscaped(writer, t);
                 } else {
@@ -257,7 +284,9 @@ fn renderInline(writer: *std.Io.Writer, item: AST.Inline, ctx: *const Ctx) anyer
             } else {
                 try writer.writeAll("#image(\"");
                 try writeStringLiteral(writer, img.destination.url);
-                try writer.writeAll("\")");
+                try writer.writeByte('"');
+                try writeImageAlt(writer, img.alt_text);
+                try writer.writeByte(')');
             }
         },
 
@@ -785,6 +814,60 @@ fn collectFootnotes(doc: AST.Document, ctx: *Ctx) !void {
     }
 }
 
+// ── Math detection ────────────────────────────────────────────────────────────
+
+/// True if `doc` contains any math inline (`AST.Math`) anywhere in the tree.
+///
+/// zigmark emits math as `#mi(…)` / `#mitex(…)` calls but never emits the
+/// mitex `#import` itself; consumers that supply their own preamble use this
+/// to decide whether to add
+/// `#import "@preview/mitex:0.2.5": mi, mitex` (or equivalent).
+pub fn docHasMath(doc: *const AST.Document) bool {
+    return blocksHaveMath(doc.children.items);
+}
+
+fn blocksHaveMath(blocks: []const AST.Block) bool {
+    for (blocks) |*block| {
+        const found = switch (block.*) {
+            .paragraph => |*p| inlinesHaveMath(p.children.items),
+            .heading => |*h| inlinesHaveMath(h.children.items),
+            .blockquote => |*bq| blocksHaveMath(bq.children.items),
+            .footnote_definition => |*fd| blocksHaveMath(fd.children.items),
+            .list => |*lst| for (lst.items.items) |*item| {
+                if (blocksHaveMath(item.children.items)) break true;
+            } else false,
+            .table => |*tbl| tableHasMath(tbl),
+            .code_block, .fenced_code_block, .thematic_break, .html_block => false,
+        };
+        if (found) return true;
+    }
+    return false;
+}
+
+fn tableHasMath(tbl: *const AST.Table) bool {
+    for (tbl.header.cells.items) |*cell|
+        if (inlinesHaveMath(cell.children.items)) return true;
+    for (tbl.body.items) |*row|
+        for (row.cells.items) |*cell|
+            if (inlinesHaveMath(cell.children.items)) return true;
+    return false;
+}
+
+fn inlinesHaveMath(items: []const AST.Inline) bool {
+    for (items) |*item| {
+        const found = switch (item.*) {
+            .math => true,
+            .emphasis => |*e| inlinesHaveMath(e.children.items),
+            .strong => |*s| inlinesHaveMath(s.children.items),
+            .strikethrough => |*s| inlinesHaveMath(s.children.items),
+            .link => |*l| inlinesHaveMath(l.children.items),
+            else => false,
+        };
+        if (found) return true;
+    }
+    return false;
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Render `doc` to an allocator-owned Typst byte slice (body only; no preamble).
@@ -1094,6 +1177,139 @@ test "non-mermaid lang unaffected by mermaid renderer" {
         "```zig\nconst x = 1;\n```",
         stubSvg,
         "#raw(block: true, lang: \"zig\", \"const x = 1;\")\n\n",
+    );
+}
+
+// ── Math tests (opt-in `$…$` / `$$…$$` via mitex) ─────────────────────────────
+
+fn okMath(src: []const u8, expected: []const u8) !void {
+    const allocator = tst.allocator;
+    var parser = Parser.init();
+    parser.math = true;
+    defer parser.deinit(allocator);
+    var res = try parser.parseMarkdown(allocator, src);
+    defer res.deinit(allocator);
+    const out = try render(allocator, res);
+    defer allocator.free(out);
+    try tst.expectEqualStrings(expected, out);
+}
+
+test "inline math emits #mi" {
+    try okMath("$E=mc^2$", "#mi(\"E=mc^2\")\n\n");
+}
+
+test "display math emits #mitex" {
+    // LaTeX backslashes become `\\` inside the Typst string literal;
+    // Typst unescapes them back to `\` before mitex sees the TeX.
+    try okMath("$$\\sum_{i=0}^n i$$", "#mitex(\"\\\\sum_{i=0}^n i\")\n\n");
+}
+
+test "inline and display math mixed with text" {
+    try okMath(
+        "Inline $a+b$ and display: $$\\frac{a}{b}$$",
+        "Inline #mi(\"a+b\") and display: #mitex(\"\\\\frac{a}{b}\")\n\n",
+    );
+}
+
+test "math opener followed by whitespace stays literal" {
+    try okMath("a $ b", "a \\$ b\n\n");
+}
+
+test "currency dollars stay literal" {
+    try okMath("$5 and $6", "\\$5 and \\$6\n\n");
+}
+
+test "escaped dollars never open math" {
+    try okMath("\\$not math\\$", "\\$not math\\$\n\n");
+}
+
+test "dollar inside code span stays literal" {
+    try okMath("`$x$`", "#raw(\"$x$\")\n\n");
+}
+
+test "unterminated math stays literal" {
+    try okMath("$x", "\\$x\n\n");
+}
+
+test "math in heading" {
+    try okMath("# Euler $e^{i\\pi}$", "= Euler #mi(\"e^{i\\\\pi}\")\n");
+}
+
+test "math in table cell" {
+    try okMath(
+        "| $x^2$ |\n| --- |\n| $y$ |",
+        "#table(\n" ++
+            "  columns: 1,\n" ++
+            "  align: (auto),\n" ++
+            "  stroke: rgb(\"#999999\"),\n" ++
+            "  table.header(\n" ++
+            "    [*#mi(\"x^2\")*],\n" ++
+            "  ),\n" ++
+            "  [#mi(\"y\")],\n" ++
+            ")\n\n",
+    );
+}
+
+test "math content cannot break out of the Typst string literal" {
+    // A quote in the TeX source must stay inside the string literal — the
+    // same injection guard as the code-span/raw() tests above.
+    try okMath(
+        "$\") #read(\"/etc/passwd\") #(\"$",
+        "#mi(\"\\\") #read(\\\"/etc/passwd\\\") #(\\\"\")\n\n",
+    );
+}
+
+test "math off by default keeps dollars as text" {
+    try ok("$E=mc^2$", "\\$E=mc^2\\$\n\n");
+}
+
+test "docHasMath detects math anywhere in the tree" {
+    const allocator = tst.allocator;
+    var parser = Parser.init();
+    parser.math = true;
+    defer parser.deinit(allocator);
+
+    var in_list = try parser.parseMarkdown(allocator, "- item with $x$\n");
+    defer in_list.deinit(allocator);
+    try tst.expect(docHasMath(&in_list));
+
+    var in_quote = try parser.parseMarkdown(allocator, "> quoted $y$\n");
+    defer in_quote.deinit(allocator);
+    try tst.expect(docHasMath(&in_quote));
+
+    var none = try parser.parseMarkdown(allocator, "plain $ text and `$x$`\n");
+    defer none.deinit(allocator);
+    try tst.expect(!docHasMath(&none));
+}
+
+// ── Image alt tests (`image(alt:)` for accessibility / PDF-UA) ───────────────
+
+test "image alt maps to image(alt:) in the figure branch" {
+    try ok(
+        "![a chart](img.png)",
+        "#figure(image(\"img.png\", alt: \"a chart\"), caption: [a chart])\n\n",
+    );
+}
+
+test "image title becomes caption while alt is preserved" {
+    try ok(
+        "![alt text](img.png \"The Title\")",
+        "#figure(image(\"img.png\", alt: \"alt text\"), caption: [The Title])\n\n",
+    );
+}
+
+test "empty alt omits the alt param (bare image branch)" {
+    try ok("![](img.png)", "#image(\"img.png\")\n\n");
+}
+
+test "empty alt with title keeps caption but omits alt" {
+    try ok("![](img.png \"T\")", "#figure(image(\"img.png\"), caption: [T])\n\n");
+}
+
+test "image alt is injection-safe inside the string literal" {
+    try ok(
+        "![a\\\\b\"c](img.png)",
+        "#figure(image(\"img.png\", alt: \"a\\\\b\\\"c\"), caption: [a\\\\b\"c])\n\n",
     );
 }
 

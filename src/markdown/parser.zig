@@ -272,6 +272,10 @@ const Self = @This();
 /// continuation lines which must not form setext headings.
 has_lazy_setext: bool = false,
 gfm: bool = true,
+/// Opt-in TeX math: parse `$…$` (inline) and `$$…$$` (display) into
+/// `AST.Math` nodes.  Off by default — when disabled, `$` is plain text and
+/// output is byte-identical to previous releases.
+math: bool = false,
 /// Maximum block nesting depth before parsing bails with `error.NestingTooDeep`
 /// (DoS guard against stack overflow on deeply nested blockquotes/lists).
 max_nesting_depth: usize = default_max_nesting_depth,
@@ -286,10 +290,15 @@ pub fn init() Self {
 }
 pub fn deinit(_: *Self, _: Allocator) void {}
 
-fn appendInlines(allocator: Allocator, dest: *std.ArrayList(AST.Inline), content: []const u8, ref_map: ?*const RefMap, gfm: bool) !void {
-    var items = try Inline.parseInlineElements(allocator, content, ref_map, gfm);
+fn appendInlines(allocator: Allocator, dest: *std.ArrayList(AST.Inline), content: []const u8, ref_map: ?*const RefMap, opts: Inline.Options) !void {
+    var items = try Inline.parseInlineElements(allocator, content, ref_map, opts);
     defer items.deinit(allocator);
     for (items.items) |item| try dest.append(allocator, item);
+}
+
+/// The inline-parsing options implied by this parser's flags.
+fn inlineOpts(self: Self) Inline.Options {
+    return .{ .gfm = self.gfm, .math = self.math };
 }
 
 pub fn parseMarkdown(self: Self, allocator: Allocator, input: []const u8) !AST.Document {
@@ -722,6 +731,7 @@ fn parseList(
 
         if (trimLine(effective_content).len > 0) {
             var inner = init();
+            inner.math = parent.math;
             inner.max_nesting_depth = parent.max_nesting_depth;
             inner.depth = parent.depth + 1;
             var inner_doc = try inner.parseMarkdownWithRefs(allocator, effective_content, ref_map);
@@ -979,7 +989,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
             var heading = AST.Heading.init(allocator, h.level);
             const owned_content = try allocator.dupe(u8, h.content);
             heading.inline_source = owned_content;
-            appendInlines(allocator, &heading.children, owned_content, ref_map, self.gfm) catch |err| {
+            appendInlines(allocator, &heading.children, owned_content, ref_map, self.inlineOpts()) catch |err| {
                 heading.deinit(allocator);
                 return err;
             };
@@ -1105,6 +1115,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
             defer allocator.free(bq_str);
             var inner = init();
             inner.has_lazy_setext = has_lazy_setext_line;
+            inner.math = self.math;
             inner.max_nesting_depth = self.max_nesting_depth;
             inner.depth = self.depth + 1;
             var inner_doc = try inner.parseMarkdownWithRefs(allocator, bq_str, ref_map);
@@ -1163,7 +1174,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
             var para = AST.Paragraph.init(allocator);
             const fn_pc = try allocator.dupe(u8, fd.content);
             para.inline_source = fn_pc;
-            appendInlines(allocator, &para.children, fn_pc, ref_map, self.gfm) catch |err| {
+            appendInlines(allocator, &para.children, fn_pc, ref_map, self.inlineOpts()) catch |err| {
                 para.deinit(allocator);
                 fn_def.deinit(allocator);
                 return err;
@@ -1176,7 +1187,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
 
         // GFM table (header line + delimiter line)
         {
-            if (try tryTableStart(allocator, lines, i, ref_map, self.gfm)) |tres| {
+            if (try tryTableStart(allocator, lines, i, ref_map, self.inlineOpts())) |tres| {
                 try doc.children.append(allocator, .{ .table = tres.table });
                 i = tres.next_line;
                 continue;
@@ -1219,7 +1230,7 @@ fn parseMarkdownWithRefs(self: Self, allocator: Allocator, input: []const u8, re
                 const pc = try allocator.dupe(u8, content);
                 para_buf.deinit(allocator);
                 para.inline_source = pc;
-                appendInlines(allocator, &para.children, pc, ref_map, self.gfm) catch |err| {
+                appendInlines(allocator, &para.children, pc, ref_map, self.inlineOpts()) catch |err| {
                     para.deinit(allocator);
                     return err;
                 };
@@ -1414,7 +1425,7 @@ fn parseTableRow(
     alignments: []const AST.TableAlignment,
     row_line: []const u8,
     table_row: *AST.TableRow,
-    gfm: bool,
+    opts: Inline.Options,
 ) !void {
     const cols = alignments.len;
     const raw_cells = splitTableRow(row_line, cols);
@@ -1423,7 +1434,7 @@ fn parseTableRow(
         var cell = AST.TableCell.init(allocator);
         const dup = try unescapeTablePipes(allocator, cell_src);
         cell.inline_source = dup;
-        try appendInlines(allocator, &cell.children, dup, ref_map, gfm);
+        try appendInlines(allocator, &cell.children, dup, ref_map, opts);
         try table_row.cells.append(allocator, cell);
         if (idx + 1 == cols) break;
     }
@@ -1434,7 +1445,7 @@ fn tryTableStart(
     lines: []const []const u8,
     start: usize,
     ref_map: ?*const RefMap,
-    gfm: bool,
+    opts: Inline.Options,
 ) !?TableParseResult {
     if (start + 1 >= lines.len) return null;
 
@@ -1482,7 +1493,7 @@ fn tryTableStart(
     for (align_buf) |a| try table.alignments.append(allocator, a);
 
     // Header row
-    try parseTableRow(allocator, ref_map, table.alignments.items, header_line, &table.header, gfm);
+    try parseTableRow(allocator, ref_map, table.alignments.items, header_line, &table.header, opts);
 
     // Body rows
     var i = start + 2;
@@ -1493,7 +1504,7 @@ fn tryTableStart(
         if (isStandaloneBlockStart(allocator, raw)) break;
 
         var row = AST.TableRow.init(allocator);
-        try parseTableRow(allocator, ref_map, table.alignments.items, raw, &row, gfm);
+        try parseTableRow(allocator, ref_map, table.alignments.items, raw, &row, opts);
         try table.body.append(allocator, row);
     }
 
