@@ -10,6 +10,15 @@ same stability guarantee.
 
 ## [0.9.0] — 2026-07-16
 
+### Fixed
+
+- **A trailing `# comment` after a plain scalar no longer breaks front-matter
+  parsing.** YAML like `- date: 2025-01-01  # when` inside a block sequence
+  (e.g. a policy revision entry) previously failed the whole document with
+  `ParseFailure`. Fixed upstream in the sc2in/zig-yaml fork (0.3.1, "comment
+  terminates a plain scalar"); this release bumps the pin and adds
+  front-matter regression tests.
+
 ### Added
 
 - **Opt-in TeX math** (`Parser{ .math = true }`; off by default). `$…$` parses

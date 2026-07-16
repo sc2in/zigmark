@@ -978,3 +978,31 @@ test "frontmatter: parseFieldArg errors" {
     try tst.expectError(error.InvalidFieldArg, FrontMatter.parseFieldArg("no-equals-sign"));
     try tst.expectError(error.InvalidFieldArg, FrontMatter.parseFieldArg("=value-no-path"));
 }
+
+test "frontmatter: trailing comment on a block-sequence mapping line" {
+    // Regression: a trailing `# comment` after a plain scalar inside a block
+    // sequence (e.g. a policy revision entry) made the whole front matter
+    // fail with ParseFailure before zig-yaml 0.3.1.
+    const md =
+        "---\n" ++
+        "extra:\n" ++
+        "  major_revisions:\n" ++
+        "    - date: 2025-01-01  # when it happened\n" ++
+        "      version: \"1.0\"\n" ++
+        "---\n" ++
+        "Body.\n";
+    var fm = try FrontMatter.initFromMarkdown(tst.allocator, md);
+    defer fm.deinit();
+    const revs = fm.get("extra.major_revisions") orelse return error.Missing;
+    try tst.expectEqual(@as(usize, 1), revs.array.items.len);
+    const date = revs.array.items[0].object.get("date") orelse return error.Missing;
+    try tst.expectEqualStrings("2025-01-01", date.string);
+}
+
+test "frontmatter: trailing comment keeps top-level scalar intact" {
+    const md = "---\ntitle: My Policy  # a note\n---\nBody.\n";
+    var fm = try FrontMatter.initFromMarkdown(tst.allocator, md);
+    defer fm.deinit();
+    const t = fm.get("title") orelse return error.Missing;
+    try tst.expectEqualStrings("My Policy", t.string);
+}
