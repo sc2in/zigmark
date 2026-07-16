@@ -67,8 +67,8 @@
             .lazy = true,
         },
         .yaml = .{
-            .url = "git+https://github.com/sc2in/zig-yaml#691a2c37f1546fe843f7080fd7bf4450f1facb2e",
-            .hash = "zig_yaml-0.3.0-C1161oSpAgCiEJXrktVkXNSWNQifQ8NWvNB-20PqoFc3",
+            .url = "git+https://github.com/sc2in/zig-yaml#7c60d9cd6ae596c8247ac74b5b8e32c329e7c1d0",
+            .hash = "zig_yaml-0.3.1-C1161s2zAgBOYGjCQB3uWdAadPevfdNiTaffefbhAhBq",
         },
     },
     // Specifies the set of files and directories that are included in this package.
