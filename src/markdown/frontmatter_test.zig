@@ -86,6 +86,7 @@ test "frontmatter: YAML quoted numeric strings stay as strings" {
         \\version: "1"
         \\weight: "42"
         \\tag: "007"
+        \\flag: "true"
     ;
     var fm = try FrontMatter.init(alloc, source, .yaml);
     defer fm.deinit();
@@ -94,6 +95,12 @@ test "frontmatter: YAML quoted numeric strings stay as strings" {
     try tst.expect(version != null);
     try tst.expect(version.? == .string);
     try tst.expectEqualStrings("1", version.?.string);
+
+    // A quoted `"true"` stays a string — quoting overrides bool coercion.
+    const flag = fm.get("flag");
+    try tst.expect(flag != null);
+    try tst.expect(flag.? == .string);
+    try tst.expectEqualStrings("true", flag.?.string);
 
     const weight = fm.get("weight");
     try tst.expect(weight != null);
@@ -107,6 +114,8 @@ test "frontmatter: YAML quoted numeric strings stay as strings" {
 }
 
 test "frontmatter: YAML boolean values" {
+    // Unquoted YAML booleans are typed `.bool`, matching TOML — so a consumer
+    // can switch on the value type portably regardless of front-matter format.
     const alloc = tst.allocator;
     const source =
         \\draft: true
@@ -117,13 +126,38 @@ test "frontmatter: YAML boolean values" {
 
     const draft = fm.get("draft");
     try tst.expect(draft != null);
-    try tst.expect(draft.? == .string);
-    try tst.expectEqualStrings("true", draft.?.string);
+    try tst.expectEqualDeep(std.json.Value{ .bool = true }, draft.?);
 
     const published = fm.get("published");
     try tst.expect(published != null);
-    try tst.expect(published.? == .string);
-    try tst.expectEqualStrings("false", published.?.string);
+    try tst.expectEqualDeep(std.json.Value{ .bool = false }, published.?);
+}
+
+test "frontmatter: YAML null value" {
+    // Unquoted YAML `null` is typed `.null` (YAML 1.2 core schema).
+    const alloc = tst.allocator;
+    const source =
+        \\reviewer: null
+    ;
+    var fm = try FrontMatter.init(alloc, source, .yaml);
+    defer fm.deinit();
+
+    const reviewer = fm.get("reviewer");
+    try tst.expect(reviewer != null);
+    try tst.expect(reviewer.? == .null);
+}
+
+test "frontmatter: YAML and TOML type unquoted booleans identically" {
+    // Same key/value in both formats must yield the same `.bool` tag.
+    const alloc = tst.allocator;
+
+    var y = try FrontMatter.init(alloc, "enabled: true\n", .yaml);
+    defer y.deinit();
+    var t = try FrontMatter.init(alloc, "enabled = true\n", .toml);
+    defer t.deinit();
+
+    try tst.expectEqualDeep(y.get("enabled").?, t.get("enabled").?);
+    try tst.expectEqualDeep(std.json.Value{ .bool = true }, y.get("enabled").?);
 }
 
 test "frontmatter: TOML basic parsing" {

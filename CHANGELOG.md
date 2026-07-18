@@ -8,6 +8,33 @@ same stability guarantee.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-07-18
+
+### Changed
+
+- **Unquoted YAML front-matter scalars are now typed like TOML.** `true`/`false`
+  become `.bool` and `null` becomes `.null` (in addition to the existing
+  int/float coercion), so `Frontmatter.get` returns the same `std.json.Value`
+  tag regardless of whether the source was YAML or TOML. Previously an unquoted
+  YAML boolean came back as `.string` (`"true"`) while the identical TOML value
+  came back as `.bool`, so a consumer could not switch on the value type
+  portably. Quoted scalars still stay `.string`, so `flag: "true"` is unchanged.
+  The typing now flows through the same `inferValue` helper the CLI
+  `--set key=value` path uses (#79).
+
+### Fixed
+
+- **Typst math equations now carry `alt` text.** The renderer emits
+  `#mi("…", alt: "…")` / `#mitex("…", alt: "…")` with the TeX source as the alt
+  argument (mitex forwards `..args` straight to `math.equation`), so a document
+  containing math compiles under Typst's PDF/UA-1 tagged-PDF mode
+  (`typst compile --pdf-standard ua-1`), which hard-fails on any equation
+  without alt text. Consumers no longer need a document-wide
+  `#set math.equation(alt: …)` stopgap, and each equation gets a meaningful
+  per-equation description instead of one generic string. The alt argument is
+  string-literal-escaped with the same guard as the content, so it cannot break
+  out of the literal (#78).
+
 ## [0.9.0] — 2026-07-16
 
 ### Fixed

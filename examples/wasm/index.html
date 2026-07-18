@@ -48,6 +48,7 @@
   .badge { display: inline-block; background: #238636; color: #fff; font-size: 11px; padding: 2px 8px;
            border-radius: 12px; vertical-align: middle; }
   .badge.js { background: #9e6a03; }
+  .badge.version { background: #30363d; color: #c9d1d9; }
   /* Allocator benchmark overlay */
   #bench-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:100; align-items:center; justify-content:center; }
   #bench-overlay.open { display:flex; }
@@ -78,6 +79,7 @@
 <header>
   <h1>zigmark</h1>
   <span class="badge">WASM</span>
+  <span class="badge version" id="version-badge" title="zigmark library version"></span>
   <span class="stats">
     zigmark <b id="zig-time">—</b> ms &nbsp;·&nbsp;
     <span id="js-label">marked.js</span> <b id="js-time">—</b> ms &nbsp;·&nbsp;
@@ -241,6 +243,18 @@ async function initWasm() {
   });
   wasm = instance.exports;
   memory = wasm.memory;
+  showVersion();
+}
+
+// Read the zigmark library version exported by the WASM module and show it
+// in the header badge.
+function showVersion() {
+  const badge = document.getElementById('version-badge');
+  if (!badge || !wasm.version_ptr || !wasm.version_len) return;
+  const ptr = wasm.version_ptr();
+  const len = wasm.version_len();
+  const v = new TextDecoder().decode(new Uint8Array(wasm.memory.buffer, ptr, len));
+  badge.textContent = 'v' + v;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
