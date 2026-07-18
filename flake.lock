@@ -20,27 +20,25 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1780365719,
-        "narHash": "sha256-QfWfccTN+70ZQ4m2qlU9PiKfz2Yppq94058iJyARNwc=",
-        "owner": "NixOS",
-        "repo": "nixpkgs",
-        "rev": "ffa10e26ae11d676b2db836259889f1f571cb14f",
-        "type": "github"
+        "lastModified": 1784356753,
+        "narHash": "sha256-12KrbMiWLcf8m7pCvAtZh1ZrgF85ZXDXvfR/fWTKy84=",
+        "rev": "61b7c44c4073f0b827768aff0049561b5110ea5a",
+        "revCount": 1036777,
+        "type": "tarball",
+        "url": "https://api.flakehub.com/f/pinned/NixOS/nixpkgs/0.1.1036777%2Brev-61b7c44c4073f0b827768aff0049561b5110ea5a/019f755f-4937-7ed1-93d6-e2d5a2d3cca7/source.tar.gz"
       },
       "original": {
-        "owner": "NixOS",
-        "ref": "nixpkgs-unstable",
-        "repo": "nixpkgs",
-        "type": "github"
+        "type": "tarball",
+        "url": "https://flakehub.com/f/NixOS/nixpkgs/0.1.%2A.tar.gz"
       }
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1780540212,
-        "narHash": "sha256-hqlJBt1MTYZ7LSm20DPb5ZVqYp6PGaXDmZWPBOXRF6A=",
+        "lastModified": 1783476344,
+        "narHash": "sha256-+gX8sBedQ3JSvFQ7CIV67+FyB/OlHb9HSoQDl/kM064=",
         "owner": "nixos",
         "repo": "nixpkgs",
-        "rev": "a03c17048bf84b1faaef309607168810bb9acb07",
+        "rev": "e920408605a19fda9b4e96e308b4d3f6592b32f6",
         "type": "github"
       },
       "original": {
@@ -76,16 +74,16 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1780460820,
-        "narHash": "sha256-1VrSHtqG+Mu9i7nerwfNlOSgHT1sCOx/Kx9Y1xeMHQw=",
-        "rev": "aff77c36c42dc84f81c2b48d6ac4a0457099e426",
-        "revCount": 992,
+        "lastModified": 1783395912,
+        "narHash": "sha256-khY1LUzeLm7QETVGsG+hRPkgjrHWSuXTMjKMJ1LcbPg=",
+        "rev": "db4696c32577d9d5213112d10a5762124f4a7fed",
+        "revCount": 1026,
         "type": "tarball",
-        "url": "https://api.flakehub.com/f/pinned/Cloudef/zig2nix/0.1.992%2Brev-aff77c36c42dc84f81c2b48d6ac4a0457099e426/019e90dd-0e0a-7463-97b3-eaa1b86f8c0c/source.tar.gz"
+        "url": "https://api.flakehub.com/f/pinned/Cloudef/zig2nix/0.1.1026%2Brev-db4696c32577d9d5213112d10a5762124f4a7fed/019f3fab-6e97-7521-8429-90a92b6107f3/source.tar.gz"
       },
       "original": {
         "type": "tarball",
-        "url": "https://flakehub.com/f/Cloudef/zig2nix/0.1.990.tar.gz"
+        "url": "https://flakehub.com/f/Cloudef/zig2nix/0.1.%2A.tar.gz"
       }
     }
   },
