@@ -233,7 +233,16 @@ fn renderInline(writer: *std.Io.Writer, item: AST.Inline, ctx: *const Ctx) anyer
             // zigmark does not emit the `#import "@preview/mitex..."` line;
             // the consumer's preamble must provide `mi`/`mitex` (use
             // `docHasMath` to decide whether the import is needed).
+            //
+            // An `alt:` argument carrying the TeX source is emitted on every
+            // equation: mitex forwards `..args` straight to `math.equation`, so
+            // this gives each equation per-equation alt text and lets tagged
+            // PDFs pass Typst's PDF/UA-1 mode (which hard-fails on any
+            // `math.equation` without alt text). It goes through
+            // `writeStringLiteral` too, so `"`/`\` cannot escape the literal.
             try writer.writeAll(if (m.display) "#mitex(\"" else "#mi(\"");
+            try writeStringLiteral(writer, m.content);
+            try writer.writeAll("\", alt: \"");
             try writeStringLiteral(writer, m.content);
             try writer.writeAll("\")");
         },
@@ -1195,19 +1204,21 @@ fn okMath(src: []const u8, expected: []const u8) !void {
 }
 
 test "inline math emits #mi" {
-    try okMath("$E=mc^2$", "#mi(\"E=mc^2\")\n\n");
+    // Each equation carries an `alt:` (the TeX source) so tagged PDFs pass UA-1.
+    try okMath("$E=mc^2$", "#mi(\"E=mc^2\", alt: \"E=mc^2\")\n\n");
 }
 
 test "display math emits #mitex" {
     // LaTeX backslashes become `\\` inside the Typst string literal;
-    // Typst unescapes them back to `\` before mitex sees the TeX.
-    try okMath("$$\\sum_{i=0}^n i$$", "#mitex(\"\\\\sum_{i=0}^n i\")\n\n");
+    // Typst unescapes them back to `\` before mitex sees the TeX. The same
+    // escaping applies to the `alt:` argument.
+    try okMath("$$\\sum_{i=0}^n i$$", "#mitex(\"\\\\sum_{i=0}^n i\", alt: \"\\\\sum_{i=0}^n i\")\n\n");
 }
 
 test "inline and display math mixed with text" {
     try okMath(
         "Inline $a+b$ and display: $$\\frac{a}{b}$$",
-        "Inline #mi(\"a+b\") and display: #mitex(\"\\\\frac{a}{b}\")\n\n",
+        "Inline #mi(\"a+b\", alt: \"a+b\") and display: #mitex(\"\\\\frac{a}{b}\", alt: \"\\\\frac{a}{b}\")\n\n",
     );
 }
 
@@ -1232,7 +1243,7 @@ test "unterminated math stays literal" {
 }
 
 test "math in heading" {
-    try okMath("# Euler $e^{i\\pi}$", "= Euler #mi(\"e^{i\\\\pi}\")\n");
+    try okMath("# Euler $e^{i\\pi}$", "= Euler #mi(\"e^{i\\\\pi}\", alt: \"e^{i\\\\pi}\")\n");
 }
 
 test "math in table cell" {
@@ -1243,19 +1254,20 @@ test "math in table cell" {
             "  align: (auto),\n" ++
             "  stroke: rgb(\"#999999\"),\n" ++
             "  table.header(\n" ++
-            "    [*#mi(\"x^2\")*],\n" ++
+            "    [*#mi(\"x^2\", alt: \"x^2\")*],\n" ++
             "  ),\n" ++
-            "  [#mi(\"y\")],\n" ++
+            "  [#mi(\"y\", alt: \"y\")],\n" ++
             ")\n\n",
     );
 }
 
 test "math content cannot break out of the Typst string literal" {
     // A quote in the TeX source must stay inside the string literal — the
-    // same injection guard as the code-span/raw() tests above.
+    // same injection guard as the code-span/raw() tests above. This holds for
+    // the `alt:` argument too, which is escaped identically.
     try okMath(
         "$\") #read(\"/etc/passwd\") #(\"$",
-        "#mi(\"\\\") #read(\\\"/etc/passwd\\\") #(\\\"\")\n\n",
+        "#mi(\"\\\") #read(\\\"/etc/passwd\\\") #(\\\"\", alt: \"\\\") #read(\\\"/etc/passwd\\\") #(\\\"\")\n\n",
     );
 }
 

@@ -613,8 +613,8 @@ fn mergeJsonValue(alloc: Allocator, base: *std.json.Value, overlay: std.json.Val
 
 /// Recursively convert a `zig-yaml` Tree node into `std.json.Value`,
 /// preserving quoting information: `.string_value` (quoted) nodes always
-/// produce `.string`; `.value` (unquoted) nodes are coerced to int/float
-/// where possible.
+/// produce `.string`; `.value` (unquoted) nodes are typed via `inferValue`
+/// (bool/null/int/float, else string), matching TOML's scalar typing.
 fn treeNodeToJson(allocator: Allocator, tree: Tree, node_index: Tree.Node.Index) !JsonValue {
     switch (tree.nodeTag(node_index)) {
         .doc => {
@@ -687,14 +687,18 @@ fn treeNodeToJson(allocator: Allocator, tree: Tree, node_index: Tree.Node.Index)
             return JsonValue{ .string = raw };
         },
         .value => {
-            // Unquoted scalar — coerce to int, float, or keep as string.
+            // Unquoted scalar — typed via `inferValue` (bool/null/int/float/
+            // string), the same helper the CLI `--set key=value` path uses, so
+            // `fm.get()` returns the same tag regardless of front-matter format
+            // (matching TOML: `true`/`false` → `.bool`, `null` → `.null`).
+            // `inferValue` aliases its input for strings, and `raw` may alias the
+            // yaml/source buffers, so the `.string` case is duped into `allocator`.
             const raw = tree.nodeScope(node_index).rawString(tree);
             if (raw.len == 0) return JsonValue{ .null = {} };
-            return JsonValue{ .integer = std.fmt.parseInt(i64, raw, 10) catch {
-                return JsonValue{ .float = std.fmt.parseFloat(f64, raw) catch {
-                    return JsonValue{ .string = try allocator.dupe(u8, raw) };
-                } };
-            } };
+            return switch (inferValue(raw)) {
+                .string => JsonValue{ .string = try allocator.dupe(u8, raw) },
+                else => |v| v,
+            };
         },
     }
 }
