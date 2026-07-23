@@ -8,6 +8,53 @@ same stability guarantee.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-07-22
+
+### Added
+
+- **Programmatic footnote synthesis** (`zigmark.footnotes`). A new module lets a
+  caller supply footnote definitions on demand through a `Resolver` callback:
+  `resolve(alloc, &doc, resolver, .{})` finds every `[^label]` reference that
+  has no matching definition (walking paragraphs, headings, blockquotes, list
+  items, table cells, and footnote-definition bodies, plus emphasis/strong/
+  strikethrough/link inlines), parses the resolver's Markdown, and appends real
+  `footnote_definition` blocks in first-reference order. Because synthesis
+  happens at the AST level, every renderer benefits with **zero renderer
+  changes** — in particular the Typst back-end expands the now-defined
+  references to native `#footnote[…]`. `resolve` is single-pass;
+  `dangling(alloc, &doc)` returns the deduplicated labels that are still
+  undefined (in first-reference order) so consumers can hard-fail a build. The
+  resolver-returned slice is owned and freed by zigmark (the `MermaidRendererFn`
+  ownership contract). See #82.
+- **`Library.footnoteResolver()`** — a `footnotes.Resolver` that sources
+  definition bodies from the footnote definitions found across a library's
+  documents (first match wins). The intended pattern is to build a glossary
+  document of `[^ID]: …` lines from external data, `add()` it to the library,
+  and pass `lib.footnoteResolver()` to `footnotes.resolve`. Nothing
+  domain-specific lands in zigmark.
+- `renderers/markdown.zig`'s `renderBlock` is now `pub`, so callers can
+  serialise a node's child blocks back to Markdown without wrapping a whole
+  document (used by `footnoteResolver`).
+
+### Changed
+
+- **Footnote-definition labels now accept a much wider charset.** A label may
+  contain any byte except ASCII whitespace (space, tab, CR, LF) and the square
+  brackets `[` / `]`, rather than only `[a-zA-Z0-9]`. This is the intersection
+  of pulldown-cmark (Zola) and cmark-gfm (GitHub), so control-ID-shaped labels
+  such as `IAC-21.5` or `SCF:GOV-01` now parse to the same definition in
+  zigmark, on GitHub, and in Zola. Both parser call sites (footnote definition
+  parsing and paragraph interruption) route through the one combinator, and the
+  reference parser is unchanged (it already accepts a permissive superset).
+  - **Behaviour change:** a whitespace-free line shaped like `[^word]: …` — with
+    a label the old charset rejected (e.g. `[^SCF:GOV-01]: text`) — now parses
+    as a footnote **definition** where previous releases treated it as an
+    ordinary paragraph containing a footnote reference. Lines whose label
+    contains a space (e.g. `[^see note]: x`) still stay paragraphs. The 0.8.0
+    HTML-escaping guarantee for footnote labels extends to (and is tested on)
+    the definition and synthesis paths. CommonMark/GFM spec conformance is
+    unchanged (652/652 + 24/24).
+
 ## [0.10.0] — 2026-07-18
 
 ### Changed

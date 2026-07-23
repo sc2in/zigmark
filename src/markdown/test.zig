@@ -9,6 +9,7 @@ const build_options = @import("config");
 const AST = @import("ast.zig");
 const Parser = @import("parser.zig");
 const parsers = Parser.parsers;
+const html = @import("renderers/html.zig");
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -179,6 +180,66 @@ test "link" {
 
 test "footnote" {
     try ok("[^1]\n[^1]: content\n");
+}
+
+// ── Footnote-definition label charset (0.11.0) ────────────────────────────────
+
+fn expectDefLabel(src: []const u8, label: []const u8) !void {
+    const alloc = tst.allocator;
+    var p = Parser.init();
+    var doc = try p.parseMarkdown(alloc, src);
+    defer doc.deinit(alloc);
+    try tst.expectEqual(@as(usize, 1), doc.children.items.len);
+    try tst.expect(doc.children.items[0] == .footnote_definition);
+    try tst.expectEqualStrings(label, doc.children.items[0].footnote_definition.label);
+}
+
+fn expectStaysParagraph(src: []const u8) !void {
+    const alloc = tst.allocator;
+    var p = Parser.init();
+    var doc = try p.parseMarkdown(alloc, src);
+    defer doc.deinit(alloc);
+    try tst.expect(doc.children.items.len >= 1);
+    for (doc.children.items) |b| try tst.expect(b != .footnote_definition);
+}
+
+test "footnote def label: control-ID charset parses" {
+    // Hyphen, dot, and colon+underscore labels all parse to a definition,
+    // matching pulldown-cmark (Zola) and cmark-gfm (GitHub).
+    try expectDefLabel("[^IAC-01]: control body\n", "IAC-01");
+    try expectDefLabel("[^IAC-21.5]: dotted body\n", "IAC-21.5");
+    try expectDefLabel("[^SCF:GOV_01]: colon and underscore\n", "SCF:GOV_01");
+}
+
+test "footnote def label: whitespace or bracket keeps it prose" {
+    // A space in the label is the boundary that keeps the line a paragraph
+    // (and keeps paragraph interruption conservative).
+    try expectStaysParagraph("[^see note]: not a definition\n");
+    // A `[` cannot appear in a label, so the closing `]` never matches.
+    try expectStaysParagraph("[^fo[o]: not a definition\n");
+}
+
+test "footnote def: hyphenated definition interrupts a paragraph" {
+    const alloc = tst.allocator;
+    var p = Parser.init();
+    var doc = try p.parseMarkdown(alloc, "Some prose\n[^IAC-01]: control body\n");
+    defer doc.deinit(alloc);
+    try tst.expectEqual(@as(usize, 2), doc.children.items.len);
+    try tst.expect(doc.children.items[0] == .paragraph);
+    try tst.expect(doc.children.items[1] == .footnote_definition);
+    try tst.expectEqualStrings("IAC-01", doc.children.items[1].footnote_definition.label);
+}
+
+test "footnote def: HTML ref and def id round-trip on hyphenated label" {
+    const alloc = tst.allocator;
+    var p = Parser.init();
+    var doc = try p.parseMarkdown(alloc, "See [^IAC-01].\n\n[^IAC-01]: control body\n");
+    defer doc.deinit(alloc);
+    const out = try html.render(alloc, doc);
+    defer alloc.free(out);
+    // The reference anchor and the definition div share the same id.
+    try tst.expect(std.mem.indexOf(u8, out, "href=\"#fn:IAC-01\"") != null);
+    try tst.expect(std.mem.indexOf(u8, out, "id=\"fn:IAC-01\"") != null);
 }
 
 test "backslash escape" {

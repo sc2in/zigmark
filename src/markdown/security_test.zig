@@ -81,12 +81,20 @@ test "security: ordinary and relative URLs are untouched" {
 // ── XSS: footnote label injection ─────────────────────────────────────────────
 
 test "security: footnote label is escaped in attribute and text" {
+    // The label carries no internal whitespace, so under the relaxed label
+    // charset (0.11.0) the `[^…]: note` line now parses as a real footnote
+    // *definition* rather than a paragraph.  Both the reference site and the
+    // definition div embed the label; assert neither leaks a raw tag.
     const src = "x[^a\"><img/onerror=alert(1)>]\n\n[^a\"><img/onerror=alert(1)>]: note\n";
     const out = try renderHtml(tst.allocator, src, .{});
     defer tst.allocator.free(out);
     // No unescaped attribute-breaking quote or raw tag from the label.
     try tst.expect(mem.indexOf(u8, out, "<img/onerror") == null);
     try tst.expect(mem.indexOf(u8, out, "&quot;") != null);
+    // The definition path is now exercised: a footnote div is emitted, and its
+    // escaped label appears in both the id attribute and the bold marker.
+    try tst.expect(mem.indexOf(u8, out, "<div class=\"footnote\" id=\"fn:") != null);
+    try tst.expect(mem.indexOf(u8, out, "&lt;img/onerror") != null);
 }
 
 // ── XSS: opt-in safe mode escapes raw HTML ────────────────────────────────────

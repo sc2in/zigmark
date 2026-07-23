@@ -720,12 +720,70 @@ Run the GFM suite with `zig build gfm`.
 ### Extensions
 
 - **Frontmatter** — YAML (`---`), TOML (`+++`), JSON (`{`), and ZON (`.{`) extraction, all normalised to `std.json.Value`
-- **Footnotes** — `[^label]` references and definitions
+- **Footnotes** — `[^label]` references and definitions, plus programmatic synthesis (see [Footnotes](#footnotes))
 - **GFM Tables** — pipe-delimited tables with optional column alignment
 - **GFM Task lists** — `- [x]` / `- [ ]` items rendered as disabled checkboxes
 - **GFM Strikethrough** — `~~text~~` rendered as `<del>text</del>`
 - **GFM Extended autolinks** — bare `www.`, `http(s)://`, `ftp://`, and email autolinks
 - **GFM Disallowed raw HTML** — dangerous tags escaped at render time
+
+### Footnotes
+
+`[^label]` marks a reference; `[^label]: …` on its own line defines it. A label
+may contain any byte **except** ASCII whitespace and the brackets `[` / `]` —
+the intersection of pulldown-cmark (used by Zola) and cmark-gfm (GitHub) — so
+control-ID-shaped labels such as `IAC-21.5` or `SCF:GOV-01` parse to the same
+definition in zigmark, on GitHub, and in Zola:
+
+```markdown
+Access is authenticated per policy.[^IAC-01]
+
+[^IAC-01]: Identification & Authentication — see the access-control policy.
+```
+
+> **Behaviour note:** because the label charset now permits `:`, `.`, `-`, and
+> other punctuation (rather than only `[a-zA-Z0-9]`), a whitespace-free line
+> shaped like `[^word]: …` now parses as a footnote *definition* where a
+> previous release treated it as a paragraph.
+
+**Programmatic synthesis.** References whose definition text lives in external
+data (a control catalog, a glossary, a database) can be filled in at the AST
+level via the `zigmark.footnotes` module. Supply a `Resolver` callback that
+returns Markdown for a given label; `resolve` parses it and appends real
+`footnote_definition` blocks, so every renderer works unchanged — including the
+Typst back-end, which expands the now-defined references to native
+`#footnote[…]`:
+
+```zig
+const zigmark = @import("zigmark");
+
+var doc = try parser.parseMarkdown(alloc, source);
+defer doc.deinit(alloc);
+
+const resolver = zigmark.footnotes.Resolver{
+    .resolveFn = struct {
+        fn f(_: ?*anyopaque, a: std.mem.Allocator, label: []const u8) anyerror!?[]const u8 {
+            if (std.mem.eql(u8, label, "IAC-01"))
+                return try a.dupe(u8, "Identification & Authentication control.");
+            return null; // unknown label → left dangling
+        }
+    }.f,
+};
+
+const report = try zigmark.footnotes.resolve(alloc, &doc, resolver, .{});
+// report.synthesized — definitions added; report.unresolved — nulls returned
+
+// Labels still without a definition (e.g. to hard-fail a build):
+const missing = try zigmark.footnotes.dangling(alloc, &doc);
+defer {
+    for (missing) |m| alloc.free(m);
+    alloc.free(missing);
+}
+```
+
+`Library.footnoteResolver()` builds such a resolver from footnote definitions
+found across a library's documents (first match wins) — for example a generated
+glossary document of `[^ID]: …` lines that you `add()` to the library.
 
 ## Building \& Testing
 

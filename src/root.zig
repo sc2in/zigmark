@@ -29,6 +29,10 @@ pub const AST = @import("markdown/ast.zig");
 pub const Frontmatter = @import("markdown/frontmatter.zig");
 /// A queryable collection of parsed Markdown documents with frontmatter.
 pub const Library = @import("markdown/library.zig").Library;
+/// Programmatic footnote synthesis: resolve undefined `[^label]` references to
+/// definitions supplied by a callback (`resolve`), and enumerate the ones that
+/// remain undefined (`dangling`).
+pub const footnotes = @import("markdown/footnotes.zig");
 /// Markdown parser that transforms raw text into an `AST.Document`.
 pub const Parser = @import("markdown/parser.zig");
 const ai = @import("markdown/renderers/ai.zig");
@@ -520,7 +524,9 @@ test "enhanced parse and render" {
         "<p>a footnote<a href=\"#fn:SCF:GOV-01\" class=\"footnote-ref\">SCF:GOV-01</a>\n" ++
         "a footnote<a href=\"#fn:2\" class=\"footnote-ref\">2</a></p>\n" ++
         "<h2>Heading 2</h2>\n" ++
-        "<p><a href=\"#fn:SCF:GOV-01\" class=\"footnote-ref\">SCF:GOV-01</a>: Footnote 1</p>\n" ++
+        // The `[^SCF:GOV-01]:` line now parses as a real footnote definition
+        // (the relaxed label charset accepts `:` and `-`), matching Zola/GitHub.
+        "<div class=\"footnote\" id=\"fn:SCF:GOV-01\">\n<p><b>SCF:GOV-01</b>: Footnote 1</p>\n</div>\n" ++
         "<div class=\"footnote\" id=\"fn:2\">\n<p><b>2</b>: Footnote 2</p>\n</div>\n", h);
 }
 
