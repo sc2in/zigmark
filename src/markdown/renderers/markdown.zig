@@ -182,7 +182,10 @@ fn renderInlines(writer: anytype, inlines: []const AST.Inline) !void {
 
 /// Render a single block to `writer`.  Each block ends with exactly one `\n`;
 /// the caller inserts the blank-line separator `\n` between blocks.
-fn renderBlock(alloc: Allocator, writer: anytype, block: AST.Block) !void {
+///
+/// Exposed so callers (e.g. `Library.footnoteResolver`) can serialise the
+/// child blocks of a node back to Markdown without wrapping the whole document.
+pub fn renderBlock(alloc: Allocator, writer: anytype, block: AST.Block) !void {
     switch (block) {
         .paragraph => |p| {
             try renderInlines(writer, p.children.items);

@@ -2,6 +2,9 @@ const std = @import("std");
 const tst = std.testing;
 
 const Library = @import("library.zig").Library;
+const Parser = @import("parser.zig");
+const footnotes = @import("footnotes.zig");
+const md_renderer = @import("renderers/markdown.zig");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -629,4 +632,73 @@ test "library: addFromDir recurses into subdirectories" {
     try lib.addFromDir(abs_dir);
 
     try tst.expectEqual(@as(usize, 2), lib.entries.items.len);
+}
+
+// ── footnoteResolver ────────────────────────────────────────────────────────────
+
+const glossary =
+    \\[^IAC-01]: Identification and Authentication control.
+    \\[^GOV-01]: Governance and oversight control.
+;
+
+test "library: footnoteResolver resolves definitions from a glossary" {
+    const alloc = tst.allocator;
+    var lib = Library.init(alloc);
+    defer lib.deinit();
+    try lib.add(glossary, "glossary.md");
+
+    var p = Parser.init();
+    var doc = try p.parseMarkdown(alloc, "See [^IAC-01] and [^GOV-01].\n");
+    defer doc.deinit(alloc);
+
+    const report = try footnotes.resolve(alloc, &doc, lib.footnoteResolver(), .{});
+    try tst.expectEqual(@as(usize, 2), report.synthesized);
+    try tst.expectEqual(@as(usize, 0), report.unresolved);
+
+    const out = try md_renderer.render(alloc, doc);
+    defer alloc.free(out);
+    try tst.expect(std.mem.indexOf(u8, out, "Identification and Authentication control.") != null);
+    try tst.expect(std.mem.indexOf(u8, out, "Governance and oversight control.") != null);
+}
+
+test "library: footnoteResolver reports unknown labels as unresolved and dangling" {
+    const alloc = tst.allocator;
+    var lib = Library.init(alloc);
+    defer lib.deinit();
+    try lib.add(glossary, "glossary.md");
+
+    var p = Parser.init();
+    var doc = try p.parseMarkdown(alloc, "Known [^IAC-01], unknown [^ZZZ-99].\n");
+    defer doc.deinit(alloc);
+
+    const report = try footnotes.resolve(alloc, &doc, lib.footnoteResolver(), .{});
+    try tst.expectEqual(@as(usize, 1), report.synthesized);
+    try tst.expectEqual(@as(usize, 1), report.unresolved);
+
+    const missing = try footnotes.dangling(alloc, &doc);
+    defer {
+        for (missing) |m| alloc.free(m);
+        alloc.free(missing);
+    }
+    try tst.expectEqual(@as(usize, 1), missing.len);
+    try tst.expectEqualStrings("ZZZ-99", missing[0]);
+}
+
+test "library: footnoteResolver first matching entry wins" {
+    const alloc = tst.allocator;
+    var lib = Library.init(alloc);
+    defer lib.deinit();
+    try lib.add("[^IAC-01]: First definition wins.\n", "first.md");
+    try lib.add("[^IAC-01]: Second definition loses.\n", "second.md");
+
+    var p = Parser.init();
+    var doc = try p.parseMarkdown(alloc, "See [^IAC-01].\n");
+    defer doc.deinit(alloc);
+
+    _ = try footnotes.resolve(alloc, &doc, lib.footnoteResolver(), .{});
+
+    const out = try md_renderer.render(alloc, doc);
+    defer alloc.free(out);
+    try tst.expect(std.mem.indexOf(u8, out, "First definition wins.") != null);
+    try tst.expect(std.mem.indexOf(u8, out, "Second definition loses.") == null);
 }

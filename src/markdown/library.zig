@@ -73,6 +73,8 @@ const mem = std.mem;
 const AST = @import("ast.zig");
 const Frontmatter = @import("frontmatter.zig");
 const Parser = @import("parser.zig");
+const footnotes = @import("footnotes.zig");
+const markdown_renderer = @import("renderers/markdown.zig");
 
 /// A queryable collection of parsed Markdown documents with frontmatter.
 pub const Library = struct {
@@ -242,6 +244,54 @@ pub const Library = struct {
             }
         };
         mem.sort(Result, results, Ctx{ .field = field, .ascending = ascending }, Ctx.lt);
+    }
+
+    // ── Footnote resolution ─────────────────────────────────────────────────────
+
+    /// Return a `footnotes.Resolver` that sources definition bodies from the
+    /// footnote definitions found across this library's documents.
+    ///
+    /// The resolver scans every entry's top-level `footnote_definition` blocks
+    /// for one whose label matches; the **first match wins** (entries in
+    /// insertion order, definitions in document order).  The matching
+    /// definition's child blocks are rendered back to Markdown and returned.
+    ///
+    /// Nothing domain-specific lives here: the intended pattern is to build a
+    /// glossary document of `[^ID]: …` lines from external data, `add()` it to
+    /// the library, and pass `lib.footnoteResolver()` to `footnotes.resolve`.
+    ///
+    /// The returned resolver borrows `self`; it must not outlive the `Library`.
+    pub fn footnoteResolver(self: *const Library) footnotes.Resolver {
+        return .{
+            .ctx = @constCast(self),
+            .resolveFn = resolveFromLibrary,
+        };
+    }
+
+    fn resolveFromLibrary(ctx: ?*anyopaque, allocator: Allocator, label: []const u8) anyerror!?[]const u8 {
+        const self: *const Library = @ptrCast(@alignCast(ctx.?));
+        for (self.entries.items) |*entry| {
+            for (entry.document.children.items) |*block| {
+                if (block.* == .footnote_definition and
+                    mem.eql(u8, block.footnote_definition.label, label))
+                {
+                    return try renderDefinitionBody(allocator, &block.footnote_definition);
+                }
+            }
+        }
+        return null;
+    }
+
+    /// Serialise a footnote definition's child blocks back to Markdown (the
+    /// definition *body*, without the `[^label]:` prefix), blank-line separated.
+    fn renderDefinitionBody(allocator: Allocator, def: *const AST.FootnoteDefinition) ![]const u8 {
+        var aw: std.Io.Writer.Allocating = .init(allocator);
+        defer aw.deinit();
+        for (def.children.items, 0..) |child, idx| {
+            if (idx > 0) try aw.writer.writeByte('\n');
+            try markdown_renderer.renderBlock(allocator, &aw.writer, child);
+        }
+        return aw.toOwnedSlice();
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────
