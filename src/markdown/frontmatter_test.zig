@@ -1040,3 +1040,73 @@ test "frontmatter: trailing comment keeps top-level scalar intact" {
     const t = fm.get("title") orelse return error.Missing;
     try tst.expectEqualStrings("My Policy", t.string);
 }
+
+test "frontmatter: YAML plain scalar with interior ampersand (issue #81)" {
+    // Regression: an unquoted YAML scalar containing `&` failed with
+    // ParseFailure before zig-yaml 0.3.2 — `&` is only an anchor indicator at
+    // node start, so mid-scalar it is ordinary content. Dropped a whole
+    // PolicyPress policy whose description read "… cloud & edge …".
+    const alloc = tst.allocator;
+    var fm = try FrontMatter.init(alloc, "name: foo & bar", .yaml);
+    defer fm.deinit();
+    try tst.expectEqualStrings("foo & bar", fm.get("name").?.string);
+
+    var fm2 = try FrontMatter.init(alloc, "name: cloud & edge & core", .yaml);
+    defer fm2.deinit();
+    try tst.expectEqualStrings("cloud & edge & core", fm2.get("name").?.string);
+
+    // The exact PolicyPress shape: a `&` inside a block-sequence mapping value.
+    const md =
+        "---\n" ++
+        "extra:\n" ++
+        "  revisions:\n" ++
+        "    - description: Initial cloud & edge policy\n" ++
+        "---\n" ++
+        "Body.\n";
+    var fm3 = try FrontMatter.initFromMarkdown(alloc, md);
+    defer fm3.deinit();
+    const revs = fm3.get("extra.revisions") orelse return error.Missing;
+    const desc = revs.array.items[0].object.get("description") orelse return error.Missing;
+    try tst.expectEqualStrings("Initial cloud & edge policy", desc.string);
+
+    // No space between `&` and the following word is still content, not an
+    // anchor — proves the fix is in the parser, not just a tokenizer
+    // whitespace guard.
+    var fm4 = try FrontMatter.init(alloc, "name: foo &bar", .yaml);
+    defer fm4.deinit();
+    try tst.expectEqualStrings("foo &bar", fm4.get("name").?.string);
+}
+
+test "frontmatter: YAML plain scalar with interior alias/tag/seq indicators (issue #81)" {
+    // Same class as `&`: `*` (alias), `!` (tag), and `- ` (seq-item) are only
+    // indicators at node start; mid plain-scalar they are content.
+    const alloc = tst.allocator;
+    const cases = [_]struct { src: []const u8, want: []const u8 }{
+        .{ .src = "name: a * b", .want = "a * b" },
+        .{ .src = "name: a ! b", .want = "a ! b" },
+        .{ .src = "name: foo - bar", .want = "foo - bar" },
+        .{ .src = "name: read & write * always", .want = "read & write * always" },
+    };
+    for (cases) |c| {
+        var fm = try FrontMatter.init(alloc, c.src, .yaml);
+        defer fm.deinit();
+        try tst.expectEqualStrings(c.want, fm.get("name").?.string);
+    }
+}
+
+test "frontmatter: YAML indicator scalar survives serialize round-trip (issue #81)" {
+    // Deterministic mirror of the `fuzz_frontmatter_yaml_roundtrip` oracle:
+    // the emitter leaves interior indicator chars unquoted, so the value must
+    // re-parse from zigmark's own output.
+    const alloc = tst.allocator;
+    var fm = try FrontMatter.init(alloc, "seed: 1", .yaml);
+    defer fm.deinit();
+    try fm.set("v", .{ .string = "foo & bar * baz ! qux" });
+
+    const out = try fm.serialize(alloc);
+    defer alloc.free(out);
+
+    var fm2 = try FrontMatter.initFromMarkdown(alloc, out);
+    defer fm2.deinit();
+    try tst.expectEqualStrings("foo & bar * baz ! qux", fm2.get("v").?.string);
+}

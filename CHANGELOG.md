@@ -8,7 +8,7 @@ same stability guarantee.
 
 ## [Unreleased]
 
-## [0.11.0] — 2026-07-22
+## [0.11.0] — 2026-07-23
 
 ### Added
 
@@ -54,6 +54,31 @@ same stability guarantee.
     HTML-escaping guarantee for footnote labels extends to (and is tested on)
     the definition and synthesis paths. CommonMark/GFM spec conformance is
     unchanged (652/652 + 24/24).
+
+### Fixed
+
+- **Front-matter YAML plain scalars containing an interior indicator character
+  now parse** (`&`, `*`, `!`, and a block-sequence `-`). Previously an unquoted value such as
+  `name: cloud & edge` failed with `ParseFailure` and the whole document was
+  rejected — a `&` was mistaken for a mid-scalar anchor indicator even though
+  YAML only treats it as one at node start. This regularly bit titles and
+  descriptions (issue #81, reported downstream from PolicyPress). Fixed in the
+  vendored `zig-yaml` parser (bumped 0.3.1 → 0.3.2): interior
+  anchor/alias/tag/seq-item tokens are folded into the plain scalar as content
+  instead of terminating it — the same class as the 0.3.1
+  comment-in-plain-scalar fix. Quoting the value already worked and is
+  unchanged; CommonMark/GFM spec conformance is unchanged (652/652 + 24/24).
+
+### Added
+
+- **Front-matter round-trip fuzz oracle** (`fuzz_frontmatter_yaml_roundtrip` in
+  `src/fuzz.zig`). Beyond the existing no-crash targets, it asserts that a value
+  set into YAML front matter survives `serialize` → re-parse. Because the
+  emitter leaves interior indicator characters unquoted, this catches
+  serializer↔parser disagreements — the class of spurious `ParseFailure` that
+  the no-crash targets swallow — and would have caught both issue #81 and the
+  earlier `#`-comment case automatically. `zig build fuzz` (smoke) runs it in
+  CI; `zig build fuzz --fuzz` runs it coverage-guided.
 
 ## [0.10.0] — 2026-07-18
 
