@@ -46,6 +46,33 @@ pub const letter = mecha.oneOf(.{ mecha.ascii.range('a', 'z'), mecha.ascii.range
 pub const alphanumeric = mecha.oneOf(.{ letter, digit });
 pub const whitespace = mecha.oneOf(.{ space, tab }).many(.{ .collect = false, .min = 1 });
 
+/// A single byte permitted inside a footnote-definition label.
+///
+/// Accepts any byte **except** ASCII whitespace (space, tab, CR, LF) and the
+/// square brackets `[` / `]`.  This charset is deliberately the *intersection*
+/// of the two footnote dialects zigmark must interoperate with:
+///
+///   * pulldown-cmark (the parser Zola uses) treats a footnote label like a
+///     link label — effectively any run of non-bracket characters; while
+///   * cmark-gfm (GitHub) additionally forbids internal whitespace.
+///
+/// Taking the intersection means control-ID-shaped labels such as `IAC-21.5`
+/// or `SCF:GOV-01` parse to the *same* definition in zigmark, on GitHub, and
+/// in Zola.  The bracket exclusion keeps the label unambiguous (the closing
+/// `]` terminates it).  The whitespace exclusion is what keeps ordinary prose
+/// such as `[^see note]: x` a paragraph rather than a footnote definition —
+/// this matters because `tryFootnoteDef` also drives paragraph interruption
+/// (see `isParaBreak` in `parser.zig`), so a looser charset would silently
+/// reclassify authored prose.
+///
+/// The footnote *reference* scanner (`inline.zig`) is a permissive superset of
+/// this charset; tightening it to match is noted as future work.
+pub const footnote_label_char = mecha.ascii.not(mecha.oneOf(.{
+    space,    tab,
+    mecha.ascii.char('\n'), mecha.ascii.char('\r'),
+    lbracket, rbracket,
+}));
+
 pub const url_char = mecha.oneOf(.{
     alphanumeric,          mecha.ascii.char('.'), mecha.ascii.char('/'),
     mecha.ascii.char(':'), mecha.ascii.char('?'), mecha.ascii.char('='),
@@ -126,9 +153,9 @@ pub const blockquote_line = mecha.combine(.{
 }.f);
 
 pub const footnote_definition = mecha.combine(.{
-    lbracket,                                                                             caret,
-    mecha.many(mecha.oneOf(.{ letter, digit }), .{ .collect = false, .min = 1 }).asStr(), rbracket,
-    colon,                                                                                space,
+    lbracket,                                                       caret,
+    footnote_label_char.many(.{ .collect = false, .min = 1 }).asStr(), rbracket,
+    colon,                                                          space,
     mecha.rest.asStr(),
 }).map(struct {
     fn f(r: anytype) FootnoteDefResult {
