@@ -968,4 +968,5 @@ test {
     _ = @import("query_test.zig");
     _ = @import("library_test.zig");
     _ = @import("mutation_test.zig");
+    _ = @import("footnotes_test.zig");
 }
