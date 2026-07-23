@@ -41,7 +41,7 @@
   },
   "zig_yaml-0.3.2-C1161q3CAgCEpqWl_MKjkQpPZmos4DHBJewpb58XMcAL": {
     "name": "yaml",
-    "url": "git+https://github.com/sc2in/zig-yaml#15d7885f277f438a3304dd241c1d9afc39e7ba76",
+    "url": "git+https://github.com/sc2in/zig-yaml#3dc3441ee1f9a42565881a8f846f529fd8564bff",
     "hash": "sha256-kILMfi0bF69Mm7MOZZ7+DeJ+iMdOkAfGd0mR7LXK3ns="
   }
 }
