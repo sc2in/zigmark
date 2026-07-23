@@ -68,9 +68,9 @@ pub const whitespace = mecha.oneOf(.{ space, tab }).many(.{ .collect = false, .m
 /// The footnote *reference* scanner (`inline.zig`) is a permissive superset of
 /// this charset; tightening it to match is noted as future work.
 pub const footnote_label_char = mecha.ascii.not(mecha.oneOf(.{
-    space,    tab,
+    space,                  tab,
     mecha.ascii.char('\n'), mecha.ascii.char('\r'),
-    lbracket, rbracket,
+    lbracket,               rbracket,
 }));
 
 pub const url_char = mecha.oneOf(.{
@@ -153,9 +153,9 @@ pub const blockquote_line = mecha.combine(.{
 }.f);
 
 pub const footnote_definition = mecha.combine(.{
-    lbracket,                                                       caret,
+    lbracket,                                                          caret,
     footnote_label_char.many(.{ .collect = false, .min = 1 }).asStr(), rbracket,
-    colon,                                                          space,
+    colon,                                                             space,
     mecha.rest.asStr(),
 }).map(struct {
     fn f(r: anytype) FootnoteDefResult {
