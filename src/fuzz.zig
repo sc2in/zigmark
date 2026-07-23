@@ -5,7 +5,11 @@
 //!
 //! Targets take a `*std.testing.Smith` (the Zig 0.16 structured-input source)
 //! and pull up to `max_input` bytes of fuzzer-chosen data via `smith.slice`.
-//! Each target asserts only the absence of crashes/UB/leaks, not correctness.
+//! Most targets assert only the absence of crashes/UB/leaks, not correctness.
+//! The exception is `fuzz_frontmatter_yaml_roundtrip`, which asserts a
+//! serializer<->parser round-trip invariant (see its comment) — that is the
+//! oracle that catches spurious `ParseFailure`s such as issue #81, which are
+//! graceful errors the no-crash targets swallow.
 
 const std = @import("std");
 const zigmark = @import("zigmark");
@@ -57,6 +61,10 @@ test "fuzz_frontmatter_json" {
 
 test "fuzz_frontmatter_zon" {
     try std.testing.fuzz({}, fuzzFrontmatterZon, .{});
+}
+
+test "fuzz_frontmatter_yaml_roundtrip" {
+    try std.testing.fuzz({}, fuzzFrontmatterYamlRoundtrip, .{});
 }
 
 // ── Implementations ───────────────────────────────────────────────────────────
@@ -162,4 +170,49 @@ fn fuzzFrontmatterZon(_: void, smith: *Smith) anyerror!void {
     defer arena.deinit();
     var fm = zigmark.Frontmatter.init(arena.allocator(), input, .zon) catch return;
     fm.deinit();
+}
+
+// A value byte drawn onto this alphabet lands as a word char, a space, or one
+// of the plain-scalar *indicator* characters called out in issue #81 (`&`
+// anchor, `*` alias, `!` tag, `- ` seq-item). Biasing toward spaces and
+// indicators makes the fuzzer hit the "space + indicator" positions that used
+// to abort the YAML parse mid plain-scalar. This is deliberately scoped to the
+// indicator surface; interior quote / flow-bracket round-tripping is a
+// separate class not covered here.
+const scalar_alphabet = "abcdefgh  &*!-  ";
+
+/// Round-trip oracle: a string value set into YAML front matter must survive
+/// `serialize` -> `initFromMarkdown`. zigmark's emitter leaves interior
+/// indicator characters unquoted (they are legal plain-scalar content), so if
+/// the parser rejects them the document zigmark just produced fails to re-parse
+/// — a serializer<->parser disagreement. Unlike the no-crash targets, the
+/// re-parse error is NOT swallowed: it propagates and fails the fuzz iteration,
+/// reporting the offending value (this is how issue #81 is re-caught).
+fn fuzzFrontmatterYamlRoundtrip(_: void, smith: *Smith) anyerror!void {
+    var buf: [max_input]u8 = undefined;
+    const raw = buf[0..smith.slice(&buf)];
+    for (raw) |*b| b.* = scalar_alphabet[b.* % scalar_alphabet.len];
+    // YAML strips leading/trailing whitespace from plain scalars, so surrounding
+    // spaces cannot round-trip as a plain scalar — trim them to isolate the
+    // indicator behaviour under test.
+    const value = std.mem.trim(u8, raw, " ");
+    if (value.len == 0) return;
+
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    // Build the document programmatically so the first parse cannot fail on
+    // syntax; the emitter alone decides whether `value` is quoted.
+    var fm = zigmark.Frontmatter.init(alloc, "seed: 1", .yaml) catch return;
+    defer fm.deinit();
+    fm.set("v", .{ .string = value }) catch return;
+    const out = fm.serialize(alloc) catch return;
+
+    // Re-parse zigmark's own output — this MUST succeed and preserve `value`.
+    var fm2 = try zigmark.Frontmatter.initFromMarkdown(alloc, out);
+    defer fm2.deinit();
+    const got = fm2.get("v") orelse return error.RoundTripLostValue;
+    if (got != .string) return error.RoundTripChangedType;
+    try std.testing.expectEqualStrings(value, got.string);
 }

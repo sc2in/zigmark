@@ -244,9 +244,12 @@ test "security: large frontmatter integer does not panic" {
 }
 
 test "security: malformed YAML frontmatter fails cleanly without leaking (#73)" {
-    // Upstream zig-yaml rejects a plain scalar containing an inline " - " with
-    // ParseFailure. The fix here guarantees the failure frees the parser's
-    // error bundle — testing.allocator would flag a leak otherwise.
-    const src = "---\nauthor: Foo - Bar Baz\n---\n\nbody\n";
+    // Genuinely malformed YAML (an unclosed flow sequence) must fail with
+    // ParseFailure, and the failure path must free the parser's error bundle —
+    // testing.allocator would flag a leak otherwise. (The original repro used
+    // `author: Foo - Bar Baz`, but that is a *valid* plain scalar that only
+    // failed due to the issue #81 bug; it now parses, so a real malformed
+    // input is used here.)
+    const src = "---\ntags: [a, b\n---\n\nbody\n";
     try tst.expectError(error.ParseFailure, Frontmatter.initFromMarkdown(tst.allocator, src));
 }
