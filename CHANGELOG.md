@@ -8,6 +8,16 @@ same stability guarantee.
 
 ## [Unreleased]
 
+### Changed
+
+- Bumped the lazy `pozeiden` dependency v0.2.0 → v0.4.0, picking up its two
+  0.3.0 security fixes (GHSA-p2c5-qmq5-3r4f SVG/XSS injection,
+  GHSA-rg4m-w3p2-gf3p out-of-bounds writes) plus the 0.4.0 hardening and
+  layout work. **Behaviour change:** mermaid SVG emitted by the CLI/WASM
+  paths changes bytes — the default font stack now ends in
+  `Liberation Sans, DejaVu Sans, sans-serif`, and `accTitle:`/`accDescr:`
+  directives become SVG `<title>`/`<desc>` accessibility metadata.
+
 ## [0.11.0] — 2026-07-23
 
 ### Added
