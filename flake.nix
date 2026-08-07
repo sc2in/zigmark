@@ -149,7 +149,7 @@
           text = ''
             PORT="''${1:-8080}"
             echo "▸ Starting fuzzer — web UI at http://127.0.0.1:$PORT"
-            zig build --listen fuzz --fuzz --webui="127.0.0.1:$PORT"
+            zig build fuzz --fuzz --webui="127.0.0.1:$PORT"
           '';
         };
       in {
