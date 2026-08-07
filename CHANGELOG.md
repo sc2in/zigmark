@@ -8,6 +8,8 @@ same stability guarantee.
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-08-07
+
 ### Changed
 
 - Bumped the lazy `pozeiden` dependency v0.2.0 → v0.4.0, picking up its two
