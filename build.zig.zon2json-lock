@@ -29,14 +29,14 @@
     "url": "git+https://github.com/github/cmark-gfm.git#587a12bb54d95ac37241377e6ddc93ea0e45439b",
     "hash": "sha256-egCWzw09e5daT8cnlSORC3gep9soiqonVC4GQ/s3voM="
   },
-  "pozeiden-0.2.0-NAqiXaypCgBCkAMB3WZpGLPnwV5XTsUvOf3KUY9aAN0p": {
+  "pozeiden-0.4.0-NAqiXYMXCwCzyp6k5efqAnjQ9j_0CWeuyJcw62yfnWxK": {
     "name": "pozeiden",
-    "url": "https://github.com/sc2in/pozeiden/archive/refs/tags/v0.2.0.tar.gz",
-    "hash": "sha256-9j8xkNndJX+l20+/qlfK2aLFCfPQsX1xoTDQ+V2jXUg="
+    "url": "https://github.com/sc2in/pozeiden/archive/refs/tags/v0.4.0.tar.gz",
+    "hash": "sha256-uvGGJICGYLTqqDnOQcakvn3ft2MEcj5OmLP0puS4g/g="
   },
   "mvzr-0.3.9-ZSOky8FzAQBQ9-GkQnaLjOZZHxrioD8NwY-QyZT6oAyR": {
     "name": "mvzr",
-    "url": "git+https://github.com/mnemnion/mvzr?ref=v0.3.10#dd0e1bd2d6b10f9650317b30baef7ab7bc9dd9ec",
+    "url": "git+https://github.com/mnemnion/mvzr?ref=v0.3.9#dd0e1bd2d6b10f9650317b30baef7ab7bc9dd9ec",
     "hash": "sha256-hUGdJPjC1PAm6zWL9eAE7A+wAfzf6Q7uSutT2Xe7EMU="
   },
   "zig_yaml-0.3.2-C1161q3CAgCEpqWl_MKjkQpPZmos4DHBJewpb58XMcAL": {
